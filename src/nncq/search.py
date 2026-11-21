@@ -30,7 +30,8 @@ RRF_K = 60
 LEX_N = 100
 DENSE_N = 100
 _STOP = {"the", "a", "an", "how", "is", "are", "where", "what", "does", "do", "to", "of", "in", "for", "and",
-         "or", "with", "on", "by", "this", "that", "be", "it", "find", "code", "which", "when", "who", "get"}
+         "or", "with", "on", "by", "this", "that", "be", "it", "find", "code", "which", "when", "who", "get",
+         "into", "onto", "from", "why", "can", "should", "we", "our", "my", "i", "there", "its", "at", "as"}
 _TOKEN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*|\d+")
 
 
@@ -172,8 +173,8 @@ def fts_query(q: str) -> str:
     return " OR ".join(out)
 
 
-def lexical(store: Store, q: str, n: int) -> list[tuple[int, float]]:
-    m = fts_query(q)
+def lexical(store: Store, q: str, n: int, expr: str | None = None) -> list[tuple[int, float]]:
+    m = expr if expr is not None else fts_query(q)
     if not m:
         return []
     try:
@@ -197,12 +198,13 @@ def _filter_sql(path: str, lang: str) -> tuple[str, list]:
     return (" AND " + " AND ".join(where)) if where else "", args
 
 
-def search(store: Store, query: str, k: int = 10, path: str = "", lang: str = "", max_chars: int = 1500,
-           rerank: bool | None = None) -> dict:
+def candidates(store: Store, query: str, k: int = 10, path: str = "", lang: str = "", rerank: bool | None = None,
+               fts_expr: str | None = None, pool: int = 0) -> dict:
+    """Retrieval shared by search_code and ask: BM25 + dense, RRF-fused, reranked. Returns the ranked candidate
+    rows plus every channel's ranks, so callers can explain why each hit is there."""
     s = config.settings()
-    t0 = time.time()
     wide = bool(path or lang)
-    lex = lexical(store, query, LEX_N * (5 if wide else 1))
+    lex = lexical(store, query, LEX_N * (5 if wide else 1), fts_expr)
     dense: list[tuple[int, float]] = []
     notes = []
     vec = vectors(store)
@@ -219,15 +221,17 @@ def search(store: Store, query: str, k: int = 10, path: str = "", lang: str = ""
     for lst in (lex, dense):
         for r, (cid, _) in enumerate(lst):
             fused[cid] = fused.get(cid, 0.0) + 1.0 / (RRF_K + r + 1)
+    out = {"lex": lex, "dense": dense, "notes": notes, "cands": [], "scores": {}, "mode": "none"}
     if not fused:
-        return {"query": query, "results": [], "mode": "none", "note": "no matches"}
-    ids = sorted(fused, key=lambda c: -fused[c])[:max(s.rerank_candidates, k) * (4 if wide else 1)]
+        return out
+    pool = max(pool or s.rerank_candidates, k)
+    ids = sorted(fused, key=lambda c: -fused[c])[:pool * (4 if wide else 1)]
     fsql, fargs = _filter_sql(path, lang)
     ph = ",".join("?" * len(ids))
     rows = {r[0]: r for r in store.q(
-        f"SELECT c.id, f.path, c.start_line, c.end_line, c.symbol, c.kind, c.parent, c.text, f.lang "
+        f"SELECT c.id, f.path, c.start_line, c.end_line, c.symbol, c.kind, c.parent, c.text, f.lang, c.file_id "
         f"FROM chunks c JOIN files f ON f.id=c.file_id WHERE c.id IN ({ph}){fsql}", (*ids, *fargs))}
-    cands = [rows[c] for c in ids if c in rows][:max(s.rerank_candidates, k)]
+    cands = [rows[c] for c in ids if c in rows][:pool]
     mode = "hybrid" if dense else "lexical"
     do_rr = (s.rerank if rerank is None else rerank) and len(cands) > 1 and models_ready()
     scores = {r[0]: fused[r[0]] for r in cands}
@@ -240,9 +244,20 @@ def search(store: Store, query: str, k: int = 10, path: str = "", lang: str = ""
         except Exception as e:
             notes.append(f"reranker unavailable ({type(e).__name__}); fused order used")
     cands.sort(key=lambda r: -scores[r[0]])
+    out.update(cands=cands, scores=scores, mode=mode, reranked=mode.endswith("+rerank"))
+    return out
+
+
+def search(store: Store, query: str, k: int = 10, path: str = "", lang: str = "", max_chars: int = 1500,
+           rerank: bool | None = None) -> dict:
+    t0 = time.time()
+    c = candidates(store, query, k, path, lang, rerank)
+    if not c["cands"]:
+        return {"query": query, "results": [], "mode": "none", "note": "no matches"}
+    cands, scores, mode, notes = c["cands"], c["scores"], c["mode"], c["notes"]
     res = []
     for r in cands[:k]:
-        text = r[7]
+        text = r[7].replace("\r", "")
         res.append({"path": r[1], "lines": f"{r[2]}-{r[3]}", "symbol": r[4] or "(file level)", "kind": r[5],
                     "parent": r[6] or None, "score": round(scores[r[0]], 4),
                     "code": text if len(text) <= max_chars else text[:max_chars] + f"\n... [{len(text) - max_chars} more chars: read_code]"})

@@ -18,6 +18,7 @@ Read-only on the workspace: nothing here writes outside cache/.
 """
 from __future__ import annotations
 
+import collections
 import io
 import json
 import os
@@ -33,10 +34,12 @@ from pathlib import Path
 import anyio
 from mcp.server.fastmcp import FastMCP
 
-from nncq import config, datarefs, graph, health, indexer, repos, search, sysutil, worker
+from nncq import ask as asker, config, datarefs, graph, health, indexer, repos, search, sysutil, worker
 from nncq.store import Store
 
-INSTRUCTIONS = """Local code index (nothing leaves this machine). Start with search_code for "where/how is X done";
+INSTRUCTIONS = """Local code index (nothing leaves this machine). Start with ask for any question: it returns a short,
+generated map (how the question was read, what the hits cover, one line of facts per hit, how hits call each
+other) with refs; then expand(refs) for exact code or structure. search_code gives raw code blocks;
 use find_symbol / file_outline / read_code to zoom in; the graph tools (symbol_context, called_by, calls,
 call_tree, call_trace, impact, type_hierarchy, file_context, hotspots) answer structural questions without
 reading files. Graph links are by name (static, no build): ambiguity is reported. engine: data_for_code,
@@ -54,7 +57,7 @@ _info = {"mode": "stdio", "started": time.time(), "mcp_url": "", "dashboard": ""
 _events: deque = deque(maxlen=300)        # (time, message) for the dashboard
 _calls: deque = deque(maxlen=60)
 _tool_stats: dict[str, dict] = {}
-_ARG_KEYS = ("query", "name", "to", "pattern", "path", "asset", "type_name", "what")
+_ARG_KEYS = ("question", "query", "refs", "name", "to", "pattern", "path", "asset", "type_name", "what")
 
 
 def _log(msg: str) -> None:
@@ -182,9 +185,13 @@ def _ensure_worker(r: repos.Repo) -> str:
 
 def _supervisor():
     while not _stop.wait(20):
+        _gpu()
         for r in repos.load().values():
             try:
                 _ensure_worker(r)                  # also during a build: it embeds what T0 has committed so far
+                ws = worker.read_status(r)
+                if ws and ws.get("alive"):         # keep the dashboard charts filled even when nobody watches
+                    _sample("rate:" + r.name, ws.get("updated") or time.time(), ws.get("chunks_per_s"))
             except Exception:
                 traceback.print_exc()
 
@@ -259,12 +266,32 @@ def build(stdio: bool = False) -> FastMCP:
         from mcp.server.transport_security import TransportSecuritySettings
         mcp.settings.transport_security = TransportSecuritySettings(enable_dns_rebinding_protection=False)
 
+    global _mcp
+    _mcp = mcp
     paths_of_results = lambda o: [x["path"] for x in o.get("results", [])]
 
     @mcp.tool()
+    async def ask(question: str, k: int = 8, path: str = "", lang: str = "", repo: str = "") -> dict:
+        """Start here for any question about the code ("how does X work", "where is Y decided").
+        Returns a compact map, not code: how the question was interpreted (terms, stems, the code's own
+        vocabulary for it), what the result set covers (areas, kinds, match strength, which search channel found
+        what), one line of facts per hit (signature, doc comment, meaningful calls, callers, best-matching lines,
+        why it ranked) and how the hits call each other. Dig in with expand(refs) using the hits' refs.
+        path: substring/glob filter on file path. lang: e.g. 'cpp,csharp'."""
+        return await _run(_with, repo, lambda r, st: asker.ask(st, r.root, question, k, path, lang),
+                          lambda o: [h["at"].replace(" / ", "/").rsplit(":", 1)[0] for h in o.get("hits", [])],
+                          True)
+
+    @mcp.tool()
+    async def expand(refs: str, what: str = "code", repo: str = "") -> dict:
+        """Dig into hits from ask. refs: comma-separated refs (c123), symbol names, or path:start-end.
+        what: code (exact current lines) | context (symbol card) | callers | callees | outline (file symbols)."""
+        return await _run(_with, repo, lambda r, st: asker.expand(r, st, refs, what))
+
+    @mcp.tool()
     async def search_code(query: str, k: int = 10, path: str = "", lang: str = "", repo: str = "") -> dict:
-        """Hybrid code search (keywords + meaning + reranker). Natural language or identifiers.
-        Returns whole functions/classes with path, line range, symbol, kind and parent.
+        """Raw hybrid code search (keywords + meaning + reranker): whole functions/classes as code blocks.
+        Prefer ask for questions; use this when you want the code text of the top matches directly.
         path: substring or glob filter on file path (e.g. 'Engine/Entity' or '*.ddf'). lang: e.g. 'cpp,csharp'."""
         return await _run(_with, repo, lambda r, st: search.search(st, query, k, path, lang), paths_of_results,
                           True)
@@ -447,7 +474,111 @@ def build(stdio: bool = False) -> FastMCP:
 # ------------------------------------------------------------------ dashboard state
 
 _gpu_cache: dict = {"at": 0.0}
+_mcp: FastMCP | None = None
+WEB_TOOLS = {"ask", "expand", "search_code", "grep_code", "find_symbol", "file_outline", "find_references", "read_code",
+             "symbol_context", "calls", "called_by", "call_tree", "call_trace", "impact", "type_hierarchy",
+             "file_context", "hotspots", "data_for_code", "code_for_data", "asset_info", "top_assets"}
+
+
+async def web_tool(name: str, args: dict) -> dict:
+    """The dashboard's search / symbol pages call the same (read-only) MCP tools agents use."""
+    if name not in WEB_TOOLS or _mcp is None:
+        return {"error": f"not available from the web page: {name}"}
+    try:
+        return await _mcp._tool_manager.call_tool(name, args)
+    except Exception as e:
+        return {"error": f"{type(e).__name__}: {e}"}
 _repo_cache: dict[str, tuple[float, dict]] = {}
+_LIVE_N = 600                                     # ~15 min of live samples at the page's poll rate
+_hist: dict[str, collections.deque] = {}          # rolling series for the dashboard charts: [(t, value), ...]
+# Charts survive restarts: samples are averaged per minute into a small CSV (t,key,value), reloaded at start.
+HIST_FILE = config.DATA_DIR / "history.csv"
+HIST_KEEP_S = 7 * 86400
+_hist_min: dict[str, list] = {}                   # key -> [minute, sum, count] being averaged
+_hist_long: dict[str, collections.deque] = {}     # key -> per-minute averages [(t, v)], up to HIST_KEEP_S
+_hist_lock = threading.Lock()
+_hist_loaded = False
+
+
+def _long(key: str) -> collections.deque:
+    return _hist_long.setdefault(key, collections.deque(maxlen=HIST_KEEP_S // 60))
+
+
+def _hist_buckets(win_s: int = 86400, n: int = 240) -> dict[str, list]:
+    """Per-minute history (plus the minute in progress) averaged into n buckets over the last win_s."""
+    now = time.time()
+    w = win_s / n
+    out = {}
+    with _hist_lock:
+        for key, d in _hist_long.items():
+            pts = [p for p in d if p[0] >= now - win_s]
+            m = _hist_min.get(key)
+            if m and m[2]:
+                pts.append((m[0] * 60 + 30, m[1] / m[2]))
+            b: dict[int, list] = {}
+            for t, v in pts:
+                s = b.setdefault(int((t - (now - win_s)) // w), [0.0, 0])
+                s[0] += v
+                s[1] += 1
+            if b:
+                out[key] = [(round(now - win_s + (i + .5) * w), round(s / c, 2)) for i, (s, c) in sorted(b.items())]
+    return out
+
+
+def _hist_load() -> None:
+    """Seed the charts with the saved per-minute averages and drop rows older than HIST_KEEP_S."""
+    global _hist_loaded
+    with _hist_lock:
+        if _hist_loaded:
+            return
+        _hist_loaded = True
+        try:
+            rows = HIST_FILE.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return
+        cut, keep = time.time() - HIST_KEEP_S, []
+        for line in rows:
+            try:
+                t, key, v = line.split(",", 2)
+                t, v = float(t), float(v)
+            except ValueError:
+                continue
+            if t >= cut:
+                keep.append(line)
+                _long(key).append((t, v))
+        for key, d in _hist_long.items():            # low-fi seed so the short charts show the time before a restart
+            live = _hist.setdefault(key, collections.deque(maxlen=_LIVE_N))
+            for p in d:
+                if p[0] >= time.time() - 1800:
+                    live.append(p)
+        if len(keep) < len(rows):
+            tmp = HIST_FILE.with_suffix(".tmp")
+            tmp.write_text("".join(x + "\n" for x in keep), encoding="utf-8", newline="\n")
+            os.replace(tmp, HIST_FILE)
+
+
+def _sample(key: str, t: float, v) -> None:
+    if not _hist_loaded:
+        _hist_load()
+    d = _hist.setdefault(key, collections.deque(maxlen=_LIVE_N))
+    if v is None or (d and d[-1][0] >= t):
+        return
+    d.append((round(t, 1), v))
+    minute = int(t // 60)
+    with _hist_lock:
+        m = _hist_min.get(key)
+        if m and m[0] != minute and m[2]:
+            avg = float(f"{m[1] / m[2]:.4g}")
+            _long(key).append((m[0] * 60 + 30, avg))
+            try:
+                with open(HIST_FILE, "a", encoding="utf-8", newline="\n") as f:
+                    f.write(f"{m[0] * 60 + 30},{key},{avg:g}\n")
+            except OSError:
+                pass
+        if not m or m[0] != minute:
+            _hist_min[key] = m = [minute, 0.0, 0]
+        m[1] += float(v)
+        m[2] += 1
 
 
 def _owner_desc() -> str:
@@ -461,6 +592,10 @@ def _owner_desc() -> str:
 def _gpu() -> dict:
     if time.time() - _gpu_cache["at"] > 3:
         _gpu_cache.update(sysutil.gpu_info() or {}, at=time.time())
+        g = _gpu_cache
+        if g.get("mem_total"):
+            _sample("gpu_util", g["at"], g.get("util"))
+            _sample("gpu_mem", g["at"], round(g["mem_used"] / g["mem_total"] * 100, 1))
     return {k: v for k, v in _gpu_cache.items() if k != "at"}
 
 
@@ -476,6 +611,10 @@ def _repo_snapshot(r: repos.Repo) -> dict:
                 st["chunks_by_tier"] = {str(k): v for k, v in
                                         s2.q("SELECT tier, COUNT(*) FROM chunks GROUP BY tier")}
                 hs, _ = health.compute(s2, config.settings().embed_tier)
+                try:
+                    st["parse"] = json.loads(s2.meta("sync") or "null")
+                except ValueError:
+                    st["parse"] = None
             finally:
                 s2.close()
             if hs:
@@ -487,6 +626,8 @@ def _repo_snapshot(r: repos.Repo) -> dict:
     ws = worker.read_status(r)
     if ws:
         out["embedding"] = {k: v for k, v in ws.items() if k != "repo"}
+        if ws.get("alive"):
+            _sample("rate:" + r.name, ws.get("updated") or time.time(), ws.get("chunks_per_s"))
         if ws.get("alive") and ws.get("total"):       # live tier split from the worker between count refreshes
             t2 = ws["total"] - ws.get("full_pending", 0)
             t1 = ws.get("full_pending", 0) - ws.get("cards_pending", 0)
@@ -527,7 +668,8 @@ def snapshot() -> dict:
     return {"server": {"pid": os.getpid(), "mode": _info["mode"], "owner": _owner.is_set(),
                        "uptime_s": round(time.time() - _info["started"]), "mcp_url": _info["mcp_url"]},
             "paused": worker.paused(), "repos": out_repos, "gpu": _gpu(), "models": models, "process": proc,
-            "tools": _tool_stats, "calls": list(_calls), "events": list(_events)[-80:]}
+            "tools": _tool_stats, "calls": list(_calls), "events": list(_events)[-80:],
+            "history": {k: list(v) for k, v in _hist.items()}, "history_24h": _hist_buckets()}
 
 
 def control(action: str, repo: str = "") -> dict:
@@ -606,7 +748,7 @@ def _lazy_dashboard(sock: socket.socket) -> None:
         return
     from nncq import dashboard
     _log(f"dashboard: first request, starting web server on {_info['dashboard']}")
-    app = _token_gate(dashboard.app(snapshot, control, [_health_route()]), config.settings().token)
+    app = _token_gate(dashboard.app(snapshot, control, web_tool, [_health_route()]), config.settings().token)
     try:
         _uvicorn(app, sock)
     except Exception:
@@ -711,7 +853,7 @@ def serve(stdio: bool = False) -> None:
     _become_owner(None)
     from nncq import dashboard
     app = mcp.streamable_http_app()
-    app.router.routes.extend([_health_route(), *dashboard.routes(snapshot, control)])
+    app.router.routes.extend([_health_route(), *dashboard.routes(snapshot, control, web_tool)])
     print(f"nncq MCP server on {_info['mcp_url']}, dashboard {_info['dashboard']}", flush=True)
     try:
         _uvicorn(_token_gate(app, s.token), sock)

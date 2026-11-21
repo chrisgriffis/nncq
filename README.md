@@ -2,7 +2,7 @@
 
 Local code retrieval for AI coding agents. It combines hybrid search (BM25 plus embeddings plus a reranker), AST-aware chunks, a symbol and call graph, and a engine code↔data cross-reference. Everything is served to agents over MCP. Nothing leaves the machine.
 
-> **Status: phase 1 working.** Indexing (tree-sitter + engine DSLs, `.xdata` cross-reference), the GPU embedding worker, hybrid search, the graph views, the MCP server (22 tools) and the CLI are in and tested on a 4,200-file slice of the sample workspace. Not yet: Linux `init.sh`, LAN mode, editor plugins.
+> **Status: phase 1 working.** Indexing (tree-sitter + engine DSLs, `.xdata` cross-reference), the GPU embedding worker, hybrid search, the graph views, the MCP server (24 tools) and the CLI are in and tested on a 4,200-file slice of the sample workspace. Not yet: Linux `init.sh`, LAN mode, editor plugins.
 
 ---
 
@@ -10,7 +10,9 @@ Local code retrieval for AI coding agents. It combines hybrid search (BM25 plus 
 
 | MCP tool | Answers |
 |---|---|
-| `search_code` | "where is X done?" in natural language or with identifiers. Hybrid ranking, returns whole functions or classes |
+| `ask` | **Start here.** A question in plain words returns a short generated map, not code: how the question was read, what the hits cover, one line of facts per hit, and how the hits call each other. Each hit has a ref to dig into. [Why](#ask-not-search) |
+| `expand` | Dig into `ask` refs: exact code, symbol card, callers, callees or file outline |
+| `search_code` | Raw hybrid search (keywords plus meaning plus reranker). Returns whole functions or classes as code blocks |
 | `grep_code` | exact text or regex matches (ripgrep, honours `.p4ignore`) |
 | `find_symbol` | where a class, function or method is defined |
 | `file_outline` | the symbols in a file, with line ranges, without reading the file |
@@ -120,8 +122,9 @@ Embedding keeps the GPU close to fully busy. It is built to stay out of your way
   Search uses whatever tier each chunk has reached. Recently changed files go first.
 - **Pause and resume.** `nncq pause` makes the worker finish its current batch and **exit**, so VRAM is fully released (it runs as its own process). `nncq resume` picks up where it stopped. Progress is saved per batch, so Ctrl+C, a reboot or a crash loses at most one batch.
 - **On demand.** `NNCQ_EMBED_TIER=0` disables background embedding. You can also run `nncq work` only when you choose.
-- **Polite mode.** `NNCQ_BG_WHEN=idle` embeds only after `NNCQ_IDLE_MINUTES` without keyboard or mouse input. `NNCQ_GPU_MIN_FREE_MB` skips starting while the GPU is busy, e.g. a game or the editor.
+- **Polite mode.** `NNCQ_BG_WHEN=idle` embeds only after `NNCQ_IDLE_MINUTES` without keyboard or mouse input. `NNCQ_GPU_MIN_FREE_MB` skips starting while the GPU is busy, e.g. a game or the editor. While embedding, the GPU is released for `NNCQ_GPU_BREAK_MS` (100 ms) every `NNCQ_GPU_BREAK_EVERY_S` (5 s), so Snipping Tool, the desktop and other CUDA apps are not starved.
 - **Queries stay light, and come first.** A query is one short embedding plus reranking 40 chunks, about 1 s. While a search uses the GPU, the worker holds its next batch (batches are small, about 1 s), so searches stay fast during embedding. Without this, server and worker fighting over VRAM made reranking take 20–50 s.
+- **VRAM is left for others.** Each nncq process is capped at total VRAM minus `NNCQ_GPU_RESERVE_MB` (1 GB). While the card has less than that free, for example because a game or the editor grew, GPU batches are split in halves instead of crowding the other app out. Running out of memory also halves the batch and retries; it never fails the job.
 
 ---
 
@@ -206,6 +209,89 @@ Embedding keeps the GPU close to fully busy. It is built to stay out of your way
 
 ---
 
+## Design choices and why
+
+### Ask, not search
+
+An agent does not need ten code blocks. It needs to know **which few places matter and why**, then read only those. Raw search answered "how does rendering get computed" with five unexplained blocks, 13 KB, and gave no sign that the match was weak. `ask` answers with a map an LLM can collate into a reply. The map is generated deterministically from the index: **no LLM** runs on the server, so it is fast and reproducible, and it never paraphrases the code wrongly.
+
+- **How the question was read.** It shows:
+  - the words it used, with stems (`rendering → render*`) and identifier parts;
+  - how common each word is in the code, and how many hits contain it;
+  - the words it ignored;
+  - whether meaning search was used, and how much of the code has vectors yet.
+
+  This makes a bad match explainable: "`seat`: 0.00% of code" says the codebase uses another word.
+- **The code's own words.** Identifiers that recur across the top candidates, such as `ServerVehicleSpawnEntity` for "spawn player into vehicle", are what to ask with next.
+- **What came back (portfolio).**
+  - Areas (folders) and kinds (function, class, doc).
+  - Which channel found the hits: keyword, meaning, or both.
+  - Where each channel led on its own.
+  - A **strength verdict** from the reranker: strong, fair or weak. A weak result says so and suggests a better question, instead of presenting noise as an answer.
+- **Why each hit is there:** its keyword rank, meaning rank, rerank score and the matched words.
+- **Facts instead of code, one line each:**
+  - signature and doc comment (taken from the code, or from the comment above the declaration);
+  - calls that matter (logging, macros and calls used everywhere are hidden and counted);
+  - callers with call-site counts;
+  - bases and members;
+  - the 1–2 lines that best match.
+- **Links between hits:** A calls B, A reaches B through one hop, members of the same class, derives from. This is usually the actual answer to "how does X work": the hits form a chain.
+- **Next steps:** an `expand` call for the top refs, a `call_trace` for the best function, a narrower `path=`, or a re-ask in the code's words.
+
+### Short first, drill down on demand
+
+Context is the agent's scarcest resource, so every response is sized for it:
+
+- `ask` returns about 5–9 KB for 8 hits. That is less than one large function, and enough to decide what to read.
+- `expand(refs)` returns exact current code from disk for only the chosen hits, capped per hit, with a `read_code` follow-up for the rest. `what=context|callers|callees|outline` returns structure instead of code.
+- Split chunks of one function are merged, and identical code at several paths is listed once (`also at`), so the hit budget is not spent on duplicates.
+- Healthy responses carry nothing extra. `index_state` appears only when something is degraded.
+
+### The MCP client owns the lifetime
+
+Over stdio, nncq runs **inside** the agent's MCP process and exits with it. When stdin closes, it stops its GPU worker and exits. The worker also exits on its own if its parent disappears. Nothing is left running in the background after you close the agent, and there is no service to install or forget about. The first copy binds the port and owns indexing; other copies only answer queries and take over if the owner goes away. `nncq serve` is the opt-in standalone mode for several clients.
+
+### Pausing frees the GPU completely
+
+Pause makes the embedding worker finish its batch and **exit**, rather than idle, because an idle CUDA process still holds VRAM. Progress is saved per batch, so resuming loses nothing. While it runs, the worker:
+
+- releases the GPU for 100 ms every 5 s, so screen capture and the desktop are not starved;
+- leaves 1 GB of VRAM for other apps;
+- yields to queries.
+
+The page has a visible **❚❚ pause** button for when you need the card yourself.
+
+### The web page: one screen, status → ask → symbols
+
+- **One page, no menus.**
+  - **Left column:** status, the ask box, the symbol explorer and the console.
+  - **Right half:** a viewer shared by search hits and the symbol view.
+
+  Results never push the symbol view off screen, and the viewer has room for long lines and signatures that would otherwise be truncated.
+- **Two roll-ups for an answer.**
+  1. How the question was read, plus the portfolio.
+  2. The list of files.
+
+  Each is collapsible. Picking a file opens its hits (facts, then code with the matching lines highlighted) on the right. **×** or **Esc** returns search to its home state.
+- **Visual emphasis over text:**
+  - rings and bars for indexing progress and the GPU;
+  - colour-coded stage lights;
+  - a strength badge on each answer;
+  - a stacked bar for which channel found the hits;
+  - bars for areas.
+
+  Numbers that change are drawn, not printed; the console is the only place for raw text. The page is a working surface, not a monitor: tool calls and internals are not shown.
+- **Calls both ways.** The symbol explorer switches between **Callers** (who reaches this) and **Callees** (what this reaches), as lazily expanded trees with recursion marked. File outline and type tree are the other views. ◎ or a double-click re-roots on any node.
+- **Jump-to links everywhere:**
+  - symbol names in hits open the symbol view;
+  - `c123` refs in the links list open that hit;
+  - code-vocabulary words re-ask;
+  - areas narrow the path filter;
+  - callers and callees on a symbol card open that symbol.
+- **Back and forward work.** A new ask or a new symbol is a browser history entry; picking a file or tab updates the current one. ‹ ›, Alt+← and the mouse back button all work. Results are cached in the page, and asks for the tab's lifetime, so going back redraws instantly instead of recomputing. The URL holds the state, so a link reopens the same view.
+
+---
+
 ## Quick start (Windows)
 
 ```powershell
@@ -236,6 +322,9 @@ Day to day: `nncq sync` (p4 sync plus delta), `nncq status`, `nncq pause` / `nnc
 | `NNCQ_BG_WHEN` / `NNCQ_IDLE_MINUTES` | `always` / `5` | embed only when idle |
 | `NNCQ_GPU_MIN_FREE_MB` | `0` | don't start embedding below this much free VRAM |
 | `NNCQ_GPU_BATCH_TOKENS` | `32768` | GPU batch size. Lower it on smaller cards |
+| `NNCQ_GPU_BREAK_EVERY_S` | `5` | background embedding gives the GPU up every this many seconds… |
+| `NNCQ_GPU_BREAK_MS` | `100` | …for this long, so the desktop, screen capture and other CUDA apps get in (0 = never) |
+| `NNCQ_GPU_RESERVE_MB` | `1024` | VRAM nncq leaves for other apps: each process is capped at total minus this, and GPU batches shrink while less is free (0 = no cap) |
 | `NNCQ_RERANK` / `NNCQ_RERANK_CANDIDATES` | `true` / `40` | cross-encoder reranking |
 | `NNCQ_INDEX_PROCS` | half the cores (max 8) | T0 parser processes |
 | `NNCQ_TEXT_LANGS` | `markdown,cmake,make,dockerfile,proto,batch` | non-code formats to index (add `xml,json,yaml,...` if wanted) |

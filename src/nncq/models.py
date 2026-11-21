@@ -28,6 +28,57 @@ PINNED = [(EMBED_MODEL, EMBED_REV), (RERANK_MODEL, RERANK_REV)]
 
 # One GPU pass is bounded by tokens, not text count: memory ~ count x padded length.
 BATCH_TOKENS = int(os.environ.get("NNCQ_GPU_BATCH_TOKENS", "32768"))
+# Background embedding pauses the GPU this long every BREAK_EVERY seconds, so the desktop, screen capture
+# and other CUDA processes can get in (a saturated GPU starves them).
+BREAK_EVERY_S = float(os.environ.get("NNCQ_GPU_BREAK_EVERY_S", "5"))
+BREAK_MS = int(os.environ.get("NNCQ_GPU_BREAK_MS", "100"))
+# VRAM nncq never takes: each process is capped at total minus this, and a GPU pass is split in halves
+# while less than this is free on the card (other apps grew) or when it runs out of memory.
+RESERVE_MB = int(os.environ.get("NNCQ_GPU_RESERVE_MB", "1024"))
+_last_break = time.time()
+_capped = False
+
+
+def _cap_vram() -> None:
+    global _capped
+    if _capped:
+        return
+    _capped = True
+    torch = sys.modules.get("torch")
+    if RESERVE_MB <= 0 or torch is None or not torch.cuda.is_available():
+        return
+    total = torch.cuda.get_device_properties(0).total_memory
+    torch.cuda.set_per_process_memory_fraction(max(0.2, 1 - RESERVE_MB * 2**20 / total))
+
+
+def _guarded(g: list[int], run) -> None:
+    """run(g) on the GPU; split g in halves while the card is short of free VRAM or on out-of-memory."""
+    torch = sys.modules.get("torch")
+    cuda = torch is not None and torch.cuda.is_available()
+    if cuda and RESERVE_MB > 0 and len(g) > 1 and torch.cuda.mem_get_info()[0] < RESERVE_MB * 2**20:
+        torch.cuda.empty_cache()
+        if torch.cuda.mem_get_info()[0] < RESERVE_MB * 2**20:
+            h = len(g) // 2
+            _guarded(g[:h], run)
+            _guarded(g[h:], run)
+            return
+    try:
+        run(g)
+    except Exception as e:
+        if not (cuda and isinstance(e, torch.cuda.OutOfMemoryError)) or len(g) == 1:
+            raise
+        torch.cuda.empty_cache()
+        h = len(g) // 2
+        _guarded(g[:h], run)
+        _guarded(g[h:], run)
+
+
+def gpu_break() -> None:
+    """Give the GPU up for BREAK_MS if BREAK_EVERY_S has passed. Call only after the GPU work was synced."""
+    global _last_break
+    if BREAK_MS > 0 and time.time() - _last_break >= BREAK_EVERY_S:
+        time.sleep(BREAK_MS / 1000)
+        _last_break = time.time()
 MAX_BATCH = 256
 MAX_TOKENS = 2048          # per text; chunks are ~3000 chars, so this rarely truncates
 RERANK_MAX_CHARS = 6000
@@ -119,6 +170,8 @@ class _Lazy:
             if self.model is not None and self.device != dev:
                 self.unload()
             if self.model is None:
+                if dev.startswith("cuda"):
+                    _cap_vram()
                 self.model = self._load(dev)
                 self.device = dev
             self.last_used = time.time()
@@ -153,10 +206,13 @@ class Embedder(_Lazy):
             out = np.zeros((len(texts), self.dim), dtype=np.float32)
             try:
                 with fast_attention():
-                    for g in token_batches(lengths, BATCH_TOKENS, MAX_BATCH):
+                    def run(g):
                         v = m.encode_document([texts[i] for i in g], batch_size=len(g),
                                               convert_to_numpy=True, show_progress_bar=False)
                         out[g] = _renorm(v, self.dim)
+                    for g in token_batches(lengths, BATCH_TOKENS, MAX_BATCH):
+                        _guarded(g, run)
+                        gpu_break()  # convert_to_numpy already waited for the GPU
             finally:
                 _free_cache()
                 self.last_used = time.time()
@@ -200,13 +256,15 @@ class Reranker(_Lazy):
             lengths = [len(i) for i in tok(texts, truncation=True, max_length=MAX_TOKENS)["input_ids"]]
             scores = [0.0] * len(texts)
             try:
-                for g in token_batches(lengths, BATCH_TOKENS, len(texts)):
+                def run(g):
                     batch = tok([texts[i] for i in g], return_tensors="pt", truncation=True,
                                 max_length=MAX_TOKENS, padding=True).to(m.device)
                     with torch.no_grad(), fast_attention():
                         logits = m(**batch).logits.reshape(-1).float().cpu().tolist()
                     for i, s in zip(g, logits):
                         scores[i] = s
+                for g in token_batches(lengths, BATCH_TOKENS, len(texts)):
+                    _guarded(g, run)
             finally:
                 _free_cache()
                 self.last_used = time.time()

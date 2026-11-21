@@ -192,6 +192,8 @@ def update(repo: Repo, full: bool = False, data: bool | None = None, log=print) 
         store.set_meta("indexed_at", time.time())
         log(f"[{repo.name}] code: {res}")
         if s.data if data is None else data:
+            state["phase"] = "data"
+            store.set_meta("sync", json.dumps(state))
             log(f"[{repo.name}] data cross-reference (.xdata) ...")
             d = datarefs.update(store, repo.root, s.ignore, log)
             log(f"[{repo.name}] data: {d}")
