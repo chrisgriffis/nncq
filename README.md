@@ -2,7 +2,7 @@
 
 Local code retrieval for AI coding agents. It combines hybrid search (BM25 plus embeddings plus a reranker), AST-aware chunks, a symbol and call graph, and a engine code↔data cross-reference. Everything is served to agents over MCP. Nothing leaves the machine.
 
-> **Status: MVP in progress.** Done: chunking (tree-sitter and engine DSLs), the SQLite store, file enumeration, the `.xdata` data cross-reference, model wrappers, T0 indexing, and the graph views. In progress: the embedding worker, search, the MCP server and the CLI. Commands below describe the intended interface.
+> **Status: phase 1 working.** Indexing (tree-sitter + engine DSLs, `.xdata` cross-reference), the GPU embedding worker, hybrid search, the graph views, the MCP server (22 tools) and the CLI are in and tested on a 4,200-file slice of the sample workspace. Not yet: Linux `init.sh`, LAN mode, editor plugins.
 
 ---
 
@@ -102,10 +102,11 @@ A grep skill is good when you know the exact string. It falls short when you don
   | index | varies | engine data cross-reference: 420 MB for 390k `.xdata`. Vectors: 2 KB per chunk (1024-dim fp16), about 2 GB per million chunks |
 
 - **RAM:** the server keeps vectors in memory (2 KB per chunk). Models load on first query and unload after `NNCQ_MODEL_IDLE_SECONDS`.
-- **Time (measured on the sample workspace):**
-  - T0 parsing: about 500 files/s per process (7,220 files in 15 s, single process).
-  - Full `.xdata` cross-reference: 84 s for 388k files.
-  - Embedding throughput: not measured yet. It is the slow part, hours for a large tree, which is why it is tiered and interruptible.
+- **Time (measured on the sample workspace, RTX 5080):**
+  - T0 parsing: about 300 files/s with the process pool (4,199 files, 42k chunks in 12–15 s, including a full re-parse).
+  - Full `.xdata` cross-reference: 75–84 s for 388k files. Start-up catch-up (stat every `.xdata`, rescan changed): about 25 s.
+  - Embedding: cards (T1) about 200–290 chunks/s, full chunks (T2) about 35–40 chunks/s. 42k chunks: about 3 min of cards (search is semantic from then on), then about 20 min of full vectors.
+  - Queries: hybrid + rerank about 1 s (query embedding 20 ms, reranking 40 candidates about 0.9 s). The first query after start loads both models (about 10 s). Graph views: 0–220 ms on 43k symbols and 260k edges.
 
 ## GPU use during indexing: on demand, interruptible
 
@@ -120,7 +121,7 @@ Embedding keeps the GPU close to fully busy. It is built to stay out of your way
 - **Pause and resume.** `nncq pause` makes the worker finish its current batch and **exit**, so VRAM is fully released (it runs as its own process). `nncq resume` picks up where it stopped. Progress is saved per batch, so Ctrl+C, a reboot or a crash loses at most one batch.
 - **On demand.** `NNCQ_EMBED_TIER=0` disables background embedding. You can also run `nncq work` only when you choose.
 - **Polite mode.** `NNCQ_BG_WHEN=idle` embeds only after `NNCQ_IDLE_MINUTES` without keyboard or mouse input. `NNCQ_GPU_MIN_FREE_MB` skips starting while the GPU is busy, e.g. a game or the editor.
-- **Queries stay light.** A query is one short embedding plus reranking 40 chunks, a fraction of a second.
+- **Queries stay light, and come first.** A query is one short embedding plus reranking 40 chunks, about 1 s. While a search uses the GPU, the worker holds its next batch (batches are small, about 1 s), so searches stay fast during embedding. Without this, server and worker fighting over VRAM made reranking take 20–50 s.
 
 ---
 
@@ -243,6 +244,15 @@ Day to day: `nncq sync` (p4 sync plus delta), `nncq status`, `nncq pause` / `nnc
 | `NNCQ_DATA` | `true` | maintain the `.xdata` cross-reference |
 | `NNCQ_HOST` / `NNCQ_PORT` / `NNCQ_TOKEN` | `127.0.0.1` / `8765` / | token required for non-loopback |
 | `NNCQ_WATCH` | `true` | re-index on file save |
+
+Every option, with comments: `.env.example`.
+
+## Tests
+
+```powershell
+.venv\Scripts\python -m pytest -q tst      # chunking, deltas + vector reuse, call_trace, degradation notes (no GPU)
+.venv\Scripts\nncq doctor                  # installation check
+```
 
 ## Limitations
 

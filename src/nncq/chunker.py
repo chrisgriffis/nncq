@@ -283,7 +283,7 @@ class _Ast:
                 yield ("def", ch, d)
             elif ch.named_child_count and ch.end_point[0] > ch.start_point[0] and self._has_def(ch):
                 yield from self._flatten(list(ch.children))
-            else:
+            elif ch.is_named:                     # bare `{` `}` `;` tokens would duplicate their whole line
                 yield ("gap", ch, None)
 
     def _chunk_scope(self, children, parents, ctx_sym, ctx_kind, header):
@@ -293,6 +293,8 @@ class _Ast:
         parent = self.sep.join(parents)
         for what, node, d in self._flatten(children):
             s, e = node.start_point[0], node.end_point[0]
+            if node.end_point[1] == 0 and e > s:          # preprocessor nodes end at column 0 of the next line
+                e -= 1
             if what == "gap":
                 gap.append((s, e, node.type in ("comment", "line_comment", "block_comment")))
                 continue
@@ -319,15 +321,27 @@ class _Ast:
         qual = self.sep.join(names)
         parent = self.sep.join(parents + d.scope)
         size = sum(len(self.lines[i]) for i in range(start, min(end, len(self.lines) - 1) + 1))
-        if size <= self.max:
+        scope_only = d.kind in ("namespace", "module") and d.body is not None and self._has_def(d.body)
+        if size <= self.max and not scope_only:
             self.r.chunks.append(_mk(self.lines, start, end, qual, d.kind, parent))
             return
         if d.kind in L.CONTAINER_KINDS and d.body is not None:
             hb = d.body.start_point[0]
-            self._chunk_scope(list(d.body.children), names, qual, d.kind, (start, hb))
+            self._chunk_scope(list(d.body.children), names, qual, d.kind, None if scope_only else (start, hb))
             return
         for a, b in windows(self.lines, start, end, self.max):
             self.r.chunks.append(_mk(self.lines, a, b, qual, d.kind, parent))
+
+    def _signature(self, row: int) -> str:
+        """First line of the definition; joins following lines while it is only a return type / template
+        header / attribute (`void` on its own line, then `Foo::bar(...)`)."""
+        out = []
+        for i in range(row, min(row + 4, len(self.lines))):
+            s = self.lines[i].strip()
+            out.append(s)
+            if "(" in s or "{" in s or ":" in s.replace("::", "") or len(" ".join(out)) > 120:
+                break
+        return " ".join(x for x in out if x)[:200]
 
     # -- symbols + call edges over the whole tree
     def _collect(self, root):
@@ -342,7 +356,7 @@ class _Ast:
                     kind = "method"
                 qual = self.sep.join(names)
                 span = n.parent if n.parent is not None and n.parent.type in L.WRAPPERS else n
-                sig = self.lines[n.start_point[0]].strip()[:200] if n.start_point[0] < len(self.lines) else ""
+                sig = self._signature(n.start_point[0])
                 self.r.symbols.append(Symbol(d.name, qual, kind, self.sep.join(names[:-1]),
                                              span.start_point[0] + 1, n.end_point[0] + 1, sig))
                 parents, encl, encl_kind = names, qual, kind

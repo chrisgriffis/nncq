@@ -2,12 +2,13 @@
 Vectors are added later by worker.py.
 
 Full / stat-delta:  update(repo)          enumerate with ripgrep, stat, re-chunk new/changed, drop removed
-Path delta:         update_paths(repo, p) for the watcher and p4 sync (exact file list)
-Perforce:           p4_sync(repo, args)   runs `p4 sync`, then update_paths on what it touched
+Path delta:         update_paths(repo, p) for the watcher (exact file list)
 The engine .xdata cross-reference (datarefs.py) is refreshed alongside when NNCQ_DATA is on.
+Read-only on the workspace: files are only listed, stat'ed and read; everything is written under cache/.
 
-Sync cost is proportional to what changed, never to the workspace:
-  - only the files p4 reports are touched; content-identical files (same sha1) are just re-stamped
+Sync cost is proportional to what changed, never to the workspace (sync with P4V / p4 as usual):
+  - the watcher hands over exactly the paths that changed; at start-up a stat pass finds the rest
+  - content-identical files (same sha1) are just re-stamped
   - the graph is name-based per file, so a changed header does not re-process the files that include it
   - chunks whose text did not change keep their vectors (store.replace_file), so only edited code re-embeds
   - .xdata stats are updated incrementally; no amount of change triggers a full data rescan
@@ -18,13 +19,12 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import subprocess
 import time
 from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
-from nncq import chunker, config, datarefs, langs, walk
+from nncq import chunker, config, datarefs, langs, sysutil, walk
 from nncq.repos import Repo
 from nncq.store import Store
 
@@ -88,6 +88,15 @@ def folders(paths, depth: int = 4, k: int = 6) -> list[str]:
     if len(c) > k:
         out.append(f"+{len(c) - k} more folders")
     return out
+
+
+def _other_parser(store: Store) -> int:
+    """pid of another live process that is writing chunks into this index (T0 build / catch-up), else 0."""
+    try:
+        pid = json.loads(store.meta("sync") or "{}").get("pid", 0)
+    except ValueError:
+        return 0
+    return pid if pid and pid != os.getpid() and sysutil.pid_alive(pid) else 0
 
 
 def _begin(store: Store, source: str, paths: list[str]) -> dict:
@@ -160,8 +169,13 @@ def update(repo: Repo, full: bool = False, data: bool | None = None, log=print) 
     t0 = time.time()
     store = open_store(repo)
     try:
+        other = _other_parser(store)
+        if other:
+            log(f"[{repo.name}] another indexer (pid {other}) is running; it covers this")
+            return {"skipped": f"another indexer (pid {other}) is running"}
         m = ext_map()
-        files = [f for f in walk.list_files(repo.root, globs(m), s.ignore, repo.dirs) if lang_of(f, m)]
+        files = [f for f in walk.list_files(repo.root, globs(m), walk.code_ignore(s.ignore), repo.dirs)
+                 if lang_of(f, m)]
         log(f"[{repo.name}] {len(files)} code files under {repo.root}"
             + (f" ({', '.join(repo.dirs)})" if repo.dirs else ""))
         stats = walk.stat_many(repo.root, files)
@@ -191,14 +205,14 @@ def update(repo: Repo, full: bool = False, data: bool | None = None, log=print) 
 
 def update_paths(repo: Repo, paths: list[str], store: Store | None = None, log=print,
                  source: str = "file changes") -> dict:
-    """Delta for an explicit list of repo-relative paths (watcher events, p4 sync output)."""
+    """Delta for an explicit list of repo-relative paths (watcher events)."""
     s = config.settings()
     own = store is None
     store = store or open_store(repo)
     try:
         m = ext_map()
         ign = walk.Ignorer(repo.root, s.ignore)
-        code_ign = walk.Ignorer(repo.root, s.ignore, repo.dirs)
+        code_ign = walk.Ignorer(repo.root, walk.code_ignore(s.ignore), repo.dirs)
         rels = sorted({p.replace("\\", "/") for p in paths})
         xdata = [p for p in rels if p.lower().endswith(".xdata") and not ign.ignored(p)]
         code = [p for p in rels if lang_of(p, m) and not code_ign.ignored(p)]
@@ -209,7 +223,8 @@ def update_paths(repo: Repo, paths: list[str], store: Store | None = None, log=p
         gone = [p for p in code if p not in stats and p in known]
         if not (todo or gone or xdata):
             return {"changed": 0}
-        state = _begin(store, source, [x[0] for x in todo] + gone + (xdata if s.data else []))
+        busy = _other_parser(store)                # a build is running: write the delta, leave its progress marker
+        state = None if busy else _begin(store, source, [x[0] for x in todo] + gone + (xdata if s.data else []))
         try:
             if gone:
                 with store.tx():
@@ -220,46 +235,12 @@ def update_paths(repo: Repo, paths: list[str], store: Store | None = None, log=p
             if xdata and s.data:
                 res["data_files"] = datarefs.scan_paths(store, repo.root, xdata, log)
         finally:
-            _end(store)
+            if not busy:
+                _end(store)
         return res
     finally:
         if own:
             store.close()
-
-
-def p4_sync(repo: Repo, args: list[str], log=print) -> dict:
-    """Run `p4 sync <args>` in the workspace (P4CONFIG/.p4config applies), then index what changed."""
-    cmd = ["p4", "-ztag", "-Mj", "sync", *(args or [])]
-    log(f"[{repo.name}] {' '.join(cmd)}")
-    proc = subprocess.Popen(cmd, cwd=repo.root, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                            stdin=subprocess.DEVNULL)
-    root = os.path.normcase(str(repo.root.resolve())) + os.sep
-    touched, n, errors = [], 0, []
-    for line in proc.stdout:
-        try:
-            rec = json.loads(line)
-        except ValueError:
-            continue
-        cf = rec.get("clientFile")
-        if cf:
-            n += 1
-            full = os.path.normcase(os.path.normpath(cf))
-            if full.startswith(root):
-                touched.append(os.path.normpath(cf)[len(root):].replace("\\", "/"))
-            if n % 20000 == 0:
-                log(f"  p4: {n} files")
-        elif rec.get("generic") or rec.get("severity"):
-            errors.append(rec.get("data", "").strip())
-    err = proc.stderr.read().decode(errors="replace").strip()
-    rc = proc.wait()
-    if err:
-        errors.append(err)
-    for e in errors[:5]:
-        log(f"  p4: {e}")
-    log(f"[{repo.name}] p4 touched {len(touched)} files (exit {rc})")
-    # always a path delta, however large: cost follows what p4 changed, never the workspace size
-    res = update_paths(repo, touched, log=log, source="p4 sync") if touched else {"changed": 0}
-    return {"p4_files": len(touched), **res}
 
 
 def status(repo: Repo) -> dict:

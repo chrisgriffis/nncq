@@ -39,7 +39,8 @@ def _folders(paths: Counter, depth: int = 4, k: int = 5) -> tuple[list[str], lis
 
 
 def compute(store: Store, embed_tier: int = 2) -> tuple[dict | None, list[str]]:
-    """(state or None, degraded folder prefixes)."""
+    """(state or None, degraded folder prefixes). state["semantic_from"] = index of the first item that only
+    concerns semantic (vector) search; graph/data tools drop those items."""
     items, prefixes = [], []
     raw = store.meta("sync")
     if raw:
@@ -53,6 +54,7 @@ def compute(store: Store, embed_tier: int = 2) -> tuple[dict | None, list[str]]:
         else:
             items.append(f"{s['source']} interrupted (started {_when(s['started'])[6:]}), {s['done']}/{s['total']} "
                          f"files applied in {where}. The rest stay stale until the next update or server start.")
+    sync_items, sync_prefixes = len(items), list(prefixes)
     tiers = dict(store.q("SELECT tier, COUNT(*) FROM chunks GROUP BY tier"))
     total = sum(tiers.values()) or 1
     t0, t1 = tiers.get(0, 0), tiers.get(1, 0)
@@ -76,7 +78,8 @@ def compute(store: Store, embed_tier: int = 2) -> tuple[dict | None, list[str]]:
                      "is coarser for them until the full pass finishes.")
     if not items:
         return None, []
-    return {"degraded": items, "checked_at": time.strftime("%H:%M:%S")}, prefixes
+    return {"degraded": items, "checked_at": time.strftime("%H:%M:%S"),
+            "_sync": (sync_items, sync_prefixes)}, prefixes
 
 
 def state(store: Store, embed_tier: int = 2) -> tuple[dict | None, list[str]]:
@@ -89,12 +92,20 @@ def state(store: Store, embed_tier: int = 2) -> tuple[dict | None, list[str]]:
     return st, pre
 
 
-def annotate(result: dict, store: Store, paths: list[str] | None = None, embed_tier: int = 2) -> dict:
-    """Attach index_state to a tool result when (and only when) something is degraded."""
+def annotate(result: dict, store: Store, paths: list[str] | None = None, embed_tier: int = 2,
+             semantic: bool = True) -> dict:
+    """Attach index_state to a tool result when (and only when) something relevant is degraded.
+    semantic=False (graph / data / lookup tools): only sync state matters, not embedding progress."""
     st, pre = state(store, embed_tier)
     if st is None:
         return result
-    out = dict(st)
+    n_sync, sync_pre = st["_sync"]
+    items = st["degraded"] if semantic else st["degraded"][:n_sync]
+    if not items:
+        return result
+    if not semantic:
+        pre = sync_pre
+    out = {"degraded": items, "checked_at": st["checked_at"]}
     if paths and pre:
         hit = [p for p in paths if any(p.startswith(x) for x in pre)]
         out["affects_these_results"] = f"{len(hit)} of {len(paths)} results are in a degraded area" if hit else "no"

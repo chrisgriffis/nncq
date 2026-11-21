@@ -334,13 +334,17 @@ def code_for_data(store: Store, q: str, k: int = 8) -> dict:
     """What code does this asset (or data type) use: per type, its .ddf definition, the runtime class
     (FooData -> Foo), and code that mentions the type."""
     rows = resolve(store, q, 5) if not re.fullmatch(r"[\w.]+", q) or "/" in q else []
+    types = []
+    if not rows:
+        types = [(n, s, 0) for _, n, s, _, _ in _type_rows(store, "name=? COLLATE NOCASE OR short=? COLLATE NOCASE", (q, q))]
+        if not types:
+            rows = resolve(store, q, 5)        # a bare asset name like FX_Foo_1
     if rows:
         fid, path, _ = rows[0]
         types = store.q("SELECT t.name, t.short, i.n FROM data_inst i JOIN data_types t ON t.id=i.type_id "
                         "WHERE i.file_id=? ORDER BY i.n DESC LIMIT 30", (fid,))
     else:
         path = ""
-        types = [(n, s, 0) for _, n, s, _, _ in _type_rows(store, "name=? COLLATE NOCASE OR short=? COLLATE NOCASE", (q, q))]
         if not types:
             return {"error": f"no asset or data type matches {q!r}"}
     out = []
@@ -371,10 +375,30 @@ def top_assets(store: Store, k: int = 50, under: str = "", group_depth: int = 0)
         where += " AND path LIKE ?"
         args.append(under.replace("\\", "/").rstrip("/") + "/%")
     if not group_depth:
-        return [{"rank": i + 1, "path": p, "inbound_refs": ib, "instances": n, "kb": sz // 1024}
-                for i, (p, ib, n, sz) in enumerate(store.q(
-                    f"SELECT path, inbound, instances, size FROM data_files WHERE {where} "
-                    f"ORDER BY inbound DESC LIMIT ?", (*args, k)))]
+        # The same asset key often exists under several source roots (test data copies); a reference resolves
+        # to all of them, so show the key once, with the copy that has the most content first.
+        rows = store.q(f"SELECT path, inbound, instances, size, rkey FROM data_files WHERE {where} "
+                       f"ORDER BY inbound DESC, instances DESC LIMIT ?", (*args, k * 8))
+        seen: dict[str, dict] = {}
+        for p, ib, n, sz, rk in rows:
+            g = seen.get(rk)
+            if g is None:
+                if len(seen) >= k:
+                    continue
+                seen[rk] = {"path": p, "inbound_refs": ib, "instances": n, "kb": sz // 1024, "_best": n}
+            else:
+                g.setdefault("same_key_at", []).append(p)
+                if n > g["_best"]:
+                    g["same_key_at"][-1] = g["path"]
+                    g.update(path=p, instances=n, kb=sz // 1024, _best=n)
+        out = []
+        for i, g in enumerate(seen.values()):
+            g.pop("_best")
+            if "same_key_at" in g:
+                g["same_key_at"] = g["same_key_at"][:5] + ([f"+{len(g['same_key_at']) - 5} more"]
+                                                           if len(g["same_key_at"]) > 5 else [])
+            out.append({"rank": i + 1, **g})
+        return out
     agg: dict[str, list] = {}
     for p, ib in store.q(f"SELECT path, inbound FROM data_files WHERE {where}", args):
         key = "/".join(p.split("/")[:group_depth]) + "/"

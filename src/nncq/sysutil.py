@@ -44,6 +44,20 @@ def gpu_free_mb() -> int | None:
         return None
 
 
+def gpu_info() -> dict | None:
+    """name, mem_used/mem_total (MB), util (%) of GPU 0 via nvidia-smi."""
+    exe = shutil.which("nvidia-smi")
+    if not exe:
+        return None
+    try:
+        out = subprocess.check_output([exe, "--query-gpu=name,memory.used,memory.total,utilization.gpu",
+                                       "--format=csv,noheader,nounits"], timeout=10, stdin=subprocess.DEVNULL)
+        name, used, total, util = [x.strip() for x in out.decode().splitlines()[0].split(",")]
+        return {"name": name, "mem_used": int(used), "mem_total": int(total), "util": int(util)}
+    except (OSError, ValueError, IndexError, subprocess.SubprocessError):
+        return None
+
+
 def spawn(cmd: list[str], log: Path, detach: bool) -> subprocess.Popen:
     """Start a background process with output appended to log. detach: survives this process."""
     log.parent.mkdir(parents=True, exist_ok=True)

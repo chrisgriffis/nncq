@@ -22,6 +22,7 @@ MODELS_DIR = CACHE / "models"
 HF_HOME = MODELS_DIR / "hf"
 TS_CACHE = TOOLS_DIR / "tree-sitter"
 CONTROL_FILE = DATA_DIR / "control.json"
+QUERY_BUSY_FILE = DATA_DIR / "query.busy"     # mtime = last GPU use by a search; the worker yields to it
 SERVER_FILE = DATA_DIR / "server.json"
 REPOS_FILE = DATA_DIR / "repos.json"
 
@@ -36,6 +37,8 @@ def read_env_file(path: Path = ENV_FILE) -> dict[str, str]:
             continue
         k, v = line.split("=", 1)
         v = v.strip()
+        if v[:1] not in "\"'" and " #" in v:
+            v = v.split(" #", 1)[0].rstrip()
         if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
             v = v[1:-1]
         out[k.strip()] = v

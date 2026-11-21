@@ -15,6 +15,23 @@ from nncq import config
 DEFAULT_SKIP = ["!**/.git/**", "!**/.svn/**", "!**/node_modules/**", "!**/__pycache__/**", "!**/.vs/**",
                 "!**/.venv/**", "!**/bin/Debug/**", "!**/bin/Release/**", "!**/obj/**"]
 
+# Code only (not the .xdata data scan), case-insensitive; NNCQ_IGNORE_DEFAULTS=false turns them off.
+# Vendored / third-party, tool distributions and prebuilt headers, generated code, changelog noise.
+CODE_IGNORE_DEFAULTS = [
+    "**/External/**", "**/ThirdParty/**", "**/third_party/**", "**/3rdParty/**", "**/vendor/**", "**/extern/**",
+    "**/Bin/**", "**/Prebuild/**",
+    "**/Generated/**", "*.Designer.cs", "*.g.cs", "*.generated.*", "*_generated.*", "*_pb2.py", "*_pb2_grpc.py",
+    "*.pb.h", "*.pb.cc", "*.min.js", "*.pyi",
+    "**/ReleaseNotes/**",
+]
+
+
+def code_ignore(extra: str) -> str:
+    """NNCQ_IGNORE plus the defaults above (unless disabled), as one comma list."""
+    out = list(CODE_IGNORE_DEFAULTS) if os.environ.get("NNCQ_IGNORE_DEFAULTS", "true").lower() not in (
+        "0", "false", "no", "off") else []
+    return ",".join(out + [x.strip() for x in extra.replace(";", ",").split(",") if x.strip()])
+
 
 def rg_exe() -> str:
     for c in (Path(sys.executable).parent / "rg.exe", Path(sys.executable).parent / "rg"):
@@ -55,7 +72,7 @@ def ignore_args(root: Path, extra_ignore: str = "") -> list[str]:
             out.write_text(text, encoding="utf-8")
         args += ["--ignore-file", str(out)]
     for g in filter(None, (x.strip() for x in extra_ignore.replace(";", ",").split(","))):
-        args += ["-g", "!" + g]
+        args += ["--iglob", "!" + g]
     return args
 
 
