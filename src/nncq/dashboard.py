@@ -104,12 +104,12 @@ svg{display:block}
 .sbar input[type=text]{flex:1;min-width:0;font-size:16px;padding:10px 14px;background:var(--panel);border:1px solid var(--line);border-radius:10px;outline:none}
 .sbar input[type=text]:focus{border-color:var(--acc)}
 .recent{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}.recent:empty{display:none}
-.recent a{font-size:11px;padding:2px 8px;border-radius:10px;background:#1a1e28;color:var(--dim);cursor:pointer}.recent a:hover{color:var(--fg)}
+.recent a{font-size:11px;padding:2px 8px;border-radius:10px;background:#1a1e28;color:var(--dim);cursor:pointer}.recent a:hover{color:var(--fg)}.recent a.cur{background:#1d2a44;color:var(--acc)}
 .qwrap{flex:1;min-width:0;position:relative;display:flex}.qwrap input{flex:1}
 #qx{position:absolute;right:8px;top:50%;transform:translateY(-50%);color:var(--dim);cursor:pointer;font-size:18px;padding:0 6px;display:none}#qx:hover{color:var(--fg)}
 .blk{margin-top:8px;background:var(--panel);border:1px solid var(--line);border-radius:10px}
-.blk>summary{list-style:none;cursor:pointer;padding:7px 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:12px}
-.blk>summary::-webkit-details-marker{display:none}.blk>summary:before{content:'▸';color:var(--dim);font-size:10px}.blk[open]>summary:before{content:'▾'}
+.blk>summary{list-style:none;cursor:default;padding:7px 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:12px}
+.blk>summary::-webkit-details-marker{display:none}.blk:not([open])>summary>.tw{transform:rotate(-90deg)}
 .blk>summary .h{font-weight:600;font-size:12px}
 .bb{padding:2px 12px 10px;display:grid;grid-template-columns:auto 1fr;gap:6px 12px;font-size:12px;align-items:center}
 .bb>.lab{color:var(--dim);font-size:11px;text-align:right;white-space:nowrap}
@@ -130,7 +130,11 @@ svg{display:block}
 .frow .fn{font-weight:600;white-space:nowrap}.frow .fd{color:var(--dim);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;direction:rtl;text-align:left;min-width:60px;flex:1 1 0}
 .frow .fs{display:flex;gap:4px;flex:0 1 auto;min-width:0;overflow:hidden}.frow .fs span{font-size:11px;padding:0 6px;border-radius:8px;background:#232733;white-space:nowrap}
 .rk{width:44px;height:5px;background:var(--t0);border-radius:3px;overflow:hidden;flex:none}.rk i{display:block;height:100%;background:var(--ok)}
-.hit{border-bottom:1px solid var(--line)}.hit .hh{display:flex;gap:8px;align-items:center;padding:8px 12px 2px;flex-wrap:wrap}
+.hit{border-bottom:1px solid var(--line)}.tw:before{content:'';border-left:5px solid transparent;border-right:5px solid transparent;border-top:7px solid currentColor}.tw{color:#a9b0bc;font-size:0;flex:none;width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;border-radius:4px;cursor:pointer;transition:transform .15s;user-select:none;margin-left:-6px}.tw:hover{color:var(--fg);background:#1b1f29}.blk>summary>.tw{margin-right:-4px}
+.hit.cl .tw{transform:rotate(-90deg)}.hit.cl>.facts,.hit.cl>pre,.hit.cl>.more{display:none}.hit.cl>.hh{padding-bottom:8px}
+.rzh{position:absolute;left:0;right:0;bottom:0;height:8px;cursor:ns-resize;z-index:3}.rzh:hover,.rzh.on{background:linear-gradient(transparent 5px,var(--acc) 5px,var(--acc) 7px,transparent 7px)}
+.rzh::after{content:'';position:absolute;right:3px;bottom:2px;width:9px;height:9px;background:linear-gradient(135deg,transparent 45%,#5a6375 45%,#5a6375 55%,transparent 55%,transparent 70%,#5a6375 70%,#5a6375 80%,transparent 80%)}
+#s-symbols.idle{height:auto!important}#s-symbols.idle>.rzh{display:none}details:not([open])>.rzh{display:none}.bb{overflow:auto}.hit .hh{display:flex;gap:8px;align-items:center;padding:8px 12px 2px;flex-wrap:wrap}
 .hit .hh .sym{font-weight:600;cursor:pointer}.hit .hh .sym:hover{color:var(--acc)}
 .hit .facts{padding:2px 12px 6px;font-size:12px;display:grid;grid-template-columns:auto 1fr;gap:2px 10px}
 .hit .facts .lab{color:var(--dim);font-size:11px;text-align:right}
@@ -193,18 +197,18 @@ ul.tree{list-style:none;margin:0;padding-left:16px}ul.tree.root{padding-left:0}
   <div class="recent" id="recent"></div><div id="answer"></div>
  </section>
 
- <section class="fill pane idle" id="s-symbols">
+ <section class="fill pane idle" id="s-symbols" data-rz="symbols" data-rzmin="160">
   <form class="ph" onsubmit="event.preventDefault();findSym($('#sq').value)">
    <input type="text" id="sq" placeholder="Symbol: name or app::Class::method" autocomplete="off"><button>Find</button>
    <div class="seg" id="tmode"><a data-m="callers">Callers</a><a data-m="callees">Callees</a><a data-m="outline">File outline</a><a data-m="types">Type tree</a></div></form>
   <div class="pb" id="tree"><div class="empty">Find a symbol, or click one in search hits.</div></div>
  </section>
 
- <section class="fill"><div id="console"></div></section>
+ <section class="fill"><div id="console" data-rz="console" data-rzmin="60"></div></section>
  </div>
 
  <div id="right" class="pane">
-  <div class="ph"><span class="navb"><a onclick="history.back()" title="back (Alt+←, mouse back)">‹</a><a onclick="history.forward()" title="forward (Alt+→)">›</a></span><div class="seg" id="vtab"><a data-v="hits">Search hits</a><a data-v="sym">Symbol</a></div><span id="vtitle" class="mono"></span></div>
+  <div class="ph"><span class="navb"><a onclick="history.back()" title="back (Alt+←, mouse back)">‹</a><a onclick="history.forward()" title="forward (Alt+→)">›</a></span><div class="seg" id="vtab"><a data-v="hits">Active search</a><a data-v="sym">Symbol</a></div><span id="vtitle" class="mono"></span></div>
   <div class="vb pb" id="vhits" style="padding:0"><div class="empty">Ask something, then pick a file.</div></div>
   <div class="vb" id="vsym" hidden><div class="scard" id="scard"></div><div class="cpath" id="cpath"></div><div class="pb" style="padding:0"><pre class="code tall" id="sview"><div class="empty">Find a symbol, or click one.</div></pre></div></div>
  </div>
@@ -256,6 +260,18 @@ function chart(d,key,id,color,h,short,max,pw,label){const ws=[short,21600,86400]
  return `<div class="spark ck" data-k="${esc(key)}" data-w="${ws.join(',')}" title="click: ${ws.map(x=>x>=3600?x/3600+' h':x/60+' min').join(' → ')}">${area(pts,id,color,h,w,max,pw)}<div class="cap">${label} · last ${tl}</div></div>`}
 document.addEventListener('click',e=>{const c=e.target.closest('.spark.ck');if(!c)return;const ws=c.dataset.w.split(',').map(Number),k=c.dataset.k,cur=ws.includes(WINS[k])?WINS[k]:ws[0];
  WINS[k]=ws[(ws.indexOf(cur)+1)%ws.length];localStorage.setItem('nncq.win',JSON.stringify(WINS));if(last)render(last)});
+/* drag the bottom edge (grip at bottom-right) to resize vertically; double-click resets; sizes persist */
+const RZ=JSON.parse(localStorage.getItem('nncq.rz')||'{}');
+function rzApply(root){(root||document).querySelectorAll('[data-rz]').forEach(el=>{const k=el.dataset.rz,host=el.classList.contains('pane')?el:el.parentElement;
+ if(RZ[k]){el.style.height=RZ[k]+'px';el.style.maxHeight='none'}
+ if(!host.querySelector(`:scope>.rzh[data-for="${k}"]`)){host.style.position='relative';host.insertAdjacentHTML('beforeend',`<div class="rzh" data-for="${k}" title="drag to resize · double-click to reset"></div>`)}})}
+document.addEventListener('pointerdown',e=>{const hd=e.target.closest('.rzh');if(!hd)return;const el=document.querySelector(`[data-rz="${hd.dataset.for}"]`);if(!el)return;
+ e.preventDefault();const y0=e.clientY,h0=el.getBoundingClientRect().height,min=+el.dataset.rzmin||80;hd.setPointerCapture(e.pointerId);hd.classList.add('on');
+ const mv=ev=>{const v=Math.max(min,Math.round(h0+ev.clientY-y0));el.style.height=v+'px';el.style.maxHeight='none';RZ[el.dataset.rz]=v};
+ const up=()=>{hd.removeEventListener('pointermove',mv);hd.removeEventListener('pointerup',up);hd.classList.remove('on');localStorage.setItem('nncq.rz',JSON.stringify(RZ))};
+ hd.addEventListener('pointermove',mv);hd.addEventListener('pointerup',up)});
+document.addEventListener('dblclick',e=>{const hd=e.target.closest('.rzh');if(!hd)return;const el=document.querySelector(`[data-rz="${hd.dataset.for}"]`);
+ if(el){el.style.height='';el.style.maxHeight=''}delete RZ[hd.dataset.for];localStorage.setItem('nncq.rz',JSON.stringify(RZ))});
 function stage(label,f,active,color,extra){const p=Math.max(0,Math.min(1,f||0));
  return `<div class="stage"><div class="lb"><span>${label}</span><span>${extra||''} <b>${p>=.9995?'✓':pct(p)}</b></span></div><div class="track"><div class="fill-b ${active?'active':''}" style="width:${(p*100).toFixed(2)}%;background:${color}"></div></div></div>`}
 const light=(c,act,done,t)=>`<i class="lt ${act?'pulse':''}" title="${t}" style="background:${act||done?c:'var(--t0)'}"></i>`;
@@ -352,7 +368,7 @@ const lastName=s=>String(s||'').split(/::|\./).pop();
 const fullPath=at=>String(at).replace(' / ','/').replace(/:\d+-\d+$/,'');
 const span=at=>{const m=/:(\d+)-(\d+)$/.exec(at);return m?[+m[1],+m[2]]:[1,1]};
 function recent(){const r=JSON.parse(localStorage.getItem('nncq.recent')||'[]');
- $('#recent').innerHTML=ans?'':r.map(q=>`<a data-q="${esc(q)}">${esc(q)}</a>`).join('')}
+ const cq=$('#q').value.trim();$('#recent').innerHTML=r.map(q=>`<a data-q="${esc(q)}" class="${q===cq?'cur':''}">${esc(q)}</a>`).join('')}
 $('#recent').addEventListener('click',e=>{const a=e.target.closest('[data-q]');if(a){$('#q').value=a.dataset.q;doSearch()}});
 $('#q').addEventListener('input',()=>{$('#qx').style.display=$('#q').value||ans?'block':'none'});
 $('#q').addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();home()}});
@@ -367,7 +383,7 @@ $('#vtab').addEventListener('click',e=>{const a=e.target.closest('[data-v]');if(
 
 async function doSearch(){const q=$('#q').value.trim(),qp=$('#qpath').value.trim(),kk=$('#qk').value;if(!q)return home();
  const r=[q,...JSON.parse(localStorage.getItem('nncq.recent')||'[]').filter(x=>x!==q)].slice(0,12);localStorage.setItem('nncq.recent',JSON.stringify(r));
- setHash({q,qp,k:kk==='8'?'':kk,f:''},true);$('#qx').style.display='block';$('#recent').innerHTML='';
+ setHash({q,qp,k:kk==='8'?'':kk,f:''},true);$('#qx').style.display='block';recent();
  $('#answer').innerHTML='<div class="blk" style="padding:8px 12px"><span class="spin"></span> reading the question…</div>';
  const mine={};ans=mine;
  try{const d=await T('ask',{question:q,k:+kk,path:qp});if(ans!==mine)return;d._key=q+'\n'+qp+'\n'+kk;
@@ -396,17 +412,17 @@ function drawAnswer(){const d=ans,ip=d.interpreted||{},pf=d.portfolio||{},hits=d
   return `<div class="frow ${i===fsel?'on':''}" data-f="${i}"><span class="rk" title="best rank #${best}"><i style="width:${Math.max(8,100-(best-1)*100/Math.max(1,hits.length))}%"></i></span>
    <span class="fn">${esc(bn)}</span><span class="fs">${f.hs.map(h=>`<span title="${esc(h.sym)}">${esc(lastName(h.sym))}</span>`).join('')}</span>
    <span class="fd" title="${esc(f.p)}">&lrm;${esc(dir)}</span></div>`}).join('');
- $('#answer').innerHTML=`<details class="blk" open><summary>${stw?`<span class="st ${stw}" title="${esc(pf.strength)}">${stw}</span>`:''}<span class="h">Read as</span>${terms}${ign}
+ $('#answer').innerHTML=`<details class="blk" open><summary><span class="tw" title="roll up / unroll">▾</span>${stw?`<span class="st ${stw}" title="${esc(pf.strength)}">${stw}</span>`:''}<span class="h">Read as</span>${terms}${ign}
    <span class="dim" style="margin-left:auto">${esc((pf.shown||'').replace(/ \(.*\)/,''))} · ${n(d.ms)} ms</span></summary>
-  <div class="bb">${voc?`<span class="lab">code says</span><div>${voc}</div>`:''}
+  <div class="bb" data-rz="readas" data-rzmin="60">${voc?`<span class="lab">code says</span><div>${voc}</div>`:''}
    <span class="lab">found by</span><div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">${fb}</div>
    ${ab?`<span class="lab">areas</span><div class="abar">${ab}</div>`:''}
    ${pf.kinds?`<span class="lab">kinds</span><div>${esc(pf.kinds)}</div>`:''}
    ${links?`<span class="lab">links</span><div class="lnk">${links}</div>`:''}
    ${led?`<span class="lab">leads</span><div class="lnk">${led}</div>`:''}
    ${notes?`<span class="lab">notes</span><div class="lnk">${notes}</div>`:''}</div></details>
-  <details class="blk" open><summary><span class="h">Files</span><span class="dim">${d.files.length} files · ${hits.length} hits · pick one to open it on the right</span></summary>
-   <div class="files">${files||'<div class="empty">nothing found</div>'}</div></details>`}
+  <details class="blk" open><summary><span class="tw" title="roll up / unroll">▾</span><span class="h">Files</span><span class="dim">${d.files.length} files · ${hits.length} hits · pick one to open it on the right</span></summary>
+   <div class="files" data-rz="files" data-rzmin="80">${files||'<div class="empty">nothing found</div>'}</div></details>`}
 $('#answer').addEventListener('click',e=>{
  const v=e.target.closest('[data-ask]');if(v){$('#q').value=v.dataset.ask;doSearch();return}
  const a=e.target.closest('[data-area]');if(a){$('#qpath').value=a.dataset.area;doSearch();return}
@@ -418,7 +434,7 @@ async function openFile(i,ref){const d=ans;fsel=i;setHash({f:i||''});document.qu
  $('#vhits').innerHTML=f.hs.map(h=>{const [a,b]=span(h.at);
   const facts=[['signature',h.sig&&`<span class="sig">${esc(h.sig)}</span>`],['doc',h.doc&&esc(h.doc)],['calls',h.calls&&esc(h.calls)],['callers',h.callers&&esc(h.callers)],
    ['bases',h.bases&&esc(h.bases)],['members',h.members&&esc(h.members)+(h.derived?` · ${h.derived} derived`:'')],['also at',h.also_at&&esc(h.also_at.join(', '))]].filter(x=>x[1]);
-  return `<div class="hit" id="h-${h.ref}"><div class="hh"><span class="dim" style="font-size:11px">#${h.rank}</span><span class="kind">${esc(h.kind)}</span>
+  return `<div class="hit" id="h-${h.ref}"><div class="hh"><span class="hc tw" title="roll up / unroll">▾</span><span class="dim" style="font-size:11px">#${h.rank}</span><span class="kind">${esc(h.kind)}</span>
     <span class="sym" data-sym="${esc(h.sym)}" data-path="${esc(f.p)}" title="open in the symbol view">${short(h.sym)}</span><span class="dim mono">${a}-${b}</span>
     <span class="why">${String(h.why||'').split(' · ').filter(Boolean).map(w=>`<span>${esc(w)}</span>`).join('')}</span></div>
    ${facts.length?`<div class="facts">${facts.map(([l,v])=>`<span class="lab">${l}</span><div>${v}</div>`).join('')}</div>`:''}
@@ -433,6 +449,7 @@ async function openFile(i,ref){const d=ans;fsel=i;setHash({f:i||''});document.qu
    if(m)el.insertAdjacentHTML('afterend',`<div class="more" data-p="${esc(f.p)}" data-a="${m[1]}" data-b="${m[2]}">show the remaining ${+m[2]-+m[1]+1} lines</div>`)}}
  catch(e){$('#vhits').insertAdjacentHTML('afterbegin',`<div class="err" style="padding:6px 12px">${esc(e.message)}</div>`)}}
 $('#vhits').addEventListener('click',async e=>{const s=e.target.closest('.sym[data-sym]');if(s&&s.dataset.sym){openSym(s.dataset.sym,s.dataset.path);return}
+ const hc=e.target.closest('.hit>.hh>.tw');if(hc){hc.closest('.hit').classList.toggle('cl');return}
  const m=e.target.closest('.more');if(!m)return;m.innerHTML='<span class="spin"></span>';
  const d=await T('read_code',{path:m.dataset.p,start:+m.dataset.a,end:+m.dataset.b});const c=numbered(d.code);
  m.previousElementSibling.insertAdjacentHTML('beforeend',codeHtml(c.text,c.start,d.path));m.remove()});
@@ -527,7 +544,7 @@ async function openSym(name,path,again){$('#sq').value=name;setHash({s:name,p:pa
 /* ---------- start ---------- */
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll()});
 document.addEventListener('keydown',e=>{if(e.key==='/'&&!/INPUT|SELECT/.test(document.activeElement.tagName)){e.preventDefault();$('#q').focus()}});
-segs();recent();setView(new URLSearchParams(location.hash.slice(1)).get('v')||'hits');
+document.addEventListener('click',e=>{const s=e.target.closest('summary');if(s&&!e.target.closest('.tw'))e.preventDefault()},true);new MutationObserver(()=>rzApply($('#answer'))).observe($('#answer'),{childList:true});rzApply();segs();recent();setView(new URLSearchParams(location.hash.slice(1)).get('v')||'hits');
 applyHash();
 poll();
 </script></body></html>
