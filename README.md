@@ -1,8 +1,29 @@
+<a href="docs/img/dashboard.png" title="Open the full dashboard screenshot"><img src="docs/img/banner.svg" alt="nncq: ask questions, don't search the code. Click for the full dashboard." width="100%"></a>
+
 # no-net-code-query (nncq)
 
-Local code retrieval for AI coding agents. It combines hybrid search (BM25 plus embeddings plus a reranker), AST-aware chunks, a symbol and call graph, and a engine code↔data cross-reference. Everything is served to agents over MCP. Nothing leaves the machine.
+**Ask questions, don't search the code.** nncq is a local RAG backend for AI coding agents. Over MCP, an agent asks in plain words and gets an intelligent answer across the whole codebase, not a pile of search hits: which few places matter, why, and how they call each other.
+
+- **AST-driven, so it's efficient.** tree-sitter cuts code at function and class boundaries. Every hit is a whole unit with its path, symbol and parent, and only what matters reaches the agent's context.
+- **Call trees both ways, instantly.** Calls and called-by, call traces, blast radius and type hierarchy, without building anything.
+- **Hybrid retrieval.** BM25 keywords, Nemotron embeddings and a cross-encoder reranker, plus a engine code↔data cross-reference.
+- **Not a hosted service, just a repo and a run.** Nothing leaves the machine. The MCP process also starts a local web page for the interactive side, but only when you open it.
 
 > **Status: phase 1 working.** Indexing (tree-sitter + engine DSLs, `.xdata` cross-reference), the GPU embedding worker, hybrid search, the graph views, the MCP server (24 tools) and the CLI are in and tested on a 4,200-file slice of the sample workspace. Not yet: Linux `init.sh`, LAN mode, editor plugins.
+
+## Contents
+
+| Use it | How it works | Run it |
+|---|---|---|
+| [What it gives an agent](#what-it-gives-an-agent) | [Design](#design) | [Quick start (Windows)](#quick-start-windows) |
+| &nbsp;&nbsp;[Search and the AST together](#search-and-the-ast-work-together) | [Why each tool is used](#why-each-tool-is-used) | [Configuration (`.env`)](#configuration-env) |
+| &nbsp;&nbsp;[Symbol graph without a build](#the-symbol-graph-how-does-it-know-that-without-a-build) | [GPU use during indexing](#gpu-use-during-indexing-on-demand-interruptible) | [Requirements and cost](#requirements-and-cost) |
+| &nbsp;&nbsp;[Graph tools](#graph-tools) | [Design choices and why](#design-choices-and-why) | [Local only and air-gapped](#local-only-and-air-gapped) |
+| &nbsp;&nbsp;[Compared with grep](#compared-with-a-grep-or-search-skill) | &nbsp;&nbsp;[Ask, not search](#ask-not-search) | [Tests](#tests) |
+| | &nbsp;&nbsp;[Short first, drill down](#short-first-drill-down-on-demand) | [Limitations](#limitations) |
+| | &nbsp;&nbsp;[MCP client owns the lifetime](#the-mcp-client-owns-the-lifetime) | [Roadmap](#roadmap) |
+| | &nbsp;&nbsp;[Pausing frees the GPU](#pausing-frees-the-gpu-completely) | |
+| | &nbsp;&nbsp;[The web page](#the-web-page-one-screen-status--ask--symbols) | |
 
 ---
 
@@ -40,6 +61,8 @@ Each step returns a few hundred tokens of structured answer instead of thousands
 Usually, to get "who calls this", "what derives from this" or "who includes this header" you need an IDE that has **built** the project: clangd with `compile_commands.json`, IntelliSense with the right configuration, or a SCIP indexer that runs the compiler front-end. For engine that means generated code, millions of lines, and hours of indexing.
 
 nncq gets a useful graph **without compiling anything**, using [tree-sitter](https://tree-sitter.github.io/):
+
+![Symbol graph without a build: file, tree-sitter, facts per file, SQLite joins by name, graph views](docs/img/graph.svg)
 
 1. **Parse every file on its own.** tree-sitter is an incremental, error-tolerant parser, the same one editors use for syntax highlighting. It turns each file into a concrete syntax tree in milliseconds. It needs no headers, macros, include paths or compiler flags. Broken or half-written code still parses, with the bad region marked.
 2. **Walk the tree once and record facts:**
@@ -114,6 +137,8 @@ A grep skill is good when you know the exact string. It falls short when you don
 
 Embedding keeps the GPU close to fully busy. It is built to stay out of your way:
 
+![Indexing tiers: T0 keyword and graph within minutes, T1 card vectors add semantic search, T2 full vectors add the best ranking](docs/img/tiers.svg)
+
 - **Tiers.**
   - **T0 (CPU):** chunks, BM25, symbols and graph. Searchable within minutes.
   - **T1 (GPU):** short "card" vectors (path, symbol, signature), cheap and fast.
@@ -150,23 +175,7 @@ Embedding keeps the GPU close to fully busy. It is built to stay out of your way
 
 ## Design
 
-```
-            ripgrep (+.p4ignore) ──► stat ──► changed files
-                                               │
-      T0 CPU process pool:  tree-sitter / DSL chunker ──► chunks, symbols, edges
-                                               │
- SQLite index.db ◄─────────────────────────────┘
-   files, chunks(tier), fts(bm25), vecs(fp16), symbols, edges, data_* (xdata xref)
-     ▲                         ▲
-     │ T1/T2 GPU worker        │ queries
-     │ (separate process,      │
-     │  pause = exit)          │
-                      MCP server (127.0.0.1:8765/mcp, or stdio)
-                        search: BM25 ∪ dense ─► RRF fuse ─► rerank ─► top k
-                        graph:  symbols / edges by name
-                        data:   xdata types ↔ DDF ↔ C++
-                        watcher ─► path deltas
-```
+![Architecture: workspace, change detection, T0 CPU parsing into SQLite, GPU worker for vectors, Nemotron models, and the nncq server feeding agents and the dashboard, all on one machine](docs/img/architecture.svg)
 
 - **Chunking** (`chunker.py`):
   - Definitions become chunks. A class too big for one chunk is split into a header chunk plus one chunk per member.
@@ -214,6 +223,8 @@ Embedding keeps the GPU close to fully busy. It is built to stay out of your way
 ### Ask, not search
 
 An agent does not need ten code blocks. It needs to know **which few places matter and why**, then read only those. Raw search answered "how does rendering get computed" with five unexplained blocks, 13 KB, and gave no sign that the match was weak. `ask` answers with a map an LLM can collate into a reply. The map is generated deterministically from the index: **no LLM** runs on the server, so it is fast and reproducible, and it never paraphrases the code wrongly.
+
+![How a question is answered: keyword BM25 and meaning search, fused, reranked, then summarised as a map](docs/img/query.svg)
 
 - **How the question was read.** It shows:
   - the words it used, with stems (`rendering → render*`) and identifier parts;
@@ -263,6 +274,14 @@ The page has a visible **❚❚ pause** button for when you need the card yourse
 
 ### The web page: one screen, status → ask → symbols
 
+<a href="docs/img/dashboard.png" title="Full screenshot"><img src="docs/img/dashboard.png" alt="The nncq dashboard: status and GPU cards, the ask bar, an answer with its portfolio and files, the symbol explorer, and the shared viewer" width="100%"></a>
+
+| Status and GPU | An answer: how it was read, then files |
+|---|---|
+| <a href="docs/img/status.png"><img src="docs/img/status.png" alt="Status cards" width="100%"></a> | <a href="docs/img/answer.png"><img src="docs/img/answer.png" alt="Answer portfolio and file list" width="100%"></a> |
+| **Symbol explorer: callers and callees** | **Viewer: facts, then code with matched lines** |
+| <a href="docs/img/symbols.png"><img src="docs/img/symbols.png" alt="Symbol explorer call tree" width="100%"></a> | <a href="docs/img/viewer.png"><img src="docs/img/viewer.png" alt="Hit viewer" width="100%"></a> |
+
 - **One page, no menus.**
   - **Left column:** status, the ask box, the symbol explorer and the console.
   - **Right half:** a viewer shared by search hits and the symbol view.
@@ -281,6 +300,8 @@ The page has a visible **❚❚ pause** button for when you need the card yourse
   - bars for areas.
 
   Numbers that change are drawn, not printed; the console is the only place for raw text. The page is a working surface, not a monitor: tool calls and internals are not shown.
+- **Status at a glance.** The index ring shows how much is searchable by meaning, with a one-word state under it (ready, embedding, updating, stale, paused, …; hover for what to do) and a three-dot legend: full, semantic, text. Charts have light grid lines and axis ticks; click one to cycle its window (minutes → 6 h → 24 h). History is kept as a small per-minute CSV (`cache/db/history.csv`, 7 days), so charts survive restarts.
+- **Fits your screen.** Read-as, Files, the symbol explorer and the console resize by dragging their bottom edge (minimum enforced, double-click resets, sizes remembered). Each block and each hit rolls up from its ▼ triangle only; the rest of the heading is not a click target. Recent questions stay as chips under the ask bar.
 - **Calls both ways.** The symbol explorer switches between **Callers** (who reaches this) and **Callees** (what this reaches), as lazily expanded trees with recursion marked. File outline and type tree are the other views. ◎ or a double-click re-roots on any node.
 - **Jump-to links everywhere:**
   - symbol names in hits open the symbol view;
