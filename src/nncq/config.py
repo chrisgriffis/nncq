@@ -99,6 +99,8 @@ class Settings:
     embed_tier: int         # 0 = no vectors, 1 = card vectors only, 2 = card then full-chunk vectors
     rerank: bool
     text_langs: str         # non-code formats to index besides code + engine DSLs
+    max_response_kb: int    # tool answers above this are trimmed and paged with more(cursor); 0 = no limit
+    cache_minutes: float    # identical tool calls within this window are answered from memory; 0 = off
 
 
 def settings() -> Settings:
@@ -126,6 +128,8 @@ def settings() -> Settings:
         embed_tier=_int("NNCQ_EMBED_TIER", 2),
         rerank=_bool("NNCQ_RERANK", True),
         text_langs=e("NNCQ_TEXT_LANGS", "markdown,cmake,make,dockerfile,proto,batch"),
+        max_response_kb=_int("NNCQ_MAX_RESPONSE_KB", 16),
+        cache_minutes=_float("NNCQ_CACHE_MINUTES", 15.0),
     )
 
 

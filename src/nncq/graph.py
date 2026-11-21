@@ -24,6 +24,8 @@ from dataclasses import dataclass
 from nncq.store import Store
 
 _SEP = re.compile(r"::|\.|\\")
+MACRO = re.compile(r"^[A-Z0-9_]+$")
+UTILITY_CALLS = 1500     # names called from more places than this are plumbing (get, size, assert, log...)
 FUNCS = {"function", "method"}
 NON_TYPES = FUNCS | {"namespace", "module", "field", "variable", "constant", "macro", "property", "module_doc"}
 
@@ -66,6 +68,24 @@ def _defs_named(store: Store, name: str, limit: int = 2000) -> list[Def]:
         "FROM symbols s JOIN files f ON f.id=s.file_id WHERE s.name=? COLLATE NOCASE LIMIT ?", (name, limit))]
 
 
+def _defs_exact(store: Store, name: str, langs: list[str] | None = None, limit: int = 500) -> list[Def]:
+    """Definitions spelled exactly `name` (callee resolution: EndFrame in C# is not endFrame in C++)."""
+    lw, la = _lang_sql(langs or [])
+    return [Def(*r) for r in store.q(
+        "SELECT s.id, s.name, s.qualname, s.kind, s.parent, s.start_line, s.end_line, s.signature, f.path, s.file_id "
+        "FROM symbols s JOIN files f ON f.id=s.file_id WHERE s.name=? COLLATE NOCASE AND s.name=?" + lw + " LIMIT ?",
+        (name, name, *la, limit))]
+
+
+_TEST_PATH = re.compile(r"(^|/)(unit_?)?tests?(/|$)|(^|/)tests?[^/]*$|[_.]tests?\.[a-z]+$|(^|/)mocks?(/|$)", re.I)
+_TEST_NAME = re.compile(r"^(TEST(_[A-Z]+)?|[A-Z_]*MOCK[A-Z_]*|test_\w+)$")
+
+
+def is_test(path: str, caller: str = "") -> bool:
+    """Test or mock code: listed after production callers, which are what 'how does this get called' means."""
+    return bool(_TEST_PATH.search(path or "") or _TEST_NAME.match(short(caller or "")))
+
+
 def find_defs(store: Store, name: str, path: str = "", kinds: set[str] | None = None) -> list[Def]:
     """Definitions matching a short or qualified name (Foo, app::Foo::bar, Entity.LayerData), best first."""
     s = short(name)
@@ -96,55 +116,144 @@ def _not_found(store: Store, name: str) -> dict:
     return {"error": f"no definition named {name!r}", "did_you_mean": sug}
 
 
+_FAMILIES = [{"c", "cpp", "objc", "cuda"}, {"javascript", "typescript", "tsx"}]
+
+
+def lang_family(store: Store, file_id: int | None) -> list[str]:
+    """Languages whose calls can reach a definition in this file: a C++ `render` is not called from Python.
+    [] = no restriction (unknown file)."""
+    if file_id is None:
+        return []
+    r = store.q("SELECT lang FROM files WHERE id=?", (file_id,))
+    lang = r[0][0] if r else None
+    if not lang:
+        return []
+    return sorted(next((f for f in _FAMILIES if lang in f), {lang}))
+
+
+def _lang_sql(langs: list[str], col: str = "f.lang") -> tuple[str, tuple]:
+    return (f" AND {col} IN ({','.join('?' * len(langs))})", tuple(langs)) if langs else ("", ())
+
+
 def _chunk_text(store: Store, file_id: int, line: int) -> str:
     r = store.q("SELECT text FROM chunks WHERE file_id=? AND start_line<=? AND end_line>=? LIMIT 1",
                 (file_id, line, line))
     return r[0][0] if r else ""
 
 
+def _line_text(store: Store, file_id: int, line: int) -> str:
+    r = store.q("SELECT text, start_line FROM chunks WHERE file_id=? AND start_line<=? AND end_line>=? LIMIT 1",
+                (file_id, line, line))
+    if not r:
+        return ""
+    lines = r[0][0].split("\n")
+    i = line - r[0][1]
+    return lines[i] if 0 <= i < len(lines) else ""
+
+
+def own_call(store: Store, file_id: int, line: int, name: str, cls: str = "") -> bool | None:
+    """Is `name(...)` on this line a call on the caller's own class (plain, this->, Base::, or a receiver named
+    after the class: gameRenderer->, g_gameRenderer.)? False: only on other objects (m_pool->name());
+    None: the call is not on this line."""
+    found = None
+    named = cls.lower()
+    for m in re.finditer(rf"\b{re.escape(name)}\s*(<[^<>()]*>)?\s*\(", _line_text(store, file_id, line)):
+        pre = m.string[:m.start()].rstrip()
+        if not (pre.endswith("->") or (pre.endswith(".") and not pre.endswith(".."))):
+            return True
+        if re.search(r"\bthis\s*(->|\.)$", pre):
+            return True
+        recv = re.search(r"(\w+)\s*(->|\.)$", pre)
+        if named and recv and re.sub(r"^(m_|s_|g_|p_)", "", recv.group(1).lower()) == named:
+            return True
+        found = False
+    return found
+
+
 # ------------------------------------------------------------------ edges by name
 
-def callers(store: Store, target: Def | None, name: str, limit: int, ambiguous: bool) -> tuple[list[dict], int, int]:
-    """Call sites of `name`, grouped by calling symbol. Ranked: same class > mentions class > by name."""
+def callers(store: Store, target: Def | None, name: str, limit: int, ambiguous: bool,
+            langs: list[str] | None = None, path: str = "") -> tuple[list[dict], int, int]:
+    """Call sites of `name`, grouped by calling symbol. Ranked: same class > mentions class > by name.
+    langs: caller languages (default: the target's language family). path: substring filter on caller files."""
     s = short(name)
-    total, files = store.q("SELECT COUNT(*), COUNT(DISTINCT file_id) FROM edges WHERE dst=? AND kind='call'", (s,))[0]
-    rows = store.q("SELECT e.src, e.file_id, f.path, MIN(e.line), COUNT(*) FROM edges e JOIN files f ON f.id=e.file_id "
-                   "WHERE e.dst=? AND e.kind='call' GROUP BY e.src, e.file_id ORDER BY COUNT(*) DESC LIMIT 400", (s,))
-    out = []
+    if langs is None:
+        langs = lang_family(store, target.file_id) if target else []
+    lw, la = _lang_sql(langs)
+    if path:
+        lw += " AND f.path LIKE ?"
+        la += (f"%{path.replace(chr(92), '/')}%",)
+    base = "FROM edges e JOIN files f ON f.id=e.file_id WHERE e.dst=? AND e.kind='call'" + lw
+    total, files = store.q(f"SELECT COUNT(*), COUNT(DISTINCT e.file_id) {base}", (s, *la))[0]
+    grp = f"SELECT e.src, e.file_id, f.path, MIN(e.line), COUNT(*) {base}"
     cls = short(target.parent) if target and target.parent else ""
-    for i, (src, fid, path, line, n) in enumerate(rows):
+    rows = []
+    if cls and ambiguous:      # same-class callers first, whatever their call counts (render() has thousands)
+        rows = store.q(f"{grp} AND e.src LIKE ? GROUP BY e.src, e.file_id LIMIT 200", (s, *la, f"%{cls}%"))
+    seen = {(r[0], r[1]) for r in rows}
+    rows += [r for r in store.q(f"{grp} GROUP BY e.src, e.file_id ORDER BY COUNT(*) DESC LIMIT 400", (s, *la))
+             if (r[0], r[1]) not in seen]
+    out = []
+    want = norm(target.parent) if target and target.parent else ""
+    # classes with their own `name`: their unqualified calls go to that one, not to the target
+    owners = ({_parent_short(d.qualname) for d in _defs_exact(store, s, langs, 2000)} - {"", cls}
+              if cls and ambiguous else set())
+    for i, (src, fid, path_, line, n) in enumerate(rows):
+        if owners and _parent_short(src) in owners:
+            continue
         conf = "by name"
-        if target and cls and ambiguous and i < 200:
+        if target and cls and ambiguous:
             src_parent = norm(src).rsplit(".", 1)[0] if "." in norm(src) else ""
-            if src_parent and src_parent == norm(target.parent):
-                conf = "same class"
-            elif re.search(rf"\b{re.escape(cls)}\b", _chunk_text(store, fid, line)):
+            if src_parent and (src_parent == want or src_parent.endswith("." + want) or want.endswith("." + src_parent)):
+                # same class, unless the call is on another object (m_pool->update())
+                conf = "by name" if own_call(store, fid, line, s, cls) is False else "same class"
+            elif i < 200 and re.search(rf"\b{re.escape(cls)}\b", _chunk_text(store, fid, line)):
                 conf = "mentions " + cls
         elif not ambiguous:
             conf = "unique name"
-        out.append({"caller": src or "(file level)", "at": f"{path}:{line}", "calls": n, "match": conf})
+        out.append({"caller": src or "(file level)", "at": f"{path_}:{line}", "calls": n, "match": conf,
+                    "test": is_test(path_, src)})
     rank = lambda c: 0 if c["match"] in ("same class", "unique name") else 1 if c["match"].startswith("mentions") else 2
-    out.sort(key=lambda c: (rank(c), -c["calls"]))
+    out.sort(key=lambda c: (c["test"], rank(c), -c["calls"]))
     return out[:limit], total, files
 
 
-def callees(store: Store, quals: list[str], limit: int) -> list[str]:
+def callees(store: Store, quals: list[str], limit: int, langs: list[str] | None = None) -> list[str]:
+    """Calls made by `quals`, resolved in the caller's language family; a shared name defined in the caller's
+    own class resolves to that one. Macros and plumbing (called from > UTILITY_CALLS places) are one line."""
     if not quals:
         return []
     ph = ",".join("?" * len(quals))
-    rows = store.q(f"SELECT dst, COUNT(*), MIN(line) FROM edges WHERE kind='call' AND src IN ({ph}) "
-                   f"GROUP BY dst ORDER BY MIN(line) LIMIT ?", (*quals, limit))
-    out = []
-    for dst, n, line in rows:
-        ds = [d for d in _defs_named(store, dst, 50) if d.name == dst]
-        kinds = {norm(d.qualname) for d in ds}
+    rows = store.q(f"SELECT dst, COUNT(*), MIN(line), GROUP_CONCAT(file_id || ':' || line) FROM edges "
+                   f"WHERE kind='call' AND src IN ({ph}) GROUP BY dst ORDER BY MIN(line)", tuple(quals))
+    own = {_parent_short(q) for q in quals} - {""}
+    out, minor = [], []
+    for dst, n, line, sites in rows:
         tag = f" x{n}" if n > 1 else ""
-        if len(kinds) == 1:
-            out.append(f"L{line} {dst}{tag} -> {ds[0].qualname} {ds[0].loc()}")
-        elif kinds:
-            out.append(f"L{line} {dst}{tag} -> {len(kinds)} definitions (ambiguous)")
+        if MACRO.match(dst) or len(dst) < 3 or _call_count(store, dst) > UTILITY_CALLS:
+            minor.append(dst + tag)
+            continue
+        if len(out) >= limit:
+            continue
+        ds = _defs_exact(store, dst, langs)
+        groups = {norm(d.qualname): d for d in ds}
+        mine = [d for d in groups.values() if _parent_short(d.qualname) in own]
+        if mine and len(groups) > 1 and not any(
+                own_call(store, int(f), int(ln), dst, _parent_short(mine[0].qualname)) is not False
+                for f, ln in (x.split(":") for x in sites.split(",")[:8])):
+            mine = []       # every call is on another object: m_pool->endFrame() is not our endFrame
+        if len(groups) == 1:
+            d = next(iter(groups.values()))
+            out.append(f"L{line} {dst}{tag} -> {d.qualname} {d.loc()}")
+        elif mine:
+            out.append(f"L{line} {dst}{tag} -> {mine[0].qualname} {mine[0].loc()}  (same class; {len(groups)} defs)")
+        elif groups:
+            out.append(f"L{line} {dst}{tag} -> {len(groups)} definitions (ambiguous)")
         else:
             out.append(f"L{line} {dst}{tag} (not in index: library / macro / generated)")
+    if minor:
+        out.append(f"+ {len(minor)} macros/plumbing, not resolved: {', '.join(minor[:40])}"
+                   + (" ..." if len(minor) > 40 else ""))
     return out
 
 
@@ -258,9 +367,9 @@ def symbol_context(store: Store, name: str, path: str = "", limit: int = 12) -> 
         if total:
             out["callers"] = [f"{c['caller']}  {c['at']}" + (f" x{c['calls']}" if c["calls"] > 1 else "")
                               + ("" if c["match"] in ("unique name", "by name") and not ambiguous
-                                 else f"  [{c['match']}]") for c in cs]
+                                 else f"  [{c['match']}]") + ("  (test)" if c["test"] else "") for c in cs]
             out["call_sites_total"] = f"{total} calls in {files} files"
-        ce = callees(store, quals, limit * 3)
+        ce = callees(store, quals, limit * 3, lang_family(store, p.file_id))
         if ce:
             out["calls"] = ce
         if p.parent:
@@ -292,7 +401,7 @@ def calls(store: Store, name: str, path: str = "", limit: int = 200) -> dict:
     defs, others = _pick_func(store, name, path)
     if not defs:
         return _not_found(store, name)
-    rows = callees(store, sorted({d.qualname for d in defs}), limit)
+    rows = callees(store, sorted({d.qualname for d in defs}), limit, lang_family(store, defs[0].file_id))
     out = {"function": defs[0].qualname, "defined_at": [d.loc() for d in defs[:4]], "calls": rows,
            "count": len(rows), "note": "static, name-based; calls through pointers/delegates/virtual "
                                        "dispatch show the name called, not the runtime target"}
@@ -301,20 +410,25 @@ def calls(store: Store, name: str, path: str = "", limit: int = 200) -> dict:
     return out
 
 
-def called_by(store: Store, name: str, path: str = "", limit: int = 200) -> dict:
-    """Flat 'Calls To' table: every function that calls `name`, one row per caller and file, best match first."""
+def called_by(store: Store, name: str, path: str = "", limit: int = 200, caller_path: str = "") -> dict:
+    """Flat 'Calls To' table: every function that calls `name`, one row per caller and file, best match first.
+    path picks the definition; caller_path keeps only callers in matching files. Callers are limited to the
+    definition's language family (C/C++ together, JS/TS together)."""
     defs, others = _pick_func(store, name, path)
     target = defs[0] if defs else None
-    rows, total, files = callers(store, target, name, limit, bool(others))
+    ndefs = _ambiguity(store)(short(name))
+    rows, total, files = callers(store, target, name, limit, bool(others) or ndefs > 1, path=caller_path)
     out = {"function": target.qualname if target else name,
            "defined_at": [d.loc() for d in defs[:4]] or "(no definition indexed: library, macro or generated)",
            "callers": [f"{c['caller']}  {c['at']}" + (f"  x{c['calls']}" if c["calls"] > 1 else "")
-                       + ("" if c["match"] in ("unique name", "by name") and not others else f"  [{c['match']}]")
+                       + ("" if c["match"] == "unique name" else f"  [{c['match']}]")
+                       + ("  (test)" if c["test"] else "")
                        for c in rows],
            "shown": len(rows), "call_sites_total": total, "files_total": files}
-    if others:
-        out["note"] = (f"{len(others) + 1} functions share the name {short(name)!r}; rows are ranked "
+    if others or ndefs > 1:
+        out["note"] = (f"{max(ndefs, len(others) + 1)} functions share the name {short(name)!r}; rows are ranked "
                        "[same class] > [mentions <class>] > [by name]. Lower ranks may call a different one.")
+    if others:
         out["other_definitions_with_this_name"] = others
     return out
 
@@ -325,53 +439,98 @@ def call_tree(store: Store, name: str, direction: str = "in", depth: int = 3, li
     root = rows[0].qualname if rows else name
     lines = [f"{root}" + (f"  {rows[0].loc()}" if rows else "  (no definition indexed)")]
     seen = {short(root)}
-    budget = [200]
+    budget = [120]
+    langs = lang_family(store, rows[0].file_id) if rows else []
+    lw, la = _lang_sql(langs)
+    skipped = Counter()
 
-    def walk_in(n: str, d: int, ind: str):
-        for c in callers(store, None, n, limit, False)[0]:
+    amb = _ambiguity(store)
+
+    def walk_in(n: str, d: int, ind: str, tgt: Def | None):
+        # tgt: the definition reached; for shared names its own class's callers come first
+        for c in callers(store, tgt, n, limit, amb(n) > 1, langs)[0]:
             if budget[0] <= 0:
                 return
             budget[0] -= 1
             s = short(c["caller"])
             rep = s in seen
             lines.append(f"{ind}<- {c['caller']}  {c['at']}" + (f" x{c['calls']}" if c["calls"] > 1 else "")
-                         + ("  (seen)" if rep else ""))
+                         + ("  [same class]" if c["match"] == "same class" else "")
+                         + ("  (test)" if c["test"] else "") + ("  (seen)" if rep else ""))
             if not rep and d + 1 < depth and c["caller"] != "(file level)":
                 seen.add(s)
-                walk_in(s, d + 1, ind + "   ")
+                p = c["at"].rsplit(":", 1)[0]
+                nd = [x for x in find_defs(store, c["caller"], kinds=FUNCS) if x.path == p]
+                walk_in(s, d + 1, ind + "   ", nd[0] if nd else None)
 
     def walk_out(quals: list[str], d: int, ind: str):
         ph = ",".join("?" * len(quals))
+        shown = 0
         for dst, n, line, fpath in store.q(
                 f"SELECT e.dst, COUNT(*), MIN(e.line), f.path FROM edges e JOIN files f ON f.id=e.file_id "
-                f"WHERE e.kind='call' AND e.src IN ({ph}) GROUP BY e.dst ORDER BY MIN(e.line) LIMIT ?", (*quals, limit)):
-            if budget[0] <= 0:
+                f"WHERE e.kind='call' AND e.src IN ({ph}) GROUP BY e.dst ORDER BY MIN(e.line)", quals):
+            if budget[0] <= 0 or shown >= limit:
                 return
+            if MACRO.match(dst) or len(dst) < 3:
+                skipped["macros"] += 1
+                continue
+            if _call_count(store, dst) > UTILITY_CALLS:
+                skipped["plumbing"] += 1
+                continue
             budget[0] -= 1
-            ds = [x for x in _defs_named(store, dst, 50) if x.name == dst and x.kind in FUNCS]
-            where = ds[0].loc() if len({norm(x.qualname) for x in ds}) == 1 else \
-                f"{len(ds)} defs" if ds else "not indexed"
+            shown += 1
+            ds = [x for x in _defs_exact(store, dst, langs) if x.kind in FUNCS]
+            nq = len({norm(x.qualname) for x in ds})
+            where = ds[0].loc() if nq == 1 else f"{nq} defs, not expanded" if ds else "not indexed"
             rep = dst in seen
             lines.append(f"{ind}-> {dst}  ({where}; called {fpath}:{line})" + ("  (seen)" if rep else ""))
-            if ds and not rep and d + 1 < depth:
+            if nq == 1 and not rep and d + 1 < depth:
                 seen.add(dst)
-                walk_out(sorted({x.qualname for x in ds})[:5], d + 1, ind + "   ")
+                walk_out(sorted({x.qualname for x in ds}), d + 1, ind + "   ")
 
     if direction.startswith("in"):
-        walk_in(short(root), 0, "  ")
+        walk_in(short(root), 0, "  ", rows[0] if rows else None)
     else:
         quals = sorted({r.qualname for r in rows if norm(r.qualname) == norm(root)}) or [root]
         walk_out(quals, 0, "  ")
-    note = "name-based: callers of any definition with this name" if direction.startswith("in") else \
-        "name-based: callee names resolved to definitions when unique"
-    return {"tree": "\n".join(lines), "note": note, "truncated": budget[0] <= 0}
+    note = ("name-based: callers of any definition with this name; the definition's own class first, "
+            "test code last") if direction.startswith("in") else \
+        ("name-based: callee names resolved to definitions when unique; ambiguous names are listed, not expanded"
+         + (f"; hidden: {', '.join(f'{v} {k}' for k, v in skipped.items())} (macros; plumbing called from "
+            f">{UTILITY_CALLS} places)" if skipped else ""))
+    out = {"tree": "\n".join(lines), "note": note}
+    if langs:
+        out["languages"] = ", ".join(langs)
+    if budget[0] <= 0:
+        out["cut"] = "node budget reached: lower depth or start from a deeper function"
+    return out
 
 
-def _bfs_callers(store: Store, start: str, max_depth: int, cap: int = 6000):
+_counts: dict[tuple[str, str], int] = {}
+
+
+def _call_count(store: Store, name: str) -> int:
+    k = (str(store.path), name)
+    if k not in _counts:
+        if len(_counts) > 50000:
+            _counts.clear()
+        _counts[k] = store.q("SELECT COUNT(*) FROM edges WHERE dst=? AND kind='call'", (name,))[0][0]
+    return _counts[k]
+
+
+def _parent_short(q: str) -> str:
+    p = _SEP.split(q or "")
+    return p[-2] if len(p) >= 2 else ""
+
+
+def _bfs_callers(store: Store, start: str, max_depth: int, cap: int = 6000, langs: list[str] | None = None,
+                 cls: str = ""):
     """Backward BFS over call edges from `start` (short name).
     dist[s]  hops from s down to start
     via[s]   [(callee short, caller qual, call site)] on shortest routes
     roots    expanded names nothing in the index calls (entry points: ticks, handlers, bindings, main)"""
+    lw, la = _lang_sql(langs or [])
+    hint = {start: cls}          # class of the definition we reached a name through: its own class calls it first
     dist = {start: 0}
     via: dict[str, list[tuple[str, str, str]]] = {}
     roots: set[str] = set()
@@ -379,8 +538,10 @@ def _bfs_callers(store: Store, start: str, max_depth: int, cap: int = 6000):
     for d in range(1, max_depth + 1):
         nxt = []
         for n in frontier:
+            h = hint.get(n, "")
             rows = store.q("SELECT e.src, f.path, MIN(e.line) FROM edges e JOIN files f ON f.id=e.file_id "
-                           "WHERE e.dst=? AND e.kind='call' AND e.src!='' GROUP BY e.src LIMIT 300", (n,))
+                           "WHERE e.dst=? AND e.kind='call' AND e.src!=''" + lw + " GROUP BY e.src "
+                           "ORDER BY (e.src LIKE ?) DESC LIMIT 300", (n, *la, f"%{h}%" if h else ""))
             if not rows and n != start:
                 roots.add(n)
             for src_q, path, line in rows:
@@ -388,6 +549,7 @@ def _bfs_callers(store: Store, start: str, max_depth: int, cap: int = 6000):
                 if s not in dist:
                     dist[s] = d
                     nxt.append(s)
+                    hint[s] = _parent_short(src_q)
                 if dist[s] == d and len(via.setdefault(s, [])) < 8:
                     via[s].append((n, src_q, f"{path}:{line}"))
         frontier = nxt
@@ -396,7 +558,17 @@ def _bfs_callers(store: Store, start: str, max_depth: int, cap: int = 6000):
     return dist, via, roots, set(frontier)
 
 
-def _routes(via, frm: str, to: str, k: int, amb=None) -> list[list[tuple[str, str, str]]]:
+def _doubtful(route, amb, leaf_q: str) -> int:
+    """Hops that call a shared name from outside the callee's class (may be a different function)."""
+    n = 0
+    for i, (q, _, callee) in enumerate(route):
+        callee_q = route[i + 1][0] if i + 1 < len(route) else leaf_q
+        if amb(callee) > 1 and not (_parent_short(q) and _parent_short(q) == _parent_short(callee_q)):
+            n += 1
+    return n
+
+
+def _routes(via, frm: str, to: str, k: int, amb=None, leaf_q: str = "") -> list[list[tuple[str, str, str]]]:
     """Up to k shortest routes frm -> ... -> to as [(caller qual, call site, callee short)].
     With amb (name -> definition count), routes through unambiguous names come first."""
     out: list = []
@@ -412,17 +584,21 @@ def _routes(via, frm: str, to: str, k: int, amb=None) -> list[list[tuple[str, st
             go(nxt, acc + [(q, at, nxt)])
     go(frm, [])
     if amb is not None:
-        out.sort(key=lambda r: sum(amb(c) > 1 for _, _, c in r))
+        out.sort(key=lambda r: _doubtful(r, amb, leaf_q))
     return out[:k]
 
 
-def _stack(route, leaf: str, leaf_loc: str, cut: bool = False, amb=None) -> list[str]:
+def _stack(route, leaf: str, leaf_loc: str, cut: bool = False, amb=None, leaf_q: str = "") -> list[str]:
     """Debugger-style pseudo stack: #0 = innermost callee, last frame = outermost caller.
     A frame tagged [name: N defs] calls a name with N definitions, so that link may be a different function."""
     frames = [f"#0  {leaf}  {leaf_loc}"]
     for i, (q, at, callee) in enumerate(reversed(route), 1):
         n = amb(callee) if amb else 1
-        frames.append(f"#{i}  {q}  {at}" + (f"  [calls {callee}: {n} defs]" if n > 1 else ""))
+        j = len(route) - i
+        callee_q = route[j + 1][0] if j + 1 < len(route) else leaf_q
+        same = n > 1 and _parent_short(q) and _parent_short(q) == _parent_short(callee_q)
+        frames.append(f"#{i}  {q}  {at}" + (f"  [calls {callee}: {n} defs, same class]" if same
+                                            else f"  [calls {callee}: {n} defs]" if n > 1 else ""))
     if cut:
         frames.append("    ... (more callers above; raise max_depth)")
     return frames
@@ -433,8 +609,8 @@ def _ambiguity(store: Store):
 
     def amb(name: str) -> int:
         if name not in cache:
-            cache[name] = store.q("SELECT COUNT(DISTINCT qualname) FROM symbols WHERE name=? AND kind IN "
-                                  "('function','method')", (name,))[0][0]
+            cache[name] = store.q("SELECT COUNT(DISTINCT qualname) FROM symbols WHERE name=? COLLATE NOCASE AND name=? "
+                                  "AND kind IN ('function','method')", (name, name))[0][0]
         return cache[name]
     return amb
 
@@ -459,19 +635,41 @@ def call_trace(store: Store, to: str, frm: str = "", max_depth: int = 8, k: int 
     """
     st = short(to)
     note = "static, name-based: each frame calls the frame below it by name; no runtime/type info"
-    dist, via, roots, frontier = _bfs_callers(store, st, max_depth)
+    td = find_defs(store, to, kinds=FUNCS)
+    langs = lang_family(store, td[0].file_id) if td else []
+    tq = td[0].qualname if td else to
+    dist, via, roots, frontier = _bfs_callers(store, st, max_depth, langs=langs, cls=_parent_short(tq))
     amb = _ambiguity(store)
     if not frm:
         loc = _loc(store, to)
-        ends = sorted(roots, key=lambda r: (dist[r], r))
-        cut = sorted(frontier - roots, key=lambda r: r)
+        # soft entry points: shared names whose only callers are other classes' functions of that name
+        # (jobs, callbacks, virtuals): the static trail goes cold there, the stack above is probably wrong
+        callers_of: dict[str, list[str]] = {}
+        for lst in via.values():
+            for callee, q, _ in lst:
+                callers_of.setdefault(callee, []).append(q)
+        soft = set()
+        for r in sorted((r for r in dist if 0 < dist[r] <= 4 and r not in roots), key=lambda r: (dist[r], r))[:300]:
+            own = _parent_short(via[r][0][1]) if via.get(r) else ""
+            if own and amb(r) > 1 and not any(_parent_short(q) == own for q in callers_of.get(r, [])):
+                soft.add(r)
+        best = {}                       # entry point -> its most certain route (fewest doubtful hops)
+        for r in sorted(roots | frontier | soft, key=lambda r: (dist[r], r))[:150]:
+            rs = _routes(via, r, st, 1, amb, tq)
+            if rs:
+                best[r] = rs[0]
+        # production stacks first: a trail through test/mock code answers "who tests this", not "how does it run"
+        rank = lambda r: (any(is_test(at.rsplit(":", 1)[0], q) for q, at, _ in best[r]),
+                          _doubtful(best[r], amb, tq), r not in roots, dist[r], r)
+        ends = sorted((r for r in roots if r in best), key=rank)
         stacks = []
-        for r in ends[:k]:
-            for route in _routes(via, r, st, 1, amb):
-                stacks.append(_stack(route, st, loc, amb=amb))
-        for r in cut[:max(0, k - len(stacks))]:
-            for route in _routes(via, r, st, 1, amb):
-                stacks.append(_stack(route, st, loc, cut=True, amb=amb))
+        for r in sorted(best, key=rank)[:k]:
+            fr = _stack(best[r], st, loc, cut=r in frontier and r not in roots and r not in soft, amb=amb, leaf_q=tq)
+            if r in soft:
+                fr.append(f"    ... {r} is called only by same-named functions of other classes "
+                          f"({len(set(callers_of.get(r, [])))}): likely reached via a job, callback or virtual")
+            stacks.append(fr)
+        ends += sorted(roots - set(best), key=lambda r: (dist[r], r))
         out = {"target": to, "defined_at": loc, "stacks": stacks,
                "entry_points_total": len(roots), "callers_explored": len(dist) - 1, "note": note}
         if roots:
@@ -484,11 +682,15 @@ def call_trace(store: Store, to: str, frm: str = "", max_depth: int = 8, k: int 
     sf = short(frm)
     locs = {sf: _loc(store, frm), st: _loc(store, to)}
     out: dict = {"from": frm, "to": to, "note": note}
-    dist_f, via_f, _, _ = _bfs_callers(store, sf, max_depth)
+    fd = find_defs(store, frm, kinds=FUNCS)
+    fq = fd[0].qualname if fd else frm
+    dist_f, via_f, _, _ = _bfs_callers(store, sf, max_depth, langs=langs, cls=_parent_short(fq))
     if sf in dist and sf != st:
-        out["from_reaches_to"] = [_stack(r, st, locs[st], amb=amb) for r in _routes(via, sf, st, k, amb)]
+        out["from_reaches_to"] = [_stack(r, st, locs[st], amb=amb, leaf_q=tq)
+                                  for r in _routes(via, sf, st, k, amb, tq)]
     if st in dist_f and sf != st:
-        out["to_reaches_from"] = [_stack(r, sf, locs[sf], amb=amb) for r in _routes(via_f, st, sf, k, amb)]
+        out["to_reaches_from"] = [_stack(r, sf, locs[sf], amb=amb, leaf_q=fq)
+                                  for r in _routes(via_f, st, sf, k, amb, fq)]
     common = sorted((dist_f[s] + dist[s], max(dist_f[s], dist[s]), s) for s in dist_f.keys() & dist.keys()
                     if s not in (sf, st))
     if common:
@@ -497,12 +699,13 @@ def call_trace(store: Store, to: str, frm: str = "", max_depth: int = 8, k: int 
             if len(shared) >= k:
                 break
             # same short name is not enough: the top frame must be the same function in the same file
-            ra, rb = _routes(via_f, s, sf, 8, amb), _routes(via, s, st, 8, amb)
+            ra, rb = _routes(via_f, s, sf, 8, amb, fq), _routes(via, s, st, 8, amb, tq)
             pair = next(((x, y) for x in ra for y in rb
                          if x[0][0] == y[0][0] and x[0][1].rsplit(":", 1)[0] == y[0][1].rsplit(":", 1)[0]), None)
             if pair:
-                shared.append({"caller": pair[0][0][0], "stack_to_from": _stack(pair[0], sf, locs[sf], amb=amb),
-                               "stack_to_to": _stack(pair[1], st, locs[st], amb=amb)})
+                shared.append({"caller": pair[0][0][0],
+                               "stack_to_from": _stack(pair[0], sf, locs[sf], amb=amb, leaf_q=fq),
+                               "stack_to_to": _stack(pair[1], st, locs[st], amb=amb, leaf_q=tq)})
         if shared:
             out["shared_callers"] = shared
     if not any(x in out for x in ("from_reaches_to", "to_reaches_from", "shared_callers")):
@@ -639,7 +842,8 @@ def hotspots(store: Store, what: str = "called", under: str = "", k: int = 30) -
                 f"GROUP BY e.dst ORDER BY COUNT(*) DESC LIMIT ?", (*fargs, k * 2)):
             if len(dst) < 3:
                 continue
-            nd = store.q("SELECT COUNT(DISTINCT qualname) FROM symbols WHERE name=?", (dst,))[0][0]
+            nd = store.q("SELECT COUNT(DISTINCT qualname) FROM symbols WHERE name=? COLLATE NOCASE AND name=?",
+                         (dst, dst))[0][0]
             rows.append(f"{dst}  {n} {'calls' if ek == 'call' else 'subtypes'} in {nf} files"
                         + (f"  ({nd} definitions share this name)" if nd > 1 else ""))
     elif what == "fanout":

@@ -19,6 +19,7 @@ Read-only on the workspace: nothing here writes outside cache/.
 from __future__ import annotations
 
 import collections
+import contextvars
 import io
 import json
 import os
@@ -34,7 +35,7 @@ from pathlib import Path
 import anyio
 from mcp.server.fastmcp import FastMCP
 
-from nncq import ask as asker, config, datarefs, graph, health, indexer, repos, search, sysutil, worker
+from nncq import answers, ask as asker, config, datarefs, graph, health, indexer, repos, search, sysutil, worker
 from nncq.store import Store
 
 INSTRUCTIONS = """Local code index (nothing leaves this machine). Start with ask for any question: it returns a short,
@@ -44,7 +45,9 @@ use find_symbol / file_outline / read_code to zoom in; the graph tools (symbol_c
 call_tree, call_trace, impact, type_hierarchy, file_context, hotspots) answer structural questions without
 reading files. Graph links are by name (static, no build): ambiguity is reported. engine: data_for_code,
 code_for_data, asset_info, top_assets. If a result has index_state, part of the index is still catching up:
-it says what, where and since when; keyword and graph results are still valid."""
+it says what, where and since when; keyword and graph results are still valid. Long answers are trimmed to
+stay readable: `paged` names each cut field and the more(cursor) call that returns the rest. Repeating a
+call is free (answers are cached until the index changes)."""
 
 _local = threading.local()
 _jobs: dict[str, dict] = {}
@@ -57,7 +60,8 @@ _info = {"mode": "stdio", "started": time.time(), "mcp_url": "", "dashboard": ""
 _events: deque = deque(maxlen=300)        # (time, message) for the dashboard
 _calls: deque = deque(maxlen=60)
 _tool_stats: dict[str, dict] = {}
-_ARG_KEYS = ("question", "query", "refs", "name", "to", "pattern", "path", "asset", "type_name", "what")
+_ARG_KEYS = ("question", "query", "refs", "name", "to", "pattern", "path", "asset", "type_name", "what", "cursor")
+_from_web = contextvars.ContextVar("nncq_from_web", default=False)   # dashboard: full answers, no paging
 
 
 def _log(msg: str) -> None:
@@ -94,12 +98,15 @@ def _store(r: repos.Repo) -> Store:
 
 
 async def _run(fn, *a, **k):
+    """Every tool call: answer cache, worker thread, call log/stats, response budget (answers.py)."""
     caller = sys._getframe(1)              # the tool coroutine: its name and arguments feed the dashboard
-    tool, args = caller.f_code.co_name, caller.f_locals
+    tool = caller.f_code.co_name
+    args = {n: v for n, v in caller.f_locals.items() if isinstance(v, (str, int, float, bool))}
     arg = next((str(args[x]) for x in _ARG_KEYS if args.get(x)), "")
     if args.get("repo"):
         arg += f"  (repo {args['repo']})"
     t = time.time()
+    ck = answers.key(tool, args)
 
     def call():
         try:
@@ -109,7 +116,15 @@ async def _run(fn, *a, **k):
         except Exception as e:
             traceback.print_exc()
             return {"error": f"{type(e).__name__}: {e}"}
-    out = await anyio.to_thread.run_sync(call)
+    out = answers.get(ck, args)
+    if out is None:
+        out = await anyio.to_thread.run_sync(call)
+        answers.put(ck, args, out)
+    else:
+        arg += "  (cached)"
+    out = answers.public(out)
+    if not _from_web.get():
+        out = answers.fit(out, tool)
     ms = round((time.time() - t) * 1000)
     err = isinstance(out, dict) and "error" in out
     s = _tool_stats.setdefault(tool, {"n": 0, "errors": 0, "ms_total": 0, "last_ms": 0, "last_at": 0})
@@ -154,6 +169,7 @@ def _job(r: repos.Repo, kind: str, fn) -> dict:
             traceback.print_exc()
             j["state"] = f"failed: {type(e).__name__}: {e}"
         j["finished"] = time.time()
+        answers.bump()
     threading.Thread(target=go, daemon=True, name=f"job-{r.name}").start()
     return {"started": True, "job": kind, "repo": r.name, "progress": "call index_status"}
 
@@ -251,6 +267,7 @@ class _Watch:
                 finally:
                     st.close()
                 if res.get("changed") or res.get("removed") or res.get("data_files"):
+                    answers.bump()
                     _log(f"[{self.r.name}] watcher: {len(batch)} paths -> {res}")
             except Exception:
                 traceback.print_exc()
@@ -287,6 +304,11 @@ def build(stdio: bool = False) -> FastMCP:
         """Dig into hits from ask. refs: comma-separated refs (c123), symbol names, or path:start-end.
         what: code (exact current lines) | context (symbol card) | callers | callees | outline (file symbols)."""
         return await _run(_with, repo, lambda r, st: asker.expand(r, st, refs, what))
+
+    @mcp.tool()
+    async def more(cursor: str) -> dict:
+        """The next part of an answer that was trimmed to fit: pass a cursor from its `paged` field."""
+        return await _run(lambda: answers.more(cursor))
 
     @mcp.tool()
     async def search_code(query: str, k: int = 10, path: str = "", lang: str = "", repo: str = "") -> dict:
@@ -335,9 +357,11 @@ def build(stdio: bool = False) -> FastMCP:
         return await _run(_with, repo, lambda r, st: graph.calls(st, name, path))
 
     @mcp.tool()
-    async def called_by(name: str, path: str = "", limit: int = 60, repo: str = "") -> dict:
-        """'Calls To': every caller with file:line, ranked (same class > mentions the class > name only)."""
-        return await _run(_with, repo, lambda r, st: graph.called_by(st, name, path, limit))
+    async def called_by(name: str, path: str = "", caller_path: str = "", limit: int = 60, repo: str = "") -> dict:
+        """'Calls To': every caller with file:line, ranked (same class > mentions the class > name only).
+        path picks which definition (when the name is shared); caller_path keeps callers in matching files only.
+        Callers are limited to the definition's language family."""
+        return await _run(_with, repo, lambda r, st: graph.called_by(st, name, path, limit, caller_path))
 
     @mcp.tool()
     async def call_tree(name: str, direction: str = "in", depth: int = 3, path: str = "", repo: str = "") -> dict:
@@ -484,10 +508,13 @@ async def web_tool(name: str, args: dict) -> dict:
     """The dashboard's search / symbol pages call the same (read-only) MCP tools agents use."""
     if name not in WEB_TOOLS or _mcp is None:
         return {"error": f"not available from the web page: {name}"}
+    tok = _from_web.set(True)
     try:
         return await _mcp._tool_manager.call_tool(name, args)
     except Exception as e:
         return {"error": f"{type(e).__name__}: {e}"}
+    finally:
+        _from_web.reset(tok)
 _repo_cache: dict[str, tuple[float, dict]] = {}
 _LIVE_N = 600                                     # ~15 min of live samples at the page's poll rate
 _hist: dict[str, collections.deque] = {}          # rolling series for the dashboard charts: [(t, value), ...]

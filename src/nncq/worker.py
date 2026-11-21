@@ -55,6 +55,23 @@ def status_file(repo: Repo):
     return repo.db.parent / "worker.json"
 
 
+def _claim(repo: Repo):
+    """One worker per repo: an OS lock on worker.lock, held until the process exits (worker.json alone races)."""
+    f = open(repo.db.parent / "worker.lock", "a+b")
+    try:
+        if os.name == "nt":
+            import msvcrt
+            f.seek(0)
+            msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        f.close()
+        return None
+    return f
+
+
 def read_status(repo: Repo) -> dict | None:
     f = status_file(repo)
     try:
@@ -101,9 +118,10 @@ def run(repo: Repo, once: bool = False, max_batches: int = 0, log=print, parent:
     s = config.settings()
     if s.embed_tier <= 0:
         return {"state": "disabled (NNCQ_EMBED_TIER=0)"}
-    cur = read_status(repo)
-    if cur and cur["alive"] and cur.get("pid") != os.getpid():
-        return {"state": f"already running (pid {cur['pid']})"}
+    lock = _claim(repo)
+    if lock is None:
+        cur = read_status(repo) or {}
+        return {"state": f"already running (pid {cur.get('pid', '?')})"}
     from nncq.models import Embedder
     emb = Embedder(idle=0)
     store = Store(repo.db, cache_mb=64)
@@ -189,4 +207,5 @@ def run(repo: Repo, once: bool = False, max_batches: int = 0, log=print, parent:
         store.close()
         if st.get("state", "").startswith("embedding"):
             save(state="exited")
+        lock.close()
     return st

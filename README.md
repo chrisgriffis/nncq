@@ -32,7 +32,8 @@
 | MCP tool | Answers |
 |---|---|
 | `ask` | **Start here.** A question in plain words returns a short generated map, not code: how the question was read, what the hits cover, one line of facts per hit, and how the hits call each other. Each hit has a ref to dig into. [Why](#ask-not-search) |
-| `expand` | Dig into `ask` refs: exact code, symbol card, callers, callees or file outline |
+| `expand` | Dig into `ask` refs (or `path:start-end`, which is resolved to its enclosing symbol): exact code, symbol card, callers, callees or file outline |
+| `more` | The rest of an answer that was trimmed to fit (`paged` gives the cursor) |
 | `search_code` | Raw hybrid search (keywords plus meaning plus reranker). Returns whole functions or classes as code blocks |
 | `grep_code` | exact text or regex matches (ripgrep, honours `.p4ignore`) |
 | `find_symbol` | where a class, function or method is defined |
@@ -64,7 +65,7 @@ nncq gets a useful graph **without compiling anything**, using [tree-sitter](htt
 
 ![Symbol graph without a build: file, tree-sitter, facts per file, SQLite joins by name, graph views](docs/img/graph.svg)
 
-1. **Parse every file on its own.** tree-sitter is an incremental, error-tolerant parser, the same one editors use for syntax highlighting. It turns each file into a concrete syntax tree in milliseconds. It needs no headers, macros, include paths or compiler flags. Broken or half-written code still parses, with the bad region marked.
+1. **Parse every file on its own.** tree-sitter is an incremental, error-tolerant parser, the same one editors use for syntax highlighting. It turns each file into a concrete syntax tree in milliseconds. It needs no headers, macros, include paths or compiler flags. Broken or half-written code still parses, with the bad region marked. For C, C++, HLSL and C#, the parser sees one branch of each `#if`/`#elif`/`#else` (the first, or the `#else` of `#if 0`), as ctags does: two alternative function headers in `#if` branches would otherwise turn a whole file into one error node. Definitions and calls in the other branches are picked up from a second parse and attached to the enclosing definition.
 2. **Walk the tree once and record facts:**
    - *definitions*: class, struct, enum, function, method, namespace, with qualified name (`app::EmitterGraphEntity::onCreate`), parent, line span and signature
    - *calls*: from the enclosing definition to the callee's name (`onCreate → spawnEmitter`)
@@ -82,10 +83,12 @@ The parsers are a few MB each, cached in `cache/tools/tree-sitter`. Parsing runs
 | Tool | What you get |
 |---|---|
 | `symbol_context` | One-call card for a symbol. For a type: definition(s), bases and base chains, derived types, members, engine data types that use it. For a function: callers (ranked), callees (resolved to definitions when unique), overrides up and down the hierarchy. Plus how many files mention it and whether the name is ambiguous |
-| `calls` | Flat "Calls From" list: everything a function calls, in source order, each resolved to its definition when the name is unique |
-| `called_by` | Flat "Calls To" list: every caller with file:line. When several functions share the name, rows are ranked same class > code mentions the class > name only |
-| `call_tree` | Callers (`in`) or callees (`out`) as an indented tree, N levels deep, cycle-safe |
-| `call_trace` | "How does execution get here?" as debugger-style pseudo stacks (innermost frame first, file:line per frame), walked back to entry points (functions nothing calls). Given two functions, it shows how they relate: A reaches B, B reaches A, or a nearest common caller of both. Routes through unambiguous names are listed first, and a link that matched by name alone is tagged `[calls X: N defs]` |
+| `calls` | Flat "Calls From" list: everything a function calls, in source order, each resolved to its definition when the name is unique (exact spelling, same language family) or defined in the caller's own class (`same class; N defs`). A call counts as the class's own when it is plain, through `this`, or through a receiver named after the class (`gameRenderer->`); `m_pool->endFrame()` stays ambiguous. Macros and plumbing are folded into one closing line |
+| `called_by` | Flat "Calls To" list: every caller with file:line. When several functions share the name, rows are ranked same class > code mentions the class > name only, and callers whose own class defines the same name are dropped (they call their own). `caller_path` keeps callers in matching files |
+| `call_tree` | Callers (`in`) or callees (`out`) as an indented tree, N levels deep, cycle-safe. Callers are ranked like `called_by` at every level. Callees skip macros and plumbing (names called from more than 1,500 places, counted in the note), and names with several definitions are listed but not expanded |
+| `call_trace` | "How does execution get here?" as debugger-style pseudo stacks (innermost frame first, file:line per frame), walked back to entry points (functions nothing calls). Given two functions, it shows how they relate: A reaches B, B reaches A, or a nearest common caller of both. Routes whose links stay inside the callee's class or go through unique names are listed first. A link that matched by name alone is tagged `[calls X: N defs]`. A trail that goes cold (a function only called by same-named functions of other classes, typical for jobs, callbacks and virtuals) ends with a note saying so |
+
+All caller and callee lookups stay inside the definition's language family (C/C++ together, JS/TS together), so a C++ `render` is not "called" from Python. Test and mock code (test folders and files, `TEST_F`-style callers) is tagged `(test)` and listed after production code, and `call_trace` lists stacks through tests last.
 | `impact` | Transitive callers of X, summarised by folder and file: the blast radius before you change a signature |
 | `type_hierarchy` | Base chain(s) up and the derived tree down |
 | `file_context` | Outline, `#include`s, who includes this file, and which files it calls into or is called from |
@@ -254,8 +257,10 @@ An agent does not need ten code blocks. It needs to know **which few places matt
 Context is the agent's scarcest resource, so every response is sized for it:
 
 - `ask` returns about 5–9 KB for 8 hits. That is less than one large function, and enough to decide what to read.
-- `expand(refs)` returns exact current code from disk for only the chosen hits, capped per hit, with a `read_code` follow-up for the rest. `what=context|callers|callees|outline` returns structure instead of code.
-- Split chunks of one function are merged, and identical code at several paths is listed once (`also at`), so the hit budget is not spent on duplicates.
+- `expand(refs)` returns exact current code from disk for only the chosen hits, capped per hit, with a `read_code` follow-up for the rest. A ref to one window of a long function returns the whole function when it fits (160 lines), otherwise the window plus `before`/`more` calls for the rest. `what=context|callers|callees|outline` returns structure instead of code.
+- Split chunks of one function are merged into one hit (the best-matching window, with `window: part of X 7265-7307; 3 windows matched`), and identical code at several paths is listed once (`also at`), so the hit budget is not spent on duplicates.
+- **No answer is cut off by the client.** MCP clients spill or truncate long tool results (Copilot CLI writes anything above ~20 KB to a temp file the agent has to read back). Answers above `NNCQ_MAX_RESPONSE_KB` (16) are trimmed at their largest list or multi-line field; `paged` names the field, what is shown, and the `more(cursor=...)` call for the rest.
+- **Repeats are free.** Every read-only answer is cached in the server for `NNCQ_CACHE_MINUTES` (15) or until the index changes, for agents and the dashboard alike. `ask` is cached without `k`: a cached 8-hit answer serves `k=5` instantly.
 - Healthy responses carry nothing extra. `index_state` appears only when something is degraded.
 
 ### The MCP client owns the lifetime
@@ -349,6 +354,8 @@ Day to day: `nncq sync` (p4 sync plus delta), `nncq status`, `nncq pause` / `nnc
 | `NNCQ_RERANK` / `NNCQ_RERANK_CANDIDATES` | `true` / `40` | cross-encoder reranking |
 | `NNCQ_INDEX_PROCS` | half the cores (max 8) | T0 parser processes |
 | `NNCQ_TEXT_LANGS` | `markdown,cmake,make,dockerfile,proto,batch` | non-code formats to index (add `xml,json,yaml,...` if wanted) |
+| `NNCQ_MAX_RESPONSE_KB` | `16` | larger tool answers are trimmed and paged with `more(cursor)` (0 = never) |
+| `NNCQ_CACHE_MINUTES` | `15` | identical tool calls are answered from memory this long, until the index changes (0 = off) |
 | `NNCQ_EXTRA_EXTENSIONS` | | e.g. `.foo,.bar=cpp` |
 | `NNCQ_IGNORE` | | extra ignore globs (on top of `.p4ignore`) |
 | `NNCQ_DATA` | `true` | maintain the `.xdata` cross-reference |

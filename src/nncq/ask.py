@@ -29,13 +29,13 @@ from nncq.store import Store, split_ident
 DOCS = {"section", "text", "module_doc"}
 FILE_LEVEL = {"namespace", "module"}
 AREA_DEPTH = 4
-UTILITY_CALLS = 1500          # callees called from more places than this are plumbing (get, size, assert, log...)
+UTILITY_CALLS = graph.UTILITY_CALLS
 _WORD = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _IDENT = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]{5,}\b")
 _COMMENT = re.compile(r'^\s*(?:///?[<!]?|/\*+!?|\*(?!/)|#(?!\s*(?:include|define|if|ifdef|ifndef|endif|else|elif|'
                       r'pragma|import|undef|region|endregion)\b)|--+|"""|\'\'\'|<!--)\s?')
 _JUNK = re.compile(r"^[\s=\-*/#~_+<>!]*$|copyright|licen[cs]e|\(c\)|all rights reserved|^\s*@", re.I)
-_MACRO = re.compile(r"^[A-Z0-9_]+$")
+_MACRO = graph.MACRO
 _SENT = re.compile(r"(?<=[a-z0-9)\]])[.!?](\s|$)")
 _KW = set(("return const static void class struct public private protected virtual override inline unsigned "
            "nullptr template typename namespace default include define").split())
@@ -171,7 +171,8 @@ def _doc(store: Store, root: Path, it: dict, files: dict) -> str:
     head = above(it["path"], it["a"])
     if not head and it["sym"]:
         for p, ln in store.q("SELECT f.path, s.start_line FROM symbols s JOIN files f ON f.id=s.file_id "
-                             "WHERE s.qualname=? AND s.file_id<>? LIMIT 2", (it["sym"], it["fid"])):
+                             "WHERE s.qualname=? COLLATE NOCASE AND s.qualname=? AND s.file_id<>? LIMIT 2",
+                             (it["sym"], it["sym"], it["fid"])):
             head = above(p, ln)
             if head:
                 break
@@ -210,7 +211,8 @@ def _func_facts(store: Store, it: dict) -> None:
     nm = graph.short(it["sym"])
     total, srcs = store.q("SELECT COUNT(*), COUNT(DISTINCT src) FROM edges WHERE kind='call' AND dst=?", (nm,))[0]
     if total:
-        ndefs = store.q("SELECT COUNT(DISTINCT qualname) FROM symbols WHERE name=?", (nm,))[0][0]
+        ndefs = store.q("SELECT COUNT(DISTINCT qualname) FROM symbols WHERE name=? COLLATE NOCASE AND name=?",
+                        (nm, nm))[0][0]
         top = []
         if total <= 5000:
             cls = graph.norm(it["parent"] or "")
@@ -280,9 +282,8 @@ def ask(store: Store, root: Path, question: str, k: int = 8, path: str = "", lan
         if h in by_text:
             by_text[h].setdefault("also", []).append(p)
             continue
-        if key in by_key:
-            o = by_key[key]
-            o["a"], o["b"] = min(o["a"], a), max(o["b"], b)
+        if key in by_key:            # another window of the same symbol: count it, keep the best one's text/lines
+            by_key[key]["windows"] = by_key[key].get("windows", 1) + 1
             continue
         it = {"cid": cid, "path": p, "a": a, "b": b, "sym": sym or "", "kind": kind, "parent": parent, "text": text,
               "lang": lg, "fid": fid, "score": scores.get(cid, 0.0), "lex": lex_r.get(cid), "dense": den_r.get(cid)}
@@ -411,10 +412,12 @@ def ask(store: Store, root: Path, question: str, k: int = 8, path: str = "", lan
         h = {"ref": f"c{it['cid']}", "rank": rank,
              "sym": it["sym"] if it["kind"] not in FILE_LEVEL else f"(file level of {Path(it['path']).name})",
              "kind": it["kind"], "at": f"{area} / {rel}:{it['a']}-{it['b']}"}
-        sig = store.q("SELECT signature FROM symbols WHERE file_id=? AND qualname=? AND start_line BETWEEN ? AND ? "
-                      "LIMIT 1", (it["fid"], it["sym"], it["a"] - 3, it["b"])) if it["sym"] else []
-        if sig and sig[0][0] and sig[0][0] != it["sym"]:
-            h["sig"] = re.sub(r"\s+", " ", sig[0][0])[:180]
+        ext = _extent(store, it["fid"], it["sym"], it["a"], it["b"]) if it["kind"] not in FILE_LEVEL else None
+        if ext and ext[0] and ext[0] != it["sym"]:
+            h["sig"] = re.sub(r"\s+", " ", ext[0])[:180]
+        if ext and (ext[1] < it["a"] - 3 or ext[2] > it["b"]):
+            h["window"] = f"part of {graph.short(it['sym'])} {ext[1]}-{ext[2]}" + \
+                (f"; {it['windows']} windows matched" if it.get("windows", 1) > 1 else "")
         for f in ("doc", "calls", "callers", "bases", "derived", "members", "peek"):
             if it.get(f):
                 h[f] = it[f]
@@ -445,19 +448,40 @@ def ask(store: Store, root: Path, question: str, k: int = 8, path: str = "", lan
     return out
 
 
+def _extent(store: Store, fid: int, sym: str, a: int, b: int) -> tuple[str, int, int] | None:
+    """(signature, start, end) of the definition a chunk belongs to (a chunk may be one window of a long one)."""
+    if not sym:
+        return None
+    r = store.q("SELECT signature, start_line, end_line FROM symbols WHERE file_id=? AND qualname=? "
+                "AND start_line<=? AND end_line>=? ORDER BY end_line-start_line LIMIT 1", (fid, sym, b, a))
+    return r[0] if r else None
+
+
 # ------------------------------------------------------------------ expand
 
 def _resolve(store: Store, ref: str) -> dict | None:
     ref = ref.strip()
     m = re.fullmatch(r"c(\d+)", ref)
     if m:
-        r = store.q("SELECT f.path, c.start_line, c.end_line, c.symbol, c.kind FROM chunks c JOIN files f "
+        r = store.q("SELECT f.path, c.start_line, c.end_line, c.symbol, c.kind, c.file_id FROM chunks c JOIN files f "
                     "ON f.id=c.file_id WHERE c.id=?", (int(m.group(1)),))
-        return dict(zip(("path", "a", "b", "sym", "kind"), r[0])) if r else None
+        if not r:
+            return None
+        loc = dict(zip(("path", "a", "b", "sym", "kind"), r[0][:5]))
+        ext = _extent(store, r[0][5], loc["sym"], loc["a"], loc["b"]) if loc["kind"] not in FILE_LEVEL else None
+        if ext and (ext[1] < loc["a"] or ext[2] > loc["b"]):
+            loc["ext"] = (min(ext[1], loc["a"]), max(ext[2], loc["b"]))
+        return loc
     m = re.fullmatch(r"(.+?):(\d+)(?:-(\d+))?", ref)
     if m and "/" in ref:
         a = int(m.group(2))
-        return {"path": m.group(1), "a": a, "b": int(m.group(3) or a + 40), "sym": "", "kind": ""}
+        loc = {"path": m.group(1).replace("\\", "/"), "a": a, "b": int(m.group(3) or a + 40), "sym": "", "kind": ""}
+        r = store.q("SELECT s.qualname, s.kind, s.start_line, s.end_line FROM symbols s JOIN files f ON f.id=s.file_id "
+                    "WHERE f.path=? AND s.start_line<=? AND s.end_line>=? AND s.kind NOT IN ('namespace', 'module') "
+                    "ORDER BY s.end_line - s.start_line LIMIT 1", (loc["path"], a, a))
+        if r:       # name the enclosing symbol, so context/callers/callees work on a line range too
+            loc.update(sym=r[0][0], kind=r[0][1], span=(r[0][2], r[0][3]))
+        return loc
     d = graph.find_defs(store, ref)
     if d:
         return {"path": d[0].path, "a": d[0].start, "b": d[0].end, "sym": d[0].qualname, "kind": d[0].kind}
@@ -471,13 +495,24 @@ def expand(repo: Repo, store: Store, refs: str, what: str = "code", max_lines: i
         if not loc:
             out.append({"ref": ref, "error": "unknown ref (re-run ask: the file may have been re-indexed)"})
             continue
+        ext = loc.get("ext")
+        if what == "code" and ext and ext[1] - ext[0] < max_lines:   # a window of a short symbol: show all of it
+            loc["a"], loc["b"], ext = ext[0], ext[1], None
         e = {"ref": ref, "sym": loc["sym"], "kind": loc["kind"], "at": f"{loc['path']}:{loc['a']}-{loc['b']}"}
         if what == "code":
             end = min(loc["b"], loc["a"] + max_lines - 1)
             rc = search.read_code(repo, loc["path"], loc["a"], end)
             e["code"] = rc.get("code") or rc.get("error")
-            if end < loc["b"]:
-                e["more"] = f"read_code(path='{loc['path']}', start={end + 1}, end={loc['b']})"
+            last = max(loc["b"], ext[1]) if ext else loc["b"]
+            span = loc.get("span")
+            if span and not ext and (span[0] < loc["a"] or span[1] > loc["b"]):
+                e["window"] = f"inside {graph.short(loc['sym'])} {span[0]}-{span[1]}"
+            if ext:
+                e["window"] = f"part of {graph.short(loc['sym'])} {ext[0]}-{ext[1]}"
+                if ext[0] < loc["a"]:
+                    e["before"] = f"read_code(path='{loc['path']}', start={ext[0]}, end={loc['a'] - 1})"
+            if end < last:
+                e["more"] = f"read_code(path='{loc['path']}', start={end + 1}, end={last})"
         elif what == "context":
             e.update(graph.symbol_context(store, loc["sym"], loc["path"]))
         elif what == "callers":

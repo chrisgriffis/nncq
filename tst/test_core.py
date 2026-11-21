@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from nncq import chunker, config, graph, health, indexer
+from nncq import answers, chunker, config, graph, health, indexer
 from nncq.repos import Repo
 from nncq.store import Store
 
@@ -134,6 +134,93 @@ def test_delta_reuses_vectors_and_updates_graph(repo):
         assert "index_state" not in health.annotate({}, st, None, 2, semantic=False)
     finally:
         st.close()
+
+
+PP = """namespace app {
+#if FB_USING(NEW_PATH)
+void Renderer::onFrame(int a)
+#else
+void Renderer::onFrame(int a, int b)
+#endif
+{
+    present(a);
+#if 0
+    legacyPresent();
+#elif defined(CONSOLE)
+    consolePresent();
+#endif
+}
+
+void Renderer::onFlip() { flip(); }
+}
+"""
+
+
+def test_preprocessor_branches_keep_one_parse_and_recover_the_rest():
+    r = chunker.process("r.cpp", PP.encode(), "cpp")
+    ext = {s.qualname: (s.start_line, s.end_line) for s in r.symbols}
+    assert ext["app::Renderer::onFrame"] == (3, 14)        # not swallowing onFlip
+    assert ext["app::Renderer::onFlip"] == (16, 16)
+    calls = {(e.src, e.dst) for e in r.edges if e.kind == "call"}
+    assert ("app::Renderer::onFrame", "present") in calls
+    assert ("app::Renderer::onFrame", "consolePresent") in calls    # from the branch the parser did not see
+    assert not any(e.src == "" for e in r.edges if e.kind == "call")
+
+
+def test_callers_stay_in_the_language_family(repo):
+    (repo.root / "scripts" / "sim.lua").write_text("function tick(b)\n  integrate(b, 1)\nend\n", encoding="utf-8")
+    indexer.update_paths(repo, ["scripts/sim.lua"], log=lambda m: None)
+    st = _store(repo)
+    try:
+        assert [c.split()[0] for c in graph.called_by(st, "integrate")["callers"]] == ["eng::stepWorld"]
+        assert graph.called_by(st, "integrate", caller_path="nothing/here")["callers"] == []
+    finally:
+        st.close()
+
+
+def test_shared_names_resolve_to_the_callers_own_class(repo):
+    (repo.root / "engine" / "loop.cpp").write_text(
+        "void A::update() {}\nvoid A::tick() { update(); }\nvoid B::update() {}\nvoid B::run() { update(); }\n"
+        "void Test_A::update() {}\nvoid TEST_F() { A a; a.update(); }\nvoid C::poke(A* a) { a->update(); }\n"
+        "void A::flush() { m_child->update(); }\n",
+        encoding="utf-8")
+    indexer.update_paths(repo, ["engine/loop.cpp"], log=lambda m: None)
+    st = _store(repo)
+    try:
+        assert graph.calls(st, "A::tick")["calls"][0].split(" -> ")[1].startswith("A::update")
+        assert "(ambiguous)" in graph.calls(st, "A::flush")["calls"][0]          # m_child->update(): not ours
+        rows = graph.called_by(st, "A::update")["callers"]
+        names = [r.split()[0] for r in rows]
+        assert names[0] == "A::tick" and set(names[1:3]) == {"A::flush", "C::poke"} and names[3] == "TEST_F"
+        assert "[same class]" in rows[0] and not any("[same class]" in r for r in rows[1:])   # flush: m_child->
+        assert rows[-1].endswith("(test)")
+    finally:
+        st.close()
+
+
+def test_long_answers_are_paged_and_ask_is_served_from_a_larger_k(monkeypatch):
+    monkeypatch.setenv("NNCQ_CACHE_MINUTES", "5")
+    big = {"tree": "\n".join(f"line {i} " + "x" * 60 for i in range(400)), "note": "n"}
+    out = answers.fit(big, "call_tree", 4096)
+    assert answers.size(out) <= 4096 and "tree" in out["paged"]
+    lines, nxt = out["tree"].split("\n"), out
+    while "paged" in nxt:
+        nxt = answers.more(nxt["paged"]["tree"].split("'")[1])
+        lines += nxt["tree"].split("\n")
+    assert lines == big["tree"].split("\n")
+
+    hits = [{"ref": f"c{i}"} for i in range(8)]
+    full = {"hits": hits, "links": ["c1 f calls c7 g (line 3)", "c0 f calls c1 g (line 2)"],
+            "portfolio": {"shown": "8 of 30 distinct", "areas": ["A: 2 (c0, c1)", "B: 1 (c7)"]}}
+    args = {"question": "q", "k": 8, "path": "", "lang": "", "repo": ""}
+    key = answers.key("ask", args)
+    answers.put(key, args, full)
+    small = answers.get(key, {**args, "k": 3})
+    assert [h["ref"] for h in small["hits"]] == ["c0", "c1", "c2"]
+    assert small["links"] == ["c0 f calls c1 g (line 2)"] and small["portfolio"]["areas"] == ["A: 2 (c0, c1)"]
+    assert answers.get(key, {**args, "k": 12}) is None
+    answers.bump()
+    assert answers.get(key, args) is None
 
 
 def test_env_inline_comments(tmp_path):

@@ -81,6 +81,52 @@ def _parser(lang: str):
     return p
 
 
+_PP_LANGS = {"c", "cpp", "hlsl", "csharp", "objc", "cuda"}
+_PP_COND = re.compile(rb"^[ \t]*#[ \t]*(if|ifdef|ifndef|elif|else|endif)\b(.*)$")
+_PP_ZERO = re.compile(rb"^(?:0|false)\b")
+_NOT_CR = re.compile(rb"[^\r]")
+
+
+def flatten_pp(data: bytes) -> tuple[bytes, set[int]]:
+    """Keep one branch of every #if/#elif/#else (the first, or the #else of `#if 0`), blank the rest and the
+    directives themselves, as ctags does. Bytes and line numbers are unchanged; only the parser sees this.
+    Without it, two alternative function headers or an unbalanced brace inside #if branches turns a whole
+    C++ file into one tree-sitter ERROR node: wrong extents, lost symbols, calls attributed to file level.
+    Returns the parser input and the 0-based rows of code that was blanked (the branches not taken)."""
+    lines = data.split(b"\n")
+    skipped: set[int] = set()
+    out: list[bytes] = []
+    stack: list[list[bool]] = []          # [enclosing branch active, a branch of this #if was taken]
+    active, i = True, 0
+    while i < len(lines):
+        m = _PP_COND.match(lines[i])
+        if not m:
+            if active:
+                out.append(lines[i])
+            else:
+                out.append(_NOT_CR.sub(b" ", lines[i]))
+                skipped.add(i)
+            i += 1
+            continue
+        j = i
+        while lines[j].rstrip(b"\r").endswith(b"\\") and j + 1 < len(lines):
+            j += 1
+        kw = m.group(1)
+        if kw in (b"if", b"ifdef", b"ifndef"):
+            take = not (kw == b"if" and _PP_ZERO.match(m.group(2).strip()))
+            stack.append([active, take])
+            active = active and take
+        elif kw in (b"elif", b"else") and stack:
+            outer, taken = stack[-1]
+            active = outer and not taken
+            stack[-1][1] = taken or active
+        elif kw == b"endif" and stack:
+            active = stack.pop()[0]
+        out.extend(_NOT_CR.sub(b" ", lines[k]) for k in range(i, j + 1))
+        i = j + 1
+    return b"\n".join(out), skipped
+
+
 def decode(data: bytes) -> str:
     if data.startswith(b"\xef\xbb\xbf"):
         data = data[3:]
@@ -167,13 +213,38 @@ class _Ast:
         self.r = FileResult(lang, "ast")
 
     def run(self) -> FileResult:
-        tree = _parser(self.lang).parse(self.data)
+        data, skipped = flatten_pp(self.data) if self.lang in _PP_LANGS and b"#" in self.data else (self.data, set())
+        tree = _parser(self.lang).parse(data)
         root = tree.root_node
         self._chunk_scope(list(root.children), [], "", "file", None)
         self._collect(root)
+        if skipped:
+            self._recover(skipped)
         if not self.r.chunks:
             self.r.chunks = _text(self.lines, self.lang, self.max).chunks
         return self.r
+
+    def _recover(self, skipped: set[int]) -> None:
+        """Definitions and calls that only exist in the #if branches flatten_pp dropped (other platforms):
+        taken from a parse of the original text and attached to the enclosing definition of the main parse."""
+        other = _Ast(self.path, self.data, self.lines, self.lang, self.max)
+        other._collect(_parser(self.lang).parse(self.data).root_node)
+        have = {(s.name, s.start_line) for s in self.r.symbols}
+        scopes = [(s.start_line, s.end_line, s.qualname) for s in self.r.symbols]
+
+        def enclosing(line: int) -> str:
+            best = min(((e - a, q) for a, e, q in scopes if a <= line <= e), default=None)
+            return best[1] if best else ""
+        added = []
+        for s in other.r.symbols:
+            if s.start_line - 1 in skipped and (s.name, s.start_line) not in have:
+                parent = enclosing(s.start_line)
+                q = self.sep.join(x for x in (parent, s.name) if x)
+                added.append(Symbol(s.name, q, s.kind, parent, s.start_line, s.end_line, s.signature))
+        self.r.symbols += added
+        scopes += [(s.start_line, s.end_line, s.qualname) for s in added]
+        self.r.edges += [Edge(enclosing(e.line), e.dst, e.kind, e.line, e.label)
+                         for e in other.r.edges if e.line - 1 in skipped]
 
     # -- definitions
     def def_info(self, n) -> _Def | None:
@@ -228,7 +299,7 @@ class _Ast:
             else:
                 return None
         else:
-            name = _txt(name_node).strip()
+            name = re.sub(r"\s+", " ", re.sub(r"\s*::\s*", "::", _txt(name_node).strip()))
         if not name or len(name) > 200:
             return None
         scope: list[str] = []
