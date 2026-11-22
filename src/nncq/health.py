@@ -9,6 +9,9 @@ States (cheap to compute, cached for a few seconds):
   sync interrupted  the process applying it died: those files stay stale until the next update / server start
   not embedded      chunks with no vector yet: found by keyword and graph, not by meaning
   card-only         chunks with a summary vector but not a full one: semantic ranking is coarser there
+
+divergence() is the just-in-time check per result: the files a result cites are stat'ed against what the index
+recorded; changed or missing ones are listed under `divergent` (and re-indexed in the background by the server).
 """
 from __future__ import annotations
 
@@ -92,6 +95,46 @@ def state(store: Store, embed_tier: int = 2) -> tuple[dict | None, list[str]]:
     st, pre = compute(store, embed_tier)
     _cache[key] = (time.time(), st, pre)
     return st, pre
+
+
+_PATH_KEYS = ("path", "file")
+_DIV_MAX = 40
+
+
+def result_paths(obj, out: list[str] | None = None, depth: int = 0) -> list[str]:
+    """Repo-relative file paths a tool result cites (keys 'path' / 'file', a few levels deep)."""
+    out = [] if out is None else out
+    if depth > 4 or len(out) >= _DIV_MAX:
+        return out
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if k in _PATH_KEYS and isinstance(v, str) and v and v not in out:
+                out.append(v)
+            elif isinstance(v, (dict, list)):
+                result_paths(v, out, depth + 1)
+    elif isinstance(obj, list):
+        for v in obj[:200]:
+            result_paths(v, out, depth + 1)
+    return out
+
+
+def divergence(store: Store, root, paths: list[str]) -> list[dict]:
+    """Files whose on-disk size/mtime no longer match the index (edited, synced or deleted since indexed)."""
+    import os
+    from pathlib import Path
+    out = []
+    for p in dict.fromkeys(paths[:_DIV_MAX]):
+        row = store.db.execute("SELECT size, mtime_ns FROM files WHERE path=?", (p,)).fetchone()
+        if row is None:
+            continue
+        try:
+            stt = os.stat(Path(root) / p)
+        except OSError:
+            out.append({"path": p, "state": "missing on disk"})
+            continue
+        if (stt.st_size, stt.st_mtime_ns) != (row[0], row[1]):
+            out.append({"path": p, "state": "changed on disk since indexed"})
+    return out
 
 
 def annotate(result: dict, store: Store, paths: list[str] | None = None, embed_tier: int = 2,

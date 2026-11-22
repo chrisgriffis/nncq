@@ -160,6 +160,27 @@ async def _run(fn, *a, **k):
     return out
 
 
+_refreshing: set[tuple[str, str]] = set()
+
+
+def _refresh(r: repos.Repo, paths: list[str]) -> None:
+    """Re-index files a result found divergent, once per file at a time, off the request thread."""
+    todo = [p for p in paths if (r.name, p) not in _refreshing]
+    if not todo:
+        return
+    _refreshing.update((r.name, p) for p in todo)
+
+    def go():
+        try:
+            indexer.update_paths(r, todo, log=_log, source="divergent on read")
+            answers.bump()
+        except Exception:
+            traceback.print_exc()
+        finally:
+            _refreshing.difference_update((r.name, p) for p in todo)
+    threading.Thread(target=go, daemon=True, name=f"refresh-{r.name}").start()
+
+
 def _with(repo: str, fn, paths_of=None, semantic: bool = False):
     r = _repo(repo)
     st = _store(r)
@@ -167,6 +188,11 @@ def _with(repo: str, fn, paths_of=None, semantic: bool = False):
     if isinstance(out, dict) and "error" not in out:
         paths = paths_of(out) if paths_of else None
         health.annotate(out, st, paths, config.settings().embed_tier, semantic=semantic)
+        div = health.divergence(st, r.root, paths or health.result_paths(out))
+        if div:
+            out["divergent"] = {"files": div, "note": "these files changed since they were indexed: "
+                                "line numbers/text above may be off; re-indexing now, repeat the call for fresh results"}
+            _refresh(r, [d["path"] for d in div])
     return out
 
 
@@ -350,7 +376,7 @@ def build(stdio: bool = False) -> FastMCP:
 
     @mcp.tool()
     async def find_symbol(name: str, kind: str = "", path: str = "", repo: str = "") -> dict:
-        """Where a class/function/method/etc. is defined. name: short or qualified (app::Foo::bar, Entity.LayerData).
+        """Where a class/function/method/etc. is defined. name: short or qualified (ns::Foo::bar, pkg.Module.Class).
         kind: optional filter, e.g. 'class,struct' or 'type' or 'method'."""
         return await _run(_with, repo, lambda r, st: search.find_symbol(st, name, kind, path))
 

@@ -1,6 +1,8 @@
 """Focused tests: chunking, deltas (incl. vector reuse), graph views, degradation notes. No GPU / models needed."""
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pytest
 
@@ -267,3 +269,94 @@ def test_agents_setup_merges_configs_and_installs_skill(tmp_path, monkeypatch):
         assert skill.startswith("---\nname: nncq-user\n")
     assert "already configured" in agents.setup("copilot")[0]     # idempotent
     assert agents.run(["nope"], ask=False) == 1
+
+# ---------------------------------------------------------------- codebase profiles
+
+PROFILE = """name = 'acme'
+[workspace]
+roots = ['{root}']
+markers = ['build.txt']
+dirs = []
+ignore = ['vendor/**']
+
+[[dsl]]
+lang = 'idl'
+extensions = ['.idl']
+
+[[xref]]
+name = 'scenes'
+glob = '*.scene'
+instance = '<node type="(?P<type>[A-Za-z_]+)"'
+reference = 'ref="(?P<ref>[^"]+)"'
+type_suffix = 'Data'
+label = 'scene'
+"""
+
+
+@pytest.fixture
+def prof(tmp_path, monkeypatch):
+    from nncq import profiles
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "db")
+    monkeypatch.setattr(profiles, "DIR", tmp_path / "profiles")
+    monkeypatch.setattr(profiles, "ARCHIVE_DIR", tmp_path / "archive")
+    monkeypatch.setenv("NNCQ_INDEX_PROCS", "1")
+    monkeypatch.setenv("NNCQ_DATA", "true")
+    ws = tmp_path / "acme"
+    (ws / "src").mkdir(parents=True)
+    (ws / "vendor").mkdir()
+    (ws / "build.txt").write_text("", encoding="utf-8")
+    (ws / "src" / "door.cpp").write_text("struct Door { void open(); };\nvoid Door::open() {}\n", encoding="utf-8")
+    (ws / "src" / "door.idl").write_text("component DoorData {\n  bool locked;\n}\n", encoding="utf-8")
+    (ws / "vendor" / "lib.cpp").write_text("void vendored() {}\n", encoding="utf-8")
+    (ws / "a.scene").write_text('<node type="DoorData" ref="b"/>\n', encoding="utf-8")
+    (ws / "b.scene").write_text('<node type="DoorData"/>\n', encoding="utf-8")
+    d = profiles.DIR / "acme"
+    d.mkdir(parents=True)
+    (d / "profile.toml").write_text(PROFILE.format(root=ws.as_posix()), encoding="utf-8")
+    return ws
+
+
+def test_profile_links_its_workspace_and_drives_dsl_ignore_and_data_rules(prof, tmp_path):
+    from nncq import datarefs, profiles, repos, search
+    p = profiles.get("acme")
+    assert p.root == prof.resolve()
+    assert "missing marker" in p.accepts(tmp_path)
+    assert "overlaps" in p.accepts(config.ROOT)
+    r = repos.get("acme")
+    indexer.update(r, log=lambda m: None)
+    st = Store(r.db, cache_mb=8)
+    try:
+        paths = set(st.file_stats())
+        assert "src/door.idl" in paths and "vendor/lib.cpp" not in paths
+        d = search.find_symbol(st, "DoorData", "", "")
+        assert d["match"] == "exact" and "door.idl" in d["definitions"][0]
+        uses = json.dumps(datarefs.data_for_code(st, "Door", 10))
+        assert "a.scene" in uses and "b.scene" in uses
+        assert "a.scene" in json.dumps(datarefs.asset_info(st, "b.scene", 10))
+    finally:
+        st.close()
+
+
+def test_profile_export_import_round_trip(prof):
+    from nncq import profiles
+    f = profiles.export("acme")
+    assert f.parent == profiles.ARCHIVE_DIR and f.suffix == profiles.ARCHIVE_EXT
+    with pytest.raises(ValueError):
+        profiles.import_(f)
+    dst = profiles.import_(f, "acme2")
+    assert profiles.get("acme2").root == prof.resolve()
+    assert "name = 'acme2'" in (dst / "profile.toml").read_text(encoding="utf-8")
+
+
+def test_results_citing_files_changed_on_disk_are_flagged(repo):
+    st = _store(repo)
+    try:
+        assert health.divergence(st, repo.root, ["engine/physics.cpp"]) == []
+        (repo.root / "engine" / "physics.cpp").write_text(CPP + "\n// edited\n", encoding="utf-8")
+        (repo.root / "scripts" / "spawner.lua").unlink()
+        div = health.divergence(st, repo.root, health.result_paths(
+            {"results": [{"path": "engine/physics.cpp"}, {"file": "scripts/spawner.lua"}]}))
+        assert [d["path"] for d in div] == ["engine/physics.cpp", "scripts/spawner.lua"]
+        assert div[1]["state"] == "missing on disk"
+    finally:
+        st.close()
