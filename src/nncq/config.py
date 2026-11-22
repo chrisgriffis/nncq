@@ -101,10 +101,12 @@ class Settings:
     text_langs: str         # non-code formats to index besides code + engine DSLs
     max_response_kb: int    # tool answers above this are trimmed and paged with more(cursor); 0 = no limit
     cache_minutes: float    # identical tool calls within this window are answered from memory; 0 = off
+    lite: bool              # NNCQ_PROFILE=lite: no torch, no models, no GPU (keyword + graph + data xref only)
 
 
 def settings() -> Settings:
     e = os.environ.get
+    lite = e("NNCQ_PROFILE", "full").strip().lower() == "lite"
     return Settings(
         host=e("NNCQ_HOST", "127.0.0.1"),
         port=_int("NNCQ_PORT", 8765),
@@ -125,11 +127,12 @@ def settings() -> Settings:
         ignore=e("NNCQ_IGNORE", ""),
         repos=e("NNCQ_REPOS", ""),
         index_procs=_int("NNCQ_INDEX_PROCS", max(1, min(8, (os.cpu_count() or 2) // 2))),
-        embed_tier=_int("NNCQ_EMBED_TIER", 2),
-        rerank=_bool("NNCQ_RERANK", True),
+        embed_tier=0 if lite else _int("NNCQ_EMBED_TIER", 2),
+        rerank=False if lite else _bool("NNCQ_RERANK", True),
         text_langs=e("NNCQ_TEXT_LANGS", "markdown,cmake,make,dockerfile,proto,batch"),
         max_response_kb=_int("NNCQ_MAX_RESPONSE_KB", 16),
         cache_minutes=_float("NNCQ_CACHE_MINUTES", 15.0),
+        lite=lite,
     )
 
 

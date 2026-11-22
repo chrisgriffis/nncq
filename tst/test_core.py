@@ -227,3 +227,43 @@ def test_env_inline_comments(tmp_path):
     f = tmp_path / ".env"
     f.write_text('A=1          # port\nB="x # y"\nC=\n# D=4\n', encoding="utf-8")
     assert config.read_env_file(f) == {"A": "1", "B": "x # y", "C": ""}
+
+
+def test_lite_profile_never_touches_models_and_reports_no_degradation(repo, monkeypatch):
+    import sys
+    from nncq import ask as asker, search
+    monkeypatch.setenv("NNCQ_PROFILE", "lite")
+    monkeypatch.setenv("NNCQ_EMBED_TIER", "2")           # ignored under lite
+    s = config.settings()
+    assert s.lite and s.embed_tier == 0 and not s.rerank
+    monkeypatch.setattr(search, "_model", lambda name: pytest.fail("lite loaded a model"))
+    st = _store(repo)
+    try:
+        out = asker.ask(st, repo.root, "integrate bodies over time", 5)
+        assert "eng::integrate" in [h["sym"] for h in out["hits"]]
+        assert out["portfolio"]["strength"].startswith("unrated (lite")
+        assert out["interpreted"]["meaning"].startswith("off (lite")
+        assert "note" not in out                          # no "no vectors yet" noise in lite
+        assert health.compute(st, s.embed_tier) == (None, [])
+    finally:
+        st.close()
+    assert "torch" not in sys.modules and "transformers" not in sys.modules
+
+
+def test_agents_setup_merges_configs_and_installs_skill(tmp_path, monkeypatch):
+    import json
+    from nncq import agents
+    monkeypatch.setenv("NNCQ_AGENT_HOME", str(tmp_path))
+    cfg = tmp_path / ".copilot" / "mcp-config.json"
+    cfg.parent.mkdir(parents=True)
+    cfg.write_text(json.dumps({"mcpServers": {"other": {"type": "local", "command": "x"}}}), encoding="utf-8")
+    assert agents.run(["copilot", "claude", "vs"], ask=False) == 0
+    data = json.loads(cfg.read_text(encoding="utf-8"))
+    assert set(data["mcpServers"]) == {"other", "nncq"} and data["mcpServers"]["nncq"]["args"] == ["serve", "--stdio"]
+    assert (cfg.parent / "mcp-config.json.bak-nncq").exists()
+    assert json.loads((tmp_path / ".mcp.json").read_text(encoding="utf-8"))["servers"]["nncq"]["type"] == "stdio"
+    for d in (".copilot", ".claude"):
+        skill = (tmp_path / d / "skills" / "nncq-user" / "SKILL.md").read_text(encoding="utf-8")
+        assert skill.startswith("---\nname: nncq-user\n")
+    assert "already configured" in agents.setup("copilot")[0]     # idempotent
+    assert agents.run(["nope"], ask=False) == 1

@@ -142,7 +142,8 @@ def cmd_status(a):
     s = _server()
     print(f"server: {s.get('mode', 'http')} pid {s['pid']}; MCP {s['url'] or '(stdio)'}; dashboard {s.get('dashboard', '-')}"
           if s else "server: not running")
-    print(f"embedding: {'PAUSED' if worker.paused() else 'enabled'} (tier {config.settings().embed_tier})")
+    print("embedding: off (lite profile)" if config.settings().lite else
+          f"embedding: {'PAUSED' if worker.paused() else 'enabled'} (tier {config.settings().embed_tier})")
     for r in (repos.load().values() if not a.repo else [_repo(a.repo)]):
         st = indexer.status(r)
         ws = worker.read_status(r)
@@ -241,6 +242,12 @@ def cmd_data(a):
     return 0
 
 
+def cmd_agents(a):
+    from nncq import agents
+    t = [x.strip() for x in a.targets.split(",") if x.strip()] or None
+    return agents.run(t, ask=sys.stdin.isatty())
+
+
 def cmd_mcp_config(a):
     s = config.settings()
     url = f"http://{'127.0.0.1' if s.host in ('0.0.0.0', '::') else s.host}:{s.port}/mcp"
@@ -253,7 +260,10 @@ def cmd_mcp_config(a):
     _p({"mcpServers": {"nncq": stdio}})
     print("\n# VS Code: .vscode/mcp.json")
     _p({"servers": {"nncq": {"type": "stdio", "command": exe, "args": ["serve", "--stdio"]}}})
-    print("\n# Claude Code:  claude mcp add nncq -- " + exe + " serve --stdio")
+    print("\n# Claude Code:  claude mcp add --scope user nncq -- " + exe + " serve --stdio")
+    print("\n# Visual Studio (Copilot agent mode): %USERPROFILE%\\.mcp.json")
+    _p({"servers": {"nncq": {"type": "stdio", "command": exe, "args": ["serve", "--stdio"]}}})
+    print("\n# Or let nncq do it, MCP server plus the nncq-user skill:  nncq agents")
     print(f"\n# Dashboard: open http://127.0.0.1:{s.port}/ while an MCP client has nncq running (starts on first visit)")
     print("\n# Shared HTTP server instead (run `nncq start` yourself; several clients can attach):")
     _p({"mcpServers": {"nncq": http}})
@@ -271,7 +281,7 @@ def cmd_repos(a):
 
 
 def cmd_doctor(a):
-    from nncq import models, sysutil, walk
+    from nncq import sysutil, walk
     ok = True
 
     def line(good, what, detail=""):
@@ -279,6 +289,24 @@ def cmd_doctor(a):
         ok &= bool(good)
         print(f"[{'ok' if good else '!!'}] {what}" + (f": {detail}" if detail else ""))
     line(sys.version_info[:2] >= (3, 11), "python", sys.version.split()[0])
+    if config.settings().lite:
+        line(True, "profile", "lite: torch, models and GPU not needed")
+    else:
+        _doctor_models(line)
+    try:
+        line(True, "ripgrep", walk.rg_exe())
+    except Exception as e:
+        line(False, "ripgrep", str(e))
+    if not config.settings().lite:
+        free = sysutil.gpu_free_mb()
+        line(True, "gpu free", f"{free} MB" if free is not None else "unknown (nvidia-smi not found)")
+    s = _server()
+    line(True, "server", s["url"] if s else "not running (nncq start)")
+    return 0 if ok else 1
+
+
+def _doctor_models(line):
+    from nncq import models
     try:
         import torch
         line(True, "torch", f"{torch.__version__}, cuda={torch.cuda.is_available()}"
@@ -287,15 +315,6 @@ def cmd_doctor(a):
         line(False, "torch", str(e))
     miss = models.models_present()
     line(not miss, "models", "present" if not miss else f"missing {miss}: nncq init")
-    try:
-        line(True, "ripgrep", walk.rg_exe())
-    except Exception as e:
-        line(False, "ripgrep", str(e))
-    free = sysutil.gpu_free_mb()
-    line(True, "gpu free", f"{free} MB" if free is not None else "unknown (nvidia-smi not found)")
-    s = _server()
-    line(True, "server", s["url"] if s else "not running (nncq start)")
-    return 0 if ok else 1
 
 
 # ------------------------------------------------------------------ parser
@@ -311,8 +330,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--dirs", default=None, help="code subfolders, comma-separated (empty = everything)")
     p.add_argument("--name", default="", help="index name (default: folder name)")
     p.add_argument("--index", action="store_true", help="start indexing at the end")
-    p.add_argument("--copilot", action="store_true", help="add nncq to ~/.copilot/mcp-config.json without asking")
+    p.add_argument("--copilot", action="store_true", help="same as --agents copilot")
+    p.add_argument("--agents", default="", help="set up these agents without asking: copilot,claude,vs")
+    p.add_argument("--lite", action="store_true", help="lite profile: no torch, no models, no GPU (keyword + graph)")
     p.set_defaults(fn=cmd_init)
+
+    p = sub.add_parser("agents", help="set up agents: MCP server + nncq-user skill (Copilot CLI, Claude Code, VS)")
+    p.add_argument("--targets", default="", help="copilot,claude,vs (default: detect and ask)")
+    p.set_defaults(fn=cmd_agents)
 
     p = sub.add_parser("index", help="register a workspace and build/refresh its index")
     p.add_argument("path", nargs="?", default="")

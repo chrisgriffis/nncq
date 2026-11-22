@@ -58,7 +58,9 @@ def compute(store: Store, embed_tier: int = 2) -> tuple[dict | None, list[str]]:
     tiers = dict(store.q("SELECT tier, COUNT(*) FROM chunks GROUP BY tier"))
     total = sum(tiers.values()) or 1
     t0, t1 = tiers.get(0, 0), tiers.get(1, 0)
-    if t0 == total:
+    if embed_tier <= 0:
+        pass                                          # embeddings off (lite / tier 0): not a degraded state
+    elif t0 == total:
         items.append("semantic index not built yet: search is keyword + graph only (exact names and words work, "
                      "'find code that does X' phrasing will be weaker).")
     elif t0:

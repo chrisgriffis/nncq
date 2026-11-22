@@ -70,6 +70,9 @@ Read these fields before the hits:
 
 - **`portfolio.strength`**: `strong` -> trust the ranking; `fair` -> top hits are probably right, verify;
   `weak` -> nothing clearly answers; the hits are leads at best. Never present a weak result as the answer.
+  `unrated (lite ...)` -> the server runs the lite profile (keywords + graph, no embeddings or reranker).
+  Ranking is keyword-only: phrase asks with likely identifiers, lean on `code_vocabulary` and the graph,
+  and verify more of the top hits before relying on them.
 - **`interpreted`**: per-term frequency in the code. A term at ~0% means the codebase uses another word.
   The **code vocabulary** list is the fix: re-ask with those identifiers.
 - **`portfolio` areas / channels**: hits spread over many unrelated folders = ambiguous question; narrow

@@ -137,6 +137,8 @@ def _model(name: str):
 
 
 def models_ready() -> bool:
+    if config.settings().lite:
+        return False
     from nncq import models
     return not models.models_present()
 
@@ -207,8 +209,10 @@ def candidates(store: Store, query: str, k: int = 10, path: str = "", lang: str 
     lex = lexical(store, query, LEX_N * (5 if wide else 1), fts_expr)
     dense: list[tuple[int, float]] = []
     notes = []
-    vec = vectors(store)
-    if vec.n and models_ready():
+    vec = vectors(store) if not s.lite else None
+    if s.lite:
+        pass                                         # lite profile: keyword + graph only, by design (no note)
+    elif vec.n and models_ready():
         try:
             with _gpu_turn():
                 qv = _model("embed").encode_query(query)

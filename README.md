@@ -25,6 +25,8 @@
 | | &nbsp;&nbsp;[Pausing frees the GPU](#pausing-frees-the-gpu-completely) | |
 | | &nbsp;&nbsp;[The web page](#the-web-page-one-screen-status--ask--symbols) | |
 
+Also: [Profiles: full and lite](#profiles-full-and-lite) | [Agent setup](#agent-setup-nncq-agents) | [Why not just Copilot + Visual Assist?](docs/why-nncq.md)
+
 ---
 
 ## What it gives an agent
@@ -322,18 +324,50 @@ The page has a visible **❚❚ pause** button for when you need the card yourse
 
 ```powershell
 git clone <this repo> no-net-code-query; cd no-net-code-query
-.\init.ps1                       # venv, CUDA torch, models, interactive .env
+.\init.ps1                       # full: venv, CUDA torch, models, interactive .env, agent setup
+.\init.ps1 -Lite                 # lite: no torch, no models, no GPU (see below)
 .venv\Scripts\nncq index C:/work\my-workspace --dirs src/Code   # T0 + data xref
-.venv\Scripts\nncq start         # background server; embeds in the background
-.venv\Scripts\nncq mcp-config    # prints config for Copilot CLI / VS Code / Claude Code
 ```
 
-Copilot CLI (`~/.copilot/mcp-config.json`):
-```json
-{ "mcpServers": { "nncq": { "type": "http", "url": "http://127.0.0.1:8765/mcp", "tools": ["*"] } } }
-```
+Then start your agent (Copilot CLI, Claude Code or Visual Studio). It launches nncq over stdio itself.
+`nncq start` runs a standalone HTTP server instead, for several clients at once.
 
-**Agent skill:** [`nncq-user.skill.md`](nncq-user.skill.md) tells the agent how to use nncq well: decompose a question into several narrow `ask`s, connect hits with the graph tools, `expand` only what the answer rests on, and reply with one compiled digest. For Claude Code copy it to `.claude/skills/nncq-user/SKILL.md`; for Copilot, add it to the repo's custom instructions. A short version of the same guidance is sent to every client in the MCP server instructions.
+### Profiles: full and lite
+
+| | full (default) | lite (`-Lite`, `NNCQ_PROFILE=lite`) |
+|---|---|---|
+| Install | ~14 GB (CUDA torch, two 1B models) | ~150 MB |
+| Hardware | NVIDIA GPU (8 GB+) | any machine |
+| Indexing | T0 parse, then GPU embedding (~20 min per 40k chunks) | T0 parse only (minutes) |
+| Search | keywords + meaning + reranker | keywords (sub-word identifiers, stems) |
+| Graph, `.xdata` cross-reference, `ask` / `expand`, all graph tools | yes | yes, identical |
+| Match strength in `ask` | strong / fair / weak | `unrated`: verify top hits |
+
+Lite is the coworker default: the graph tools and the data cross-reference, which need no GPU, carry most of
+the value for structural questions. What lite loses is "find code that does X" when the question shares no
+words with the code; the agent compensates partly by re-asking with the `code_vocabulary` that `ask` returns.
+Upgrading is in place: run `.\init.ps1` without `-Lite` (installs the `gpu` extra and models, sets
+`NNCQ_PROFILE=full`), and the worker embeds the existing index. Nothing is re-parsed.
+
+### Agent setup: `nncq agents`
+
+`init` detects the agents on the machine and offers to set each up; `nncq agents` (or
+`init.ps1 -Agents copilot,claude,vs`) does it again at any time. Per agent it registers nncq as a stdio MCP
+server and installs the [`nncq-user`](nncq-user.skill.md) skill, which teaches the agent to investigate with
+several narrow `ask`s, connect hits with the graph tools, `expand` only what the answer rests on, and reply
+with one compiled digest instead of raw tool output.
+
+| Agent | MCP server | Skill |
+|---|---|---|
+| Copilot CLI | `~/.copilot/mcp-config.json` | `~/.copilot/skills/nncq-user/SKILL.md` |
+| Claude Code | `claude mcp add --scope user nncq ...` | `~/.claude/skills/nncq-user/SKILL.md` |
+| Visual Studio (Copilot agent mode) | `%USERPROFILE%\.mcp.json` | no global location: paste into custom instructions |
+
+Existing config files are merged (a `.bak-nncq` copy is kept); the workspace is never written to. A short
+version of the skill also goes to every client in the MCP server instructions, so agents without the skill
+still get the gist. `nncq mcp-config` prints the raw entries for anything else.
+
+Why this rather than Copilot in Visual Studio with Visual Assist: [docs/why-nncq.md](docs/why-nncq.md).
 
 Day to day: `nncq sync` (p4 sync plus delta), `nncq status`, `nncq pause` / `nncq resume`, `nncq stop`.
 

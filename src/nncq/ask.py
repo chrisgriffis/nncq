@@ -22,7 +22,7 @@ import time
 from collections import Counter
 from pathlib import Path
 
-from nncq import graph, search
+from nncq import config, graph, search
 from nncq.repos import Repo
 from nncq.store import Store, split_ident
 
@@ -243,6 +243,8 @@ def _type_facts(store: Store, it: dict) -> None:
 # ------------------------------------------------------------------ ask
 
 def _strength(top: float, reranked: bool) -> str:
+    if not reranked and config.settings().lite:
+        return "unrated (lite: keyword ranking, no reranker): verify the top hits before relying on them"
     if not reranked:
         return "unknown (no reranker): order is keyword/meaning fusion only"
     if top >= 2:
@@ -339,6 +341,8 @@ def ask(store: Store, root: Path, question: str, k: int = 8, path: str = "", lan
         interp["meaning"] = "embedded the whole question and compared it with code meaning" + \
             (f" ({_pct(vec_cover)} of chunks have vectors so far; the rest is found by keyword only)"
              if vec_cover is not None and vec_cover < 0.999 else "")
+    elif config.settings().lite:
+        interp["meaning"] = "off (lite profile: keywords + graph; use the code's words, see code_vocabulary)"
     else:
         interp["meaning"] = "not used: " + "; ".join(c["notes"] or ["no vectors"])
     if vocab:
@@ -354,7 +358,8 @@ def ask(store: Store, root: Path, question: str, k: int = 8, path: str = "", lan
     lex_only = sum(1 for it in shown if it["lex"] and not it["dense"])
     den_only = sum(1 for it in shown if it["dense"] and not it["lex"])
     top = max((it["score"] for it in shown), default=0.0)
-    port = {"shown": f"{len(shown)} of {len(items)} distinct candidates ({len(cands)} chunks reranked)",
+    port = {"shown": f"{len(shown)} of {len(items)} distinct candidates ({len(cands)} chunks "
+                     f"{'reranked' if c.get('reranked') else 'ranked'})",
             "areas": [f"{a}: {len(v)} ({', '.join('c' + str(x['cid']) for x in v)})"
                       for a, v in sorted(areas.items(), key=lambda kv: -len(kv[1]))],
             "kinds": ", ".join(f"{n} {k}" for k, n in kinds.most_common()),

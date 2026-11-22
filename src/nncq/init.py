@@ -1,6 +1,10 @@
 """`nncq init`: first-time setup. Writes .env, puts the models in cache/models/hf (download or copy from
 --seed-models), pre-fetches the tree-sitter parsers (so nothing touches the network afterwards), registers the
-workspace to index and adds nncq to Copilot CLI."""
+workspace to index and sets up the agents on this machine (MCP server + nncq-user skill, see agents.py).
+
+Profiles: full (default) = embeddings + reranker on an NVIDIA GPU; lite (--lite, NNCQ_PROFILE=lite) = no torch, no
+models, no GPU: keyword search, symbol graph and .xdata cross-reference only. An index built in lite works unchanged
+in full: switch the profile, install the gpu extra, and the worker embeds what is already there."""
 from __future__ import annotations
 
 import json
@@ -13,6 +17,7 @@ from nncq import config
 
 QUESTIONS = [
     ("NNCQ_PORT", "MCP server port", "8765"),
+    ("NNCQ_PROFILE", "Profile: full = embeddings + reranker (NVIDIA GPU) | lite = keyword + graph only, no GPU", "full"),
     ("NNCQ_EMBED_TIER", "Embeddings: 2 = cards then full chunks (best), 1 = cards only (faster), 0 = none", "2"),
     ("NNCQ_BG_WHEN", "Embed in the background: always | idle (only when you are away from the keyboard)", "always"),
     ("NNCQ_GPU_MIN_FREE_MB", "Leave the GPU alone when it has less free VRAM than this (0 = ignore)", "0"),
@@ -21,7 +26,19 @@ QUESTIONS = [
 ]
 
 
-def _write_env(yes: bool) -> None:
+GPU_ONLY = {"NNCQ_EMBED_TIER", "NNCQ_BG_WHEN", "NNCQ_GPU_MIN_FREE_MB"}
+
+
+def _set_env(key: str, val: str) -> None:
+    cur = config.read_env_file()
+    if cur.get(key) == val:
+        return
+    lines = config.ENV_FILE.read_text(encoding="utf-8").splitlines() if config.ENV_FILE.exists() else []
+    lines = [ln for ln in lines if not ln.strip().startswith(key + "=")] + [f"{key}={val}"]
+    config.ENV_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _write_env(yes: bool, lite: bool = False) -> None:
     cur = config.read_env_file()
     if config.ENV_FILE.exists() and yes:
         print(f"== keeping {config.ENV_FILE}")
@@ -29,7 +46,9 @@ def _write_env(yes: bool) -> None:
     print("== settings (Enter = default; edit .env later; .env.example lists everything)")
     vals = {}
     for k, q, d in QUESTIONS:
-        dv = cur.get(k, d)
+        dv = "lite" if (k == "NNCQ_PROFILE" and lite) else cur.get(k, d)
+        if k in GPU_ONLY and vals.get("NNCQ_PROFILE") == "lite":
+            continue
         v = dv if yes or not sys.stdin.isatty() else (input(f"  {q} [{dv}]: ").strip() or dv)
         vals[k] = v
     keep = {k: v for k, v in cur.items() if k not in vals}
@@ -104,46 +123,33 @@ def _workspace(a) -> "object | None":
     return r
 
 
-def _copilot(a) -> None:
-    """Add nncq to Copilot CLI as a stdio server: Copilot starts it and it exits with Copilot."""
-    cfg = Path(os.environ.get("COPILOT_HOME", Path.home() / ".copilot")) / "mcp-config.json"
-    exe = Path(sys.executable).parent / ("nncq.exe" if os.name == "nt" else "nncq")
-    entry = {"type": "local", "command": str(exe), "args": ["serve", "--stdio"], "tools": ["*"]}
-    try:
-        data = json.loads(cfg.read_text(encoding="utf-8")) if cfg.exists() else {}
-    except ValueError:
-        print(f"!! {cfg} is not valid JSON; add this yourself:\n   \"nncq\": {json.dumps(entry)}")
-        return
-    if data.get("mcpServers", {}).get("nncq") == entry:
-        print(f"== Copilot CLI: already configured ({cfg})")
-        return
-    ok = a.copilot or (not a.yes and sys.stdin.isatty()
-                       and input(f"  Add nncq to Copilot CLI ({cfg})? [Y/n]: ").strip().lower() in ("", "y", "yes"))
-    if not ok:
-        return
-    if cfg.exists():
-        shutil.copy2(cfg, cfg.with_suffix(".json.bak-nncq"))
-    data.setdefault("mcpServers", {})["nncq"] = entry
-    cfg.parent.mkdir(parents=True, exist_ok=True)
-    cfg.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-    print(f"== Copilot CLI: added nncq (stdio) to {cfg}; restart Copilot or run /mcp")
-
-
 def main(a) -> int:
     for d in (config.DATA_DIR, config.LOG_DIR, config.TOOLS_DIR, config.HF_HOME):
         d.mkdir(parents=True, exist_ok=True)
-    _write_env(a.yes)
+    _write_env(a.yes, a.lite)
+    if a.lite:
+        _set_env("NNCQ_PROFILE", "lite")
     os.environ.update({k: v for k, v in config.read_env_file().items() if v})
-    ok = _models(a.seed_models)
+    lite = config.settings().lite
+    if lite:
+        print("== profile: lite (no torch, no models, no GPU): keyword search + symbol graph + data cross-reference")
+        ok = True
+    else:
+        ok = _models(a.seed_models)
     _parsers()
     r = _workspace(a)
-    _copilot(a)
+    from nncq import agents
+    targets = [t for t in (a.agents or "").split(",") if t.strip()] or (["copilot"] if a.copilot else None)
+    agents.run(targets, ask=not a.yes and sys.stdin.isatty())
+    what = "CPU parse" if lite else "CPU parse, GPU embedding alongside"
     if r is not None and (a.index or (not a.yes and sys.stdin.isatty() and not r.db.exists() and input(
-            "  Start indexing now (CPU parse, GPU embedding alongside)? [Y/n]: ").strip().lower() in ("", "y", "yes"))):
+            f"  Start indexing now ({what})? [Y/n]: ").strip().lower() in ("", "y", "yes"))):
         from nncq import cli
         cli.main(["index", "--name", r.name])
-    print("\nNext:\n  .venv\\Scripts\\nncq index                 (build / refresh the index; embedding runs alongside)"
+    print("\nNext:\n  .venv\\Scripts\\nncq index                 (build / refresh the index"
+          + ("" if lite else "; embedding runs alongside") + ")"
           "\n  copilot                                    (starts nncq itself; dashboard on http://127.0.0.1:"
           f"{config.settings().port}/)"
+          "\n  .venv\\Scripts\\nncq agents               (set up Copilot CLI / Claude Code / Visual Studio again)"
           "\n  .venv\\Scripts\\nncq mcp-config            (for other agents)")
     return 0 if ok else 1
