@@ -553,7 +553,7 @@ async function outlineTree(path){const d=await T('file_outline',{path});const ro
 const TYPEK=/^(class|struct|interface|enum|union|record|trait|type|typedef|protocol)$/;
 /* bases above the root (top-most first), the root, then the derived tree from the API's structured list */
 async function typeTree(sym,from){const d=await T('type_hierarchy',{name:sym});
- if(d.is_type===false)return [mk({label:`<span class="dim">${from?`${esc(from.sym)} is a ${esc(from.kind||'symbol')}; its owner ${esc(sym)}`:esc(sym)} is not a type</span>`,leaf:true})];
+ if(d.is_type===false&&!(d.derived||[]).length)return [mk({label:`<span class="dim">${from?`${esc(from.sym)} is a ${esc(from.kind||'symbol')}; its owner ${esc(sym)}`:esc(sym)} is not a type</span>`,leaf:true})];
  const out=[];if(from)out.push(mk({label:`<span class="dim">type tree of ${short(sym)}, the owner of ${short(from.sym)}</span>`,leaf:true}));
  for(const b of d.bases||[]){if(/^\(/.test(b))continue;b.split(' -> ').slice(1).reverse().forEach((c,i)=>out.push(mk({sym:c,label:`<span class="dim">${i?'↑':'base'}</span> ${short(c)}`,leaf:true,resolve:true})))}
  const here=!from&&cur&&cur.sym===d.type;

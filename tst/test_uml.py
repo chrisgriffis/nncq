@@ -233,6 +233,17 @@ def test_type_hierarchy_has_structured_derived_list(repo):
         st.close()
 
 
+def test_markdown_lists_members_and_called_methods(repo):
+    st = _st(repo)
+    try:
+        md = catalog.view(st, "class", "Device", fmt="markdown")["markdown"]
+        assert "  - [run()](" in md and "/uml/method/sym%3Adev%3A%3ADevice%3A%3Arun?view=class%3ADevice" in md
+        md = catalog.view(st, "sequence", "Device::run", fmt="markdown")["markdown"]
+        assert "\nCalls:\n" in md and "/uml/method/sym%3Adev%3A%3AConn%3A%3Aconnect?" in md
+    finally:
+        st.close()
+
+
 def test_ascii_is_bounded():
     m = {"kind": "class", "title": "big", "nodes": [{"id": f"n{i}", "label": f"C{i}", "members": []}
                                                    for i in range(50)], "edges": []}

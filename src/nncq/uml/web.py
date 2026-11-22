@@ -191,7 +191,7 @@ main{flex:1;display:grid;grid-template-columns:300px minmax(0,1fr) 360px;min-hei
 #canvas pre{margin:0;padding:12px;font:12px/1.35 ui-monospace,Cascadia Mono,Consolas,monospace;white-space:pre}
 #corner{display:flex;gap:4px;flex-wrap:wrap}.vh button{padding:2px 8px;font-size:12px;white-space:nowrap}body.embed .vh{gap:5px;padding:6px 8px}body.embed .vh button{padding:1px 6px;font-size:11px}body.embed .tabs a{padding:2px 6px}
 .hl rect,.hl circle,.hl polygon,.hl path.basic{stroke:var(--acc)!important;stroke-width:3px!important}
-#canvas g[data-n]{cursor:pointer}#canvas{cursor:grab}#canvas.panning{cursor:grabbing;user-select:none}#canvas.panning *{pointer-events:none}
+#canvas g[data-n]{cursor:pointer}#out .lnk{cursor:pointer}#out text.lnk:hover,#out .lnk:hover text{fill:var(--acc)!important;text-decoration:underline}#out g.lnk:hover p{color:var(--acc)!important;text-decoration:underline}#out text.messageText.hl{fill:var(--acc)!important;font-weight:600}#canvas{cursor:grab}#canvas.panning{cursor:grabbing;user-select:none}#canvas.panning *{pointer-events:none}
 .card{padding:10px 12px;border-bottom:1px solid var(--line)}.card .t{font-size:14px;font-weight:600;word-break:break-all}
 .kv{display:grid;grid-template-columns:auto 1fr;gap:3px 8px;font-size:12px;margin-top:6px}.kv span:nth-child(odd){color:var(--dim);text-align:right}
 .chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}.chip{font-size:11px;padding:2px 8px;border-radius:10px;background:#1a1e28;cursor:pointer}.chip:hover{color:var(--acc)}
@@ -383,7 +383,41 @@ function nodeOf(raw){if(!cur)return null;const id=raw.replace(/^n_/,'');const ns
 function wire(){const svg=$('#out svg');if(!svg)return;
  svg.querySelectorAll('[id]').forEach(el=>{const m=/(?:^|-)(n_[A-Za-z0-9_]+?)(?:-\d+)?$/.exec(el.id);if(!m)return;const n=nodeOf(m[1]);if(!n)return;
   el.setAttribute('data-n',n.id);el.addEventListener('click',ev=>{ev.stopPropagation();pick(n.id,true)})});
- if(cur.kind==='sequence')svg.querySelectorAll('text.actor,.actor-box text,text').forEach(t=>{const n=cur.model.nodes.find(x=>x.label===t.textContent.trim());if(n){t.style.cursor='pointer';t.addEventListener('click',()=>pick(n.id,true))}})}
+ const on=(el,f)=>{el.classList.add('lnk');el.addEventListener('click',ev=>{ev.stopPropagation();f(ev)})};
+ /* sequence: participants -> their type / module, message labels -> the called method (alt-click: the call site) */
+ if(cur.kind==='sequence'){svg.querySelectorAll('text.actor').forEach(t=>{const n=cur.model.nodes.find(x=>x.label===t.textContent.trim());if(n)on(t.parentElement||t,()=>pick(n.id,true))});
+  const ms=(cur.model.messages||[]).filter(m=>m.kind!=='note');svg.querySelectorAll('text.messageText').forEach((t,i)=>{const m=ms[i];if(!m)return;t.setAttribute('data-msg',m.id);
+   t.setAttribute('title',(m.target?m.target.q+'  '+m.target.path+':'+(m.target.line||''):'unresolved')+(m.ref?'\ncalled at '+m.ref.path+':'+m.ref.line+' (alt-click)':''));on(t,ev=>pickMsg(m.id,true,ev.altKey))})}
+ /* class / object: each member line -> that member */
+ if(cur.kind==='class'||cur.kind==='object')svg.querySelectorAll('g.node[data-n]').forEach(g=>{const n=cur.model.nodes.find(x=>x.id===g.getAttribute('data-n'));if(!n)return;
+  const ms=(n.members||[]).slice(0,25),groups=[['.members-group',ms.filter(m=>m.kind!=='method')],['.methods-group',ms.filter(m=>m.kind==='method')]];
+  for(const [sel,list] of groups){const gg=g.querySelector(sel);if(gg)[...gg.querySelectorAll(':scope>g.label')].forEach((lab,i)=>{const m=list[i];if(m)on(lab,()=>pickMember(n.id,m.id,true))})}});
+ /* component pins -> the port (its file, or the component it needs) */
+ svg.querySelectorAll('[id]').forEach(el=>{const m=/(?:^|-)n_([A-Za-z0-9_]+?)(?:-\d+)?$/.exec(el.id);if(!m)return;const owner=cur.model.nodes.find(x=>(x.ports||[]).some(p=>p.id===m[1]));
+  if(owner)on(el,()=>pickPort(owner.id,m[1],true))})}
+function selSync(extra,code){const x=synced()&&host();if(x&&x.modelPick)x.modelPick({h:'#/uml/view/'+encodeURIComponent(viewElem())+'?view='+encodeURIComponent(cur.key)+extra,...(code||{})})}
+const symx=(q,p)=>q?`<a class="chip" data-symx="${esc(q)}" data-symp="${esc(p||'')}" href="./#s=${encodeURIComponent(q)}&p=${encodeURIComponent(p||'')}&v=sym" title="open ${esc(q)} in the Symbol explorer">Symbol explorer</a>`:'';
+const at=r=>r&&r.path?`${esc(r.path)}:${r.line||1}`:'';
+function pickMsg(id,user,site){const m=(cur.model.messages||[]).find(x=>x.id===id);if(!m)return;const t=m.target||{},nm=i=>(cur.model.nodes.find(x=>x.id===i)||{}).label||i;
+ document.querySelectorAll('#out .hl').forEach(x=>x.classList.remove('hl'));const el=document.querySelector(`#out [data-msg="${CSS.escape(id)}"]`);if(el)el.classList.add('hl');
+ if(user)selSync('&msg='+encodeURIComponent(id),t.q?{q:t.q,path:t.path||''}:null);
+ $('#side').innerHTML=`<div class="card"><div class="t">${esc(m.label||m.kind)}</div><div class="kv"><span>message</span><span>${esc(m.kind)} · ${esc(nm(m.from))} → ${esc(nm(m.to))}</span>
+   ${t.q?`<span>calls</span><span class="mono">${esc(t.q)}</span><span>defined</span><span class="mono">${at(t)}</span>`:'<span>calls</span><span class="dim">not resolved to one definition</span>'}${m.ref?`<span>call site</span><span class="mono">${at(m.ref)}</span>`:''}</div>
+  <div class="acts">${t.path?`<button data-src="${esc(t.path)}" data-ln="${t.line||1}">Source</button>`:''}${m.ref?`<button data-src="${esc(m.ref.path)}" data-ln="${m.ref.line}">Call site</button>`:''}${symx(t.q,t.path)}</div></div><div id="more"></div>`;
+ if(site&&m.ref)source(m.ref.path,m.ref.line);else if(t.q){symbolCard(t.q,t.path)}}
+function pickMember(nid,mid,user){const n=cur.model.nodes.find(x=>x.id===nid),m=n&&(n.members||[]).find(x=>x.id===mid);if(!m)return;selN=nid;hl(nid);const r=m.ref||{},im=m.impl;
+ if(user)selSync('&n='+encodeURIComponent(nid)+'&mem='+encodeURIComponent(mid),r.q?{q:r.q,path:r.path||''}:null);
+ $('#side').innerHTML=`<div class="card"><div class="t">${esc(n.label)}::${esc(m.name)}${m.kind==='method'?'()':''}</div><div class="kv"><span>member</span><span>${esc(m.vis||'')} ${esc(m.kind)}${m.type?' · '+esc(m.type):''}${(m.mods||[]).length?' · '+esc(m.mods.join(' ')):''}</span>
+   ${r.q?`<span>element</span><span class="mono">sym:${esc(r.q)}</span>`:''}${m.decl?`<span>decl</span><span class="mono">${esc(m.decl)}</span>`:''}${r.path?`<span>declared</span><span class="mono">${at(r)}</span>`:''}${im?`<span>defined</span><span class="mono">${at(im)}</span>`:''}</div>
+  <div class="acts">${r.path?`<button data-src="${esc(r.path)}" data-ln="${r.line||1}">Declaration</button>`:''}${im?`<button data-src="${esc(im.path)}" data-ln="${im.line||1}">Definition</button>`:''}<span class="chip" data-go="${esc(nid)}">${esc(n.label)}</span>${symx(r.q,r.path)}</div></div><div id="more"></div>`;
+ if(im)source(im.path,im.line,im.end);else if(r.path)source(r.path,r.line,r.end)}
+function pickPort(nid,pid,user){const n=cur.model.nodes.find(x=>x.id===nid),pt=n&&(n.ports||[]).find(x=>x.id===pid);if(!pt)return;selN=nid;hl(nid);const r=pt.ref||{};
+ const need=pt.dir==='required'?cur.model.nodes.find(x=>x.label===pt.iface):null;
+ if(user)selSync('&n='+encodeURIComponent(nid),r.path?{path:r.path,line:r.line||1}:null);
+ $('#side').innerHTML=`<div class="card"><div class="t">${esc(n.label)} · ${esc(pt.name)}</div><div class="kv"><span>pin</span><span>${esc(pt.dir||'')}${pt.iface?' · '+esc(pt.iface):''}${pt.consumers?' · used by '+pt.consumers:''}</span>${r.path?`<span>file</span><span class="mono">${at(r)}</span>`:''}</div>
+  <div class="acts">${r.path?`<button data-src="${esc(r.path)}" data-ln="${r.line||1}">Source</button>`:''}<span class="chip" data-go="${esc(nid)}">${esc(n.label)}</span>${need?`<span class="chip" data-go="${esc(need.id)}">→ ${esc(need.label)}</span>`:''}</div>
+  ${(pt.files||[]).length?`<div class="chips">${pt.files.slice(0,20).map(f=>`<span class="chip" data-src="${esc(f)}" data-ln="1">${esc(f.split('/').pop())}</span>`).join('')}</div>`:''}</div><div id="more"></div>`;
+ if(r.path)source(r.path,r.line||1)}
 function nodeLinks(){const pre=$('#out pre');if(!pre||!cur)return;pre.addEventListener('click',()=>{const s=getSelection().toString().trim();const n=cur.model.nodes.find(x=>x.label===s);if(n)pick(n.id,true)})}
 function hl(id){document.querySelectorAll('#out .hl').forEach(x=>x.classList.remove('hl'));document.querySelectorAll(`#out [data-n="${CSS.escape(id)}"]`).forEach(x=>x.classList.add('hl'))}
 
@@ -410,12 +444,13 @@ async function symbolCard(q,path){const box=$('#more');box.innerHTML='<div class
   box.innerHTML=`<div class="card">${ch(d.bases,'bases')}${ch((d.derived||[]),'derived')}${ch(d.callers,'called by')}${ch(calls,'calls')}</div>`}catch(e){box.innerHTML=''}}
 $('#side').onclick=async e=>{const sx=e.target.closest('[data-symx]');const h=sx&&host();
  if(h&&!e.ctrlKey&&!e.shiftKey&&!e.metaKey){e.preventDefault();h.openSym(sx.dataset.symx,sx.dataset.symp);return}
- const t=e.target.closest('[data-go],[data-a],[data-mem],[data-sym],[data-open],[data-msg]');if(!t)return;
+ const t=e.target.closest('[data-go],[data-a],[data-mem],[data-sym],[data-open],[data-msg],[data-src]');if(!t)return;
+ if(t.dataset.src)return source(t.dataset.src,+t.dataset.ln||1);
  if(t.dataset.go)return pick(t.dataset.go,true);
  if(t.dataset.open)return go(t.dataset.open.replace(/^view:/,''));
  const n=cur.model.nodes.find(x=>x.id===$('#side').dataset.id);
- if(t.dataset.msg){const m=cur.model.messages.find(x=>x.id===t.dataset.msg);if(m&&m.ref)return source(m.ref.path,m.ref.line);return}
- if(t.dataset.mem){const m=(n.members||[]).find(x=>x.id===t.dataset.mem);const r=(m&&(m.impl||m.ref))||{};if(r.path)source(r.path,r.line,r.end);return}
+ if(t.dataset.msg)return pickMsg(t.dataset.msg,true);
+ if(t.dataset.mem)return pickMember(n.id,t.dataset.mem,true);
  if(t.dataset.sym){const s=t.dataset.sym;const hit=cur.model.nodes.find(x=>(x.ref||{}).q===s||x.label===s);if(hit)return pick(hit.id,true);
   try{const f=await T('find_symbol',{name:s});const m=/^(\S+) \[(\w+)\] (.+):(\d+)-(\d+)/.exec((f.definitions||[])[0]||'');if(m){symbolCard(m[1],m[3]);source(m[3],+m[4],+m[5])}}catch(x){}return}
  const l=loc(n);if(!l)return;const a=t.dataset.a;
@@ -518,10 +553,13 @@ async function route(){const h=host();if(h&&h.modelHash)h.modelHash(location.has
  if(!key){const x=/^(sym|comp|pkg):(.+)$/.exec(el);if(x)return x[1]==='pkg'?dflt('',x[2]):dflt(x[2],'')}
  const same=key&&cur&&cur.key===key&&!p.get('v'),sync=syncNext;syncNext=false;
  const d=key?(same?cur:await open(key)):null;let stale=false;
- if(d&&p.get('n')){if(d.model.nodes.some(x=>x.id===p.get('n')))pick(p.get('n'))}else if(d&&!same&&sync){const t=viewCode(),x=host();if(t&&x&&x.syncCode)x.syncCode(t)}
+ if(d&&p.get('msg'))pickMsg(p.get('msg'));else if(d&&p.get('n')&&p.get('mem'))pickMember(p.get('n'),p.get('mem'));
+ else if(d&&p.get('n')){if(d.model.nodes.some(x=>x.id===p.get('n')))pick(p.get('n'))}else if(d&&!same&&sync){const t=viewCode(),x=host();if(t&&x&&x.syncCode)x.syncCode(t)}
  if(!d){stale=true;if(el.startsWith('view:')||el.startsWith('composition:'))await open(el.replace(/^view:/,''))}
  else{if(p.get('v')&&p.get('v')!==d.rev)stale=true;
-  if(m[1]!=='view'){const n=d.model.nodes.find(x=>elemId(x)===el);if(n){pick(n.id);if(p.get('h')&&d.node_revs&&d.node_revs[n.id]!==p.get('h'))stale=true}else stale=true}}
+  if(m[1]!=='view'){const n=d.model.nodes.find(x=>elemId(x)===el);if(n){pick(n.id);if(p.get('h')&&d.node_revs&&d.node_revs[n.id]!==p.get('h'))stale=true}
+   else{const q=el.replace(/^sym:/,''),msg=(d.model.messages||[]).find(x=>x.target&&x.target.q===q),own=d.model.nodes.find(x=>(x.members||[]).some(y=>(y.ref||{}).q===q));
+    if(msg)pickMsg(msg.id);else if(own)pickMember(own.id,own.members.find(y=>(y.ref||{}).q===q).id);else stale=true}}}
  if(stale)notice('This link came from an outdated export: regenerate the diagram.')}
 window.addEventListener('hashchange',route);
 init();

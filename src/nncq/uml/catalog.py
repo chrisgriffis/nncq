@@ -353,6 +353,11 @@ def markdown(st: Store, r: dict, model: dict) -> str:
         repo, base = "", "http://127.0.0.1:8765/views"
     vrev = r["hash"] or _hash(model)
     rows, links = [], {}
+
+    def sub_link(kind: str, q: str, label: str, loc: dict | None) -> str:
+        url = f"{base}#/uml/{kind}/{quote('sym:' + q, safe='')}?{urlencode({'view': r['key'], 'v': vrev, 'repo': repo})}"
+        where = f" `{loc['path']}:{loc.get('line', 1)}`" if loc and loc.get("path") else ""
+        return f"[{label.replace('[', '(').replace(']', ')')}]({url}){where}"
     for n in model.get("nodes", []):
         try:
             el = node_element(n)
@@ -366,8 +371,18 @@ def markdown(st: Store, r: dict, model: dict) -> str:
             loc = (n.get("ref") or {})
             at = f" `{loc['path']}:{loc.get('line', 1)}`" if loc.get("path") else ""
             rows.append(f"- [{label}]({url}) {n.get('type', '')}{at}" + (" (stale)" if n.get("stale") else ""))
+            ms = [m for m in (n.get("members") or []) if (m.get("ref") or {}).get("q")]     # members, under their type
+            rows += [f"  - {sub_link('method' if m.get('kind') == 'method' else 'member', m['ref']['q'], m['name'] + ('()' if m.get('kind') == 'method' else ''), m.get('impl') or m['ref'])}"
+                     for m in ms[:15]] + ([f"  - … {len(ms) - 15} more"] if len(ms) > 15 else [])
         except Exception:
             rows.append(f"- {n.get('label') or n.get('id')}")
+    calls = {}
+    for m in model.get("messages", []):                     # sequence: every called method
+        t = m.get("target") or {}
+        if t.get("q") and t["q"] not in calls:
+            calls[t["q"]] = sub_link("method", t["q"], t["q"], t)
+    if calls:
+        rows += ["", "Calls:", ""] + [f"- {x}" for x in calls.values()]
     try:
         mm = render_mermaid.render(model, links)
     except Exception:
