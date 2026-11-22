@@ -102,6 +102,7 @@ class Settings:
     max_response_kb: int    # tool answers above this are trimmed and paged with more(cursor); 0 = no limit
     cache_minutes: float    # identical tool calls within this window are answered from memory; 0 = off
     lite: bool              # NNCQ_MODE=lite: no torch, no models, no GPU (keyword + graph + data xref only)
+    uml: bool               # build the UML/SysML model at index time (else on demand: nncq uml init / uml_build)
 
 
 def mode() -> str:
@@ -141,6 +142,7 @@ def settings() -> Settings:
         max_response_kb=_int("NNCQ_MAX_RESPONSE_KB", 16),
         cache_minutes=_float("NNCQ_CACHE_MINUTES", 15.0),
         lite=lite,
+        uml=_bool("NNCQ_UML", True),
     )
 
 

@@ -60,6 +60,7 @@ Also: [Profiles: full and lite](#profiles-full-and-lite) | [Agent setup](#agent-
 | `code_for_data` | engine: which code defines or implements the types this asset uses |
 | `asset_info`, `top_assets` | engine: what an asset contains, which assets are referenced most |
 | `index_status`, `update_index` | freshness, embedding progress, delta re-index |
+| `uml_view`, `uml_views`, `uml_find`, `uml_upsert`, `uml_delete`, `uml_protocol`, `uml_build` | UML / SysML diagrams and compositions, [see below](#uml-and-sysml-views) |
 
 ### Search and the AST work together
 
@@ -109,6 +110,18 @@ All caller and callee lookups stay inside the definition's language family (C/C+
 | `file_context` | Outline, `#include`s, who includes this file, and which files it calls into or is called from |
 | `hotspots` | Static top-N tables per folder: most-called functions, most-derived bases, biggest fan-out, most-included headers, largest functions, uncalled functions (dead-code candidates) |
 
+### UML and SysML views
+
+Diagrams are queries over the same index, so they exist for any parsed code without a build and stay in step with it.
+
+- **Model.** With `NNCQ_UML=true` (default; asked by `nncq init`) the parse also records, per definition: visibility, modifiers (static, virtual, pure, override, const, ...), field / return / parameter types, template parameters, stereotypes (interface, abstract, singleton, dataclass) and exact column spans; member fields and in-class declarations; edges `composes` / `aggregates` / `associates` (from member types: value or `unique_ptr`, `shared_ptr`, pointer or reference), `depends` (signatures), `instantiates` (`new`, `make_unique`, locals, Python `Foo()`), `import`, and the receiver of every call. A repo-level pass turns build files into components: CMake `add_library` / `add_executable` with their sources, include folders, link dependencies, options, toolchains and presets; Python packages and scripts; folders as a fallback. `#include` / `import` edges are resolved to files. Off: `nncq uml init`, the `uml_build` tool or the dashboard button builds it later (one CPU re-parse; vectors are kept). An older index is migrated in place.
+- **Generated views** (`uml_view(kind, subject)`): `class` (members, inheritance / realization, composition with role and multiplicity, dependencies), `object` (globals, singletons, members holding instances, creation sites), `component` (SysML-style: provided ports = files other components use, required ports = components used, connectors between them), `package` (folders and their include / import dependencies), `deployment` (executables, libraries, scripts, link dependencies, build configurations and toolchains), `sequence` (calls from an entry function in source order; lifelines are classes or modules; receivers are typed through members and locals).
+- **Agent-authored views and compositions** (`uml_upsert`, schema from `uml_protocol`). A view (diagram) references generated elements by stable id (`sym:`, `comp:`, `port:`, `pkg:`, `cfg:`, `composition:`, `view:`) and may add labelled bespoke nodes. A composition is a model element, not a diagram: members (generated elements, compositions, views, bespoke parts) plus typed connectors. Either may reference the other; cycles are rejected. The [`nncq-uml-modeler`](nncq-uml-modeler.skill.md) skill summarises the protocol.
+- **Never silently out of date.** A changed or removed file marks only the views and compositions that depend on it. Generated views regenerate on next access; authored ones get a per-member staleness report (changed, missing, moved) and keep their members until the agent or user repairs them. Answer caches and cached renders are dropped with them.
+- **Formats.** `ascii` for a chat window (plain views, capped), `markdown` (a Mermaid block plus a list of the elements shown, each linking to its dashboard page with view and element revisions; the page flags links from outdated exports), `mermaid`, `json` (the model: stable ids, source spans, absolute paths, declaration text).
+- **Dashboard: Views** (`/views`, linked from the main page). Grouped list, generate form, Mermaid rendering from a pinned local build (fetched and sha256-verified by `nncq init`; ASCII otherwise), click a node for its element, location, relations, callers / callees and source; "Generate .md". On a loopback host only, on an explicit click: reveal the file in Explorer, open it in the editor, edit and save it with git (stage, revert) or Perforce (edit, add, revert) buttons, edit a diagram's JSON. MCP never writes to the workspace.
+- **CLI:** `nncq uml init | view KIND [SUBJECT] | list | show KEY | find NAME | upsert FILE | delete KEY | protocol`.
+
 ### Compared with a grep or search skill
 
 A grep skill is good when you know the exact string. It falls short when you don't:
@@ -126,7 +139,7 @@ A grep skill is good when you know the exact string. It falls short when you don
 
 ## Local only and air-gapped
 
-- The network is used **only during `init`**: pip packages and a one-time download of the pinned model revisions into `cache/models/hf`.
+- The network is used **only during `init`**: pip packages and a one-time download of the pinned model revisions into `cache/models/hf`, plus one pinned, sha256-verified Mermaid build for the dashboard's diagrams (`cache/tools/mermaid`).
 - After that, the Hugging Face stack is forced offline (`HF_HUB_OFFLINE=1`, telemetry off). Models load from the repo folder.
 - There are no cloud APIs, no telemetry and no external services. The server binds to `127.0.0.1` only. A non-loopback bind is refused unless `NNCQ_TOKEN` is set.
 - For a machine with no internet, copy the models from another checkout with `init.ps1 -SeedModels <hub dir>`. pip still needs a wheel cache or mirror.
@@ -398,6 +411,7 @@ Day to day: `nncq sync` (p4 sync plus delta), `nncq status`, `nncq pause` / `nnc
 | `NNCQ_EXTRA_EXTENSIONS` | | e.g. `.foo,.bar=cpp` |
 | `NNCQ_IGNORE` | | extra ignore globs (on top of `.p4ignore`) |
 | `NNCQ_DATA` | `true` | maintain the `.xdata` cross-reference |
+| `NNCQ_UML` | `true` | build the UML / SysML model at index time (else on demand: `nncq uml init`) |
 | `NNCQ_HOST` / `NNCQ_PORT` / `NNCQ_TOKEN` | `127.0.0.1` / `8765` / | token required for non-loopback |
 | `NNCQ_WATCH` | `true` | re-index on file save |
 

@@ -37,6 +37,7 @@ from mcp.server.fastmcp import FastMCP
 
 from nncq import answers, ask as asker, config, datarefs, graph, health, indexer, repos, search, sysutil, worker
 from nncq.store import Store
+from nncq.uml import tools as uml_tools
 
 INSTRUCTIONS = """Local code index (nothing leaves this machine). Start with ask for any question: it returns a short,
 generated map (how the question was read, what the hits cover, one line of facts per hit, how hits call each
@@ -300,7 +301,7 @@ class _Watch:
 def build(stdio: bool = False) -> FastMCP:
     s = config.settings()
     loaded = list(repos.load().values())
-    mcp = FastMCP("nncq", instructions=instructions(loaded), host=s.host, port=s.port, stateless_http=True,
+    mcp = FastMCP("nncq", instructions=instructions(loaded) + "\n" + uml_tools.INSTRUCTIONS, host=s.host, port=s.port, stateless_http=True,
                   json_response=True, log_level="WARNING")
     if not config.is_loopback(s.host):
         from mcp.server.transport_security import TransportSecuritySettings
@@ -518,6 +519,8 @@ def build(stdio: bool = False) -> FastMCP:
             return {"repo": r.name, "root": str(r.root), "dirs": r.dirs,
                     **_job(r, "full build" if first or fresh else "delta", go)}
         return await _run(f)
+
+    uml_tools.register(mcp, _run, _with, _job, _owned)
     return mcp
 
 
@@ -528,6 +531,7 @@ _mcp: FastMCP | None = None
 WEB_TOOLS = {"ask", "expand", "search_code", "grep_code", "find_symbol", "file_outline", "find_references", "read_code",
              "symbol_context", "calls", "called_by", "call_tree", "call_trace", "impact", "type_hierarchy",
              "file_context", "hotspots", "data_for_code", "code_for_data", "data_file", "hot_data"}
+WEB_TOOLS |= uml_tools.WEB_TOOLS
 
 
 async def web_tool(name: str, args: dict) -> dict:
@@ -800,8 +804,10 @@ def _lazy_dashboard(sock: socket.socket) -> None:
     else:
         return
     from nncq import dashboard
+    from nncq.uml import web as uml_web
     _log(f"dashboard: first request, starting web server on {_info['dashboard']}")
-    app = _token_gate(dashboard.app(snapshot, control, web_tool, [_health_route()]), config.settings().token)
+    app = _token_gate(dashboard.app(snapshot, control, web_tool, [_health_route(), *uml_web.routes(web_tool)]),
+                      config.settings().token)
     try:
         _uvicorn(app, sock)
     except Exception:
@@ -905,8 +911,10 @@ def serve(stdio: bool = False) -> None:
     _info["mcp_url"] = f"http://{host}:{s.port}/mcp"
     _become_owner(None)
     from nncq import dashboard
+    from nncq.uml import web as uml_web
     app = mcp.streamable_http_app()
-    app.router.routes.extend([_health_route(), *dashboard.routes(snapshot, control, web_tool)])
+    app.router.routes.extend([_health_route(), *uml_web.routes(web_tool), *dashboard.routes(snapshot, control,
+                                                                                            web_tool)])
     print(f"nncq MCP server on {_info['mcp_url']}, dashboard {_info['dashboard']}", flush=True)
     try:
         _uvicorn(_token_gate(app, s.token), sock)

@@ -14,7 +14,7 @@ Pure python + tree-sitter, no torch: runs in worker processes.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from nncq import langs as L
 
@@ -38,15 +38,25 @@ class Symbol:
     start_line: int
     end_line: int
     signature: str
+    visibility: str = ""     # UML facts (uml/extract.py, when parsed with uml=True)
+    mods: str = ""
+    rtype: str = ""
+    params: str = ""
+    tparams: str = ""
+    stereo: str = ""
+    start_col: int = -1      # -1 = unknown
+    end_col: int = -1
 
 
 @dataclass
 class Edge:
     src: str                 # qualname of the source symbol ('' = file level)
     dst: str                 # call: callee identifier; inherits: base short name; include: basename (lower)
-    kind: str                # call | inherits | include
+    kind: str                # call | inherits | include (+ UML kinds, see uml/schema.py)
     line: int
     label: str = ""          # inherits: base as written; include: path as written
+    role: str = ""           # UML: member / variable name; call: receiver
+    col: int = -1
 
 
 @dataclass
@@ -135,15 +145,17 @@ def decode(data: bytes) -> str:
     return data.decode("utf-8", "replace")
 
 
-def process(path: str, data: bytes, lang: str, max_chars: int = 3000, dsl: dict | None = None) -> FileResult:
-    """dsl: the profile's spec for this language (profiles.Dsl.spec()) when it is a brace-block DSL."""
+def process(path: str, data: bytes, lang: str, max_chars: int = 3000, dsl: dict | None = None,
+            uml: bool = False) -> FileResult:
+    """dsl: the profile's spec for this language (profiles.Dsl.spec()) when it is a brace-block DSL.
+    uml: also record the UML facts (members, types, stereotypes, call receivers) on the same walk."""
     text = decode(data)
     lines = text.splitlines(keepends=True) or [""]
     try:
         if dsl is not None:
             return _dsl(path, lines, lang, max_chars, dsl)
         if L.is_ast_lang(lang):
-            return _Ast(path, data, lines, lang, max_chars).run()
+            return _Ast(path, data, lines, lang, max_chars, uml).run()
     except Exception as e:  # a parser failure must never lose the file: fall back to windows
         r = _text(lines, lang, max_chars)
         r.error = f"{type(e).__name__}: {e}"
@@ -208,10 +220,14 @@ class _Def:
 
 
 class _Ast:
-    def __init__(self, path, data, lines, lang, max_chars):
+    def __init__(self, path, data, lines, lang, max_chars, uml=False):
         self.path, self.data, self.lines, self.lang, self.max = path, data, lines, lang, max_chars
         self.sep = L.QUAL_SEP.get(lang, ".")
         self.r = FileResult(lang, "ast")
+        self.uml = uml
+        if uml:
+            from nncq.uml.extract import Extractor
+        self.x = Extractor(self) if uml else None
 
     def run(self) -> FileResult:
         data, skipped = flatten_pp(self.data) if self.lang in _PP_LANGS and b"#" in self.data else (self.data, set())
@@ -221,6 +237,8 @@ class _Ast:
         self._collect(root)
         if skipped:
             self._recover(skipped)
+        if self.x is not None:
+            self.x.finish()
         if not self.r.chunks:
             self.r.chunks = _text(self.lines, self.lang, self.max).chunks
         return self.r
@@ -228,7 +246,7 @@ class _Ast:
     def _recover(self, skipped: set[int]) -> None:
         """Definitions and calls that only exist in the #if branches flatten_pp dropped (other platforms):
         taken from a parse of the original text and attached to the enclosing definition of the main parse."""
-        other = _Ast(self.path, self.data, self.lines, self.lang, self.max)
+        other = _Ast(self.path, self.data, self.lines, self.lang, self.max, self.uml)
         other._collect(_parser(self.lang).parse(self.data).root_node)
         have = {(s.name, s.start_line) for s in self.r.symbols}
         scopes = [(s.start_line, s.end_line, s.qualname) for s in self.r.symbols]
@@ -241,11 +259,10 @@ class _Ast:
             if s.start_line - 1 in skipped and (s.name, s.start_line) not in have:
                 parent = enclosing(s.start_line)
                 q = self.sep.join(x for x in (parent, s.name) if x)
-                added.append(Symbol(s.name, q, s.kind, parent, s.start_line, s.end_line, s.signature))
+                added.append(replace(s, qualname=q, parent=parent))
         self.r.symbols += added
         scopes += [(s.start_line, s.end_line, s.qualname) for s in added]
-        self.r.edges += [Edge(enclosing(e.line), e.dst, e.kind, e.line, e.label)
-                         for e in other.r.edges if e.line - 1 in skipped]
+        self.r.edges += [replace(e, src=enclosing(e.line)) for e in other.r.edges if e.line - 1 in skipped]
 
     # -- definitions
     def def_info(self, n) -> _Def | None:
@@ -429,22 +446,29 @@ class _Ast:
                 qual = self.sep.join(names)
                 span = n.parent if n.parent is not None and n.parent.type in L.WRAPPERS else n
                 sig = self._signature(n.start_point[0])
-                self.r.symbols.append(Symbol(d.name, qual, kind, self.sep.join(names[:-1]),
-                                             span.start_point[0] + 1, n.end_point[0] + 1, sig))
+                sym = Symbol(d.name, qual, kind, self.sep.join(names[:-1]), span.start_point[0] + 1,
+                             n.end_point[0] + 1, sig)
+                self.r.symbols.append(sym)
                 parents, encl, encl_kind = names, qual, kind
                 if kind in L.CLASSLIKE_KINDS:
                     for short, full, line in self._bases(n):
                         self.r.edges.append(Edge(qual, short, "inherits", line, full))
+                if self.x is not None:
+                    self.x.on_def(n, span, sym)
             elif n.type in L.CALL_TYPES:
                 callee = self._callee(n)
                 if callee:
-                    self.r.edges.append(Edge(encl, callee, "call", n.start_point[0] + 1))
+                    self.r.edges.append(Edge(encl, callee, "call", n.start_point[0] + 1,
+                                             role=self.x.on_call(n, encl, callee) if self.x is not None else "",
+                                             col=n.start_point[1] if self.x is not None else -1))
             elif n.type == "preproc_include":
                 p = n.child_by_field_name("path")
                 inc = _txt(p).strip().strip('"<>').replace("\\", "/") if p is not None else ""
                 if inc:
                     self.r.edges.append(Edge("", inc.rsplit("/", 1)[-1].lower(), "include",
                                              n.start_point[0] + 1, inc))
+            elif self.x is not None:
+                self.x.on_node(n, encl, encl_kind)
             for c in reversed(n.children):
                 if c.named_child_count or c.is_named:
                     stack.append((c, parents, encl, encl_kind))

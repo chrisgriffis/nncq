@@ -2,7 +2,7 @@
 
 For each target it does two things:
   mcp    register nncq as a stdio MCP server (the agent starts it; it exits with the agent)
-  skill  install nncq-user.skill.md, which teaches the agent to investigate with several small asks and
+  skill  install nncq-user.skill.md (and nncq-uml-modeler.skill.md when NNCQ_UML is on), which teaches the agent to investigate with several small asks and
          answer with one compiled digest (the MCP server instructions carry a short version of the same)
 
 Targets:
@@ -26,6 +26,7 @@ from nncq import config
 
 SKILL_NAME = "nncq-user"
 SKILL_SRC = config.ROOT / "nncq-user.skill.md"
+UML_SKILL = ("nncq-uml-modeler", config.ROOT / "nncq-uml-modeler.skill.md")     # optional: with NNCQ_UML on
 TARGETS = ("copilot", "claude", "vs")
 LABEL = {"copilot": "Copilot CLI", "claude": "Claude Code", "vs": "Visual Studio (Copilot agent mode)"}
 
@@ -54,16 +55,20 @@ def _merge_json(path: Path, section: str, entry: dict) -> str:
     return f"added nncq to {path}"
 
 
-def _skill(dest_root: Path) -> str:
-    if not SKILL_SRC.exists():
-        return f"!! skill source missing: {SKILL_SRC}"
-    dst = dest_root / SKILL_NAME / "SKILL.md"
-    new = SKILL_SRC.read_text(encoding="utf-8")
+def _skill(dest_root: Path, name: str = SKILL_NAME, src: Path = SKILL_SRC) -> str:
+    if not src.exists():
+        return f"!! skill source missing: {src}"
+    dst = dest_root / name / "SKILL.md"
+    new = src.read_text(encoding="utf-8")
     if dst.exists() and dst.read_text(encoding="utf-8") == new:
         return f"skill up to date ({dst})"
     dst.parent.mkdir(parents=True, exist_ok=True)
     dst.write_text(new, encoding="utf-8")
     return f"skill installed ({dst})"
+
+
+def _uml_skill(dest_root: Path) -> list[str]:
+    return [_skill(dest_root, *UML_SKILL)] if config.settings().uml else []
 
 
 def detected() -> list[str]:
@@ -84,7 +89,8 @@ def setup(target: str) -> list[str]:
     if target == "copilot":
         entry = {"type": "local", "command": cmd, "args": ["serve", "--stdio"], "tools": ["*"]}
         return [_merge_json(h / ".copilot" / "mcp-config.json", "mcpServers", entry),
-                _skill(h / ".copilot" / "skills"), "restart Copilot CLI or run /mcp"]
+                _skill(h / ".copilot" / "skills"), *_uml_skill(h / ".copilot" / "skills"),
+                "restart Copilot CLI or run /mcp"]
     if target == "claude":
         out = []
         claude = shutil.which("claude")
@@ -99,7 +105,7 @@ def setup(target: str) -> list[str]:
                            f"!! claude mcp add failed: {(r.stderr or r.stdout).strip()}")
         else:
             out.append("run: claude " + " ".join(add))
-        return out + [_skill(h / ".claude" / "skills")]
+        return out + [_skill(h / ".claude" / "skills"), *_uml_skill(h / ".claude" / "skills")]
     if target == "vs":
         entry = {"type": "stdio", "command": cmd, "args": ["serve", "--stdio"]}
         return [_merge_json(h / ".mcp.json", "servers", entry),

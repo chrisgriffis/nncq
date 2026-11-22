@@ -208,7 +208,7 @@ ul.tree{list-style:none;margin:0;padding-left:16px}ul.tree.root{padding-left:0}
  </div>
 
  <div id="right" class="pane">
-  <div class="ph"><span class="navb"><a onclick="history.back()" title="back (Alt+←, mouse back)">‹</a><a onclick="history.forward()" title="forward (Alt+→)">›</a></span><div class="seg" id="vtab"><a data-v="hits">Active search</a><a data-v="sym">Symbol</a></div><span id="vtitle" class="mono"></span></div>
+  <div class="ph"><span class="navb"><a onclick="history.back()" title="back (Alt+←, mouse back)">‹</a><a onclick="history.forward()" title="forward (Alt+→)">›</a></span><div class="seg" id="vtab"><a data-v="hits">Active search</a><a data-v="sym">Symbol</a></div><a href="views" title="UML / SysML diagrams and compositions" style="font-size:12px;color:var(--acc);white-space:nowrap">Views ↗</a><span id="vtitle" class="mono"></span></div>
   <div class="vb pb" id="vhits" style="padding:0"><div class="empty">Ask something, then pick a file.</div></div>
   <div class="vb" id="vsym" hidden><div class="scard" id="scard"></div><div class="cpath" id="cpath"></div><div class="pb" style="padding:0"><pre class="code tall" id="sview"><div class="empty">Find a symbol, or click one.</div></pre></div></div>
  </div>
