@@ -3,7 +3,7 @@ links to every definition named `update`. Where that is ambiguous, results say s
 targets first (same class, or the caller's code mentions the class).
 
   symbol_context   one-call "neighbourhood" card: definition(s), bases/derived/members or
-                   callers/callees/overrides, engine data types, how widely it is mentioned
+                   callers/callees/overrides, data types that use it (profile data xref), how widely it is mentioned
   calls            flat 'Calls From' table: what this function calls, in source order
   called_by        flat 'Calls To' table: every caller with file:line, ranked when the name is ambiguous
   call_tree        callers (in) or callees (out), N levels, as an indented tree
@@ -361,7 +361,7 @@ def symbol_context(store: Store, name: str, path: str = "", limit: int = 12) -> 
             from nncq import datarefs
             dt = datarefs.data_for_code(store, p.qualname if "." in p.qualname else p.name, k=1)["data_types"]
             if dt:
-                out["data_types"] = [f"{t['type']} ({t['via']}, {t['files']} .xdata files)" for t in dt[:6]]
+                out["data_types"] = [f"{t['type']} ({t['via']}, {t['files']} data files)" for t in dt[:6]]
     if p.kind in FUNCS or not is_type(p.kind):
         cs, total, files = callers(store, p, p.name, limit, ambiguous)
         if total:

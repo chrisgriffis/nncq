@@ -1,13 +1,17 @@
-"""engine .xdata data cross-reference: which assets instantiate which types, and which assets reference which.
+"""Data cross-reference, driven by a codebase profile's [[xref]] rules (profiles.Xref): which data files
+instantiate which types, and which data files reference which.
 
-No chunks, no vectors: ~35 s ripgrep pass over a full workspace (392k files / 30 GB), then deltas.
-Answers: what data uses this code (type) / what code does this asset use / who references this asset /
-most referenced assets. Static (what the files say), name-based.
+A rule = a glob for the data files + a regex whose (?P<type>...) group names a type a file instantiates and/or
+one whose (?P<ref>...) group names another data file it references (path or key, without extension).
+No chunks, no vectors: one ripgrep pass per rule (hundreds of thousands of files in a minute or so), then deltas.
+Answers: what data uses this code (type) / what code does this data file use / who references this file /
+most referenced files. Static (what the files say), name-based.
 """
 from __future__ import annotations
 
 import bisect
 import collections
+import json
 import os
 import re
 import subprocess
@@ -15,10 +19,9 @@ import time
 from pathlib import Path
 
 from nncq import walk
-from nncq.store import Store, rkey
+from nncq.profiles import Xref
+from nncq.store import Store, rkey, strip_ext
 
-RG_PAT = r'<instance [^>]*?type="[^"]+"|ref="[^"]*/[0-9a-fA-F-]{36}"'
-_PY_PAT = re.compile(rb'<instance [^>]*?type="([^"]+)"|ref="([^"]*)/[0-9a-fA-F-]{36}"')
 _IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]{2,}")
 
 
@@ -87,57 +90,83 @@ class _Writer:
             self.s.db.execute("DELETE FROM data_files WHERE id=?", (row[0],))
 
 
-def scan_full(store: Store, root: Path, extra_ignore: str = "", log=print) -> dict:
-    """Rebuild the whole cross-reference with one ripgrep pass."""
+_RX: dict[str, re.Pattern] = {}
+
+
+def _rx(rule: Xref) -> re.Pattern:
+    r = _RX.get(rule.pattern)
+    if r is None:
+        r = _RX[rule.pattern] = re.compile(rule.pattern.encode())
+    return r
+
+
+def _collect(rule: Xref, m: bytes, types: collections.Counter, refs: set) -> None:
+    for mm in _rx(rule).finditer(m):
+        g = mm.groupdict()
+        if g.get("type"):
+            types[g["type"].decode("utf-8", "replace")] += 1
+        elif g.get("ref") is not None:
+            refs.add(g["ref"].decode("utf-8", "replace").replace("\\", "/").strip("/").lower())
+
+
+def scan_full(store: Store, root: Path, rules: list[Xref], extra_ignore: str = "", log=print) -> dict:
+    """Rebuild the whole cross-reference with one ripgrep pass per rule."""
     t0 = time.time()
-    cmd = [walk.rg_exe(), *walk.ignore_args(root, extra_ignore), "-o", "--null", "--no-line-number",
-           "--with-filename", "-g", "*.xdata", RG_PAT, *walk.top_dirs(root)]
-    proc = subprocess.Popen(cmd, cwd=root, stdout=subprocess.PIPE, stdin=subprocess.DEVNULL, bufsize=1 << 20)
     nfiles = 0
     with store.tx() as db:
         for t in ("data_inst", "data_refs", "data_files", "data_assets", "data_types"):
             db.execute(f"DELETE FROM {t}")
         w = _Writer(store)
-        cur, types, refs = None, collections.Counter(), set()
-
-        def flush():
-            nonlocal nfiles
-            if cur is None:
-                return
-            try:
-                st = os.stat(root / cur)
-            except OSError:
-                return
-            w.put(cur, st.st_size, st.st_mtime_ns, types, refs)
-            nfiles += 1
-            if nfiles % 50000 == 0:
-                log(f"  data: {nfiles} files ({time.time() - t0:.0f}s)")
-
-        for line in proc.stdout:
-            path, _, m = line.rstrip(b"\r\n").partition(b"\0")
-            p = path.decode("utf-8", "replace").replace("\\", "/")
-            if p != cur:
-                flush()
-                cur, types, refs = p, collections.Counter(), set()
-            if m.startswith(b"<instance"):
-                i = m.rfind(b'type="')
-                types[m[i + 6:m.rfind(b'"')].decode("utf-8", "replace")] += 1
-            else:
-                refs.add(m[5:m.rfind(b"/")].decode("utf-8", "replace").lower())
-        flush()
-        proc.wait()
+        for rule in rules:
+            nfiles += _scan_rule(w, root, rule, extra_ignore, log, t0)
         _refresh_stats(store)
         store.set_meta("data_scanned_at", time.time())
     return {"files": nfiles, "seconds": round(time.time() - t0, 1)}
 
 
-DELTA_BATCH = 2000   # .xdata files per write transaction, so readers and other writers are never blocked long
+def _scan_rule(w: "_Writer", root: Path, rule: Xref, extra_ignore: str, log, t0: float) -> int:
+    cmd = [walk.rg_exe(), *walk.ignore_args(root, extra_ignore), "-o", "--null", "--no-line-number",
+           "--with-filename", "-g", rule.glob, "-e", rule.pattern, *walk.top_dirs(root)]
+    proc = subprocess.Popen(cmd, cwd=root, stdout=subprocess.PIPE, stdin=subprocess.DEVNULL, bufsize=1 << 20)
+    nfiles = 0
+    cur, types, refs = None, collections.Counter(), set()
+
+    def flush():
+        nonlocal nfiles
+        if cur is None:
+            return
+        try:
+            st = os.stat(root / cur)
+        except OSError:
+            return
+        w.put(cur, st.st_size, st.st_mtime_ns, types, refs)
+        nfiles += 1
+        if nfiles % 50000 == 0:
+            log(f"  data: {nfiles} files ({time.time() - t0:.0f}s)")
+
+    for line in proc.stdout:
+        path, _, m = line.rstrip(b"\r\n").partition(b"\0")
+        p = path.decode("utf-8", "replace").replace("\\", "/")
+        if p != cur:
+            flush()
+            cur, types, refs = p, collections.Counter(), set()
+        _collect(rule, m, types, refs)
+    flush()
+    proc.wait()
+    return nfiles
 
 
-def scan_paths(store: Store, root: Path, paths: list[str], log=print) -> int:
-    """Delta: (re)scan the given relative .xdata paths; missing ones are removed. Cost is proportional to
+DELTA_BATCH = 2000   # data files per write transaction, so readers and other writers are never blocked long
+
+
+def _rule_for(rules: list[Xref], path: str) -> Xref | None:
+    return next((r for r in rules if r.matches(path)), None)
+
+
+def scan_paths(store: Store, root: Path, rules: list[Xref], paths: list[str], log=print) -> int:
+    """Delta: (re)scan the given relative data paths; missing ones are removed. Cost is proportional to
     len(paths) only (stats are updated incrementally), so even a huge sync never triggers a full rebuild."""
-    paths = [p.replace("\\", "/") for p in paths if p.lower().endswith(".xdata")]
+    paths = [p.replace("\\", "/") for p in paths if _rule_for(rules, p.replace("\\", "/"))]
     t0 = time.time()
     for i in range(0, len(paths), DELTA_BATCH):
         with store.tx():
@@ -151,11 +180,7 @@ def scan_paths(store: Store, root: Path, paths: list[str], log=print) -> int:
                     w.delete(p)
                     continue
                 types, refs = collections.Counter(), set()
-                for t, r in _PY_PAT.findall(data):
-                    if t:
-                        types[t.decode("utf-8", "replace")] += 1
-                    else:
-                        refs.add(r.decode("utf-8", "replace").lower())
+                _collect(_rule_for(rules, p), data, types, refs)
                 w.put(p, st.st_size, st.st_mtime_ns, types, refs)
             _refresh_dirty(store, w)
         if len(paths) > DELTA_BATCH:
@@ -163,17 +188,22 @@ def scan_paths(store: Store, root: Path, paths: list[str], log=print) -> int:
     return len(paths)
 
 
-def update(store: Store, root: Path, extra_ignore: str = "", log=print) -> dict:
-    """Stat-compare every .xdata against the table; rescan changed/new, drop removed.
-    Only the very first build does a full scan; after that, any amount of change is applied as a delta."""
-    if store.meta("data_scanned_at") is None:
-        return scan_full(store, root, extra_ignore, log)
+def update(store: Store, root: Path, rules: list[Xref], extra_ignore: str = "", log=print) -> dict:
+    """Stat-compare every data file against the table; rescan changed/new, drop removed.
+    Only the very first build (or a change of rules) does a full scan; after that, any change is a delta."""
+    sig = json.dumps([[r.glob, r.pattern] for r in rules])
+    store.set_meta("data_type_suffix", next((r.type_suffix for r in rules if r.type_suffix), ""))
+    store.set_meta("data_label", rules[0].label if rules else "data file")
+    if store.meta("data_scanned_at") is None or store.meta("data_rules", sig) != sig:
+        res = scan_full(store, root, rules, extra_ignore, log)
+        store.set_meta("data_rules", sig)
+        return res
     t0 = time.time()
-    on_disk = walk.stat_many(root, walk.list_files(root, ["*.xdata"], extra_ignore))
+    on_disk = walk.stat_many(root, walk.list_files(root, [r.glob for r in rules], extra_ignore))
     known = {p: (s, m) for p, s, m in store.q("SELECT path, size, mtime_ns FROM data_files")}
     changed = [p for p, st in on_disk.items() if known.get(p) != st]
     removed = [p for p in known if p not in on_disk]
-    scan_paths(store, root, changed + removed, log)
+    scan_paths(store, root, rules, changed + removed, log)
     return {"changed": len(changed), "removed": len(removed), "seconds": round(time.time() - t0, 1)}
 
 
@@ -244,20 +274,20 @@ def resolve(store: Store, q: str, limit: int = 20) -> list[tuple[int, str, int]]
                    "ORDER BY inbound DESC LIMIT ?", (rk, rk + "/", rk + "0", limit))
     if not rows:
         rows = store.q("SELECT id, path, inbound FROM data_files WHERE path LIKE ? ORDER BY inbound DESC LIMIT ?",
-                       (f"%{q.removesuffix('.xdata')}%", limit))
+                       (f"%{strip_ext(q)}%", limit))
     return rows
 
 
 def _keys_for_path(path: str) -> list[str]:
-    parts = path.lower().removesuffix(".xdata").split("/")
+    parts = strip_ext(path.lower()).split("/")
     return ["/".join(parts[i:]) for i in range(len(parts))]
 
 
 def asset_info(store: Store, q: str, k: int = 25) -> dict:
-    """Types instantiated, outgoing references, incoming referrers for one asset."""
+    """Types instantiated, outgoing references, incoming referrers for one data file."""
     rows = resolve(store, q, 10)
     if not rows:
-        return {"error": f"no .xdata asset matches {q!r}"}
+        return {"error": f"no data file matches {q!r}"}
     fid, path, inbound = rows[0]
     types = store.q("SELECT t.name, i.n FROM data_inst i JOIN data_types t ON t.id=i.type_id WHERE i.file_id=? "
                     "ORDER BY i.n DESC", (fid,))
@@ -277,12 +307,13 @@ def _type_rows(store: Store, where: str, args) -> list[tuple[int, str, str, int,
     return store.q(f"SELECT id, name, short, files, instances FROM data_types WHERE {where}", args)
 
 
-def data_for_code(store: Store, name: str, k: int = 15) -> dict:
-    """What data uses this code: data types named by / used in the code symbol, their subclasses, and top assets.
+def data_for_code(store: Store, name: str, k: int = 15, suffix: str = "") -> dict:
+    """What data uses this code: data types named by / used in the code symbol, their subclasses, and top files.
 
-    Matching (name-based): the data type itself (Entity.LayerData / LayerData), the runtime convention
-    Foo -> FooData, and any data type name that appears in the symbol's code.
+    Matching (name-based): the data type itself (Module.FooData / FooData), the profile's naming convention
+    (type_suffix: Foo -> FooData), and any data type name that appears in the symbol's code.
     """
+    suffix = suffix or store.meta("data_type_suffix", "") or ""
     name = name.strip()
     base = re.split(r"::|\.", name)[-1]
     found: dict[int, dict] = {}
@@ -292,9 +323,9 @@ def data_for_code(store: Store, name: str, k: int = 15) -> dict:
             found.setdefault(tid, {"type": tname, "via": via, "files": files, "instances": inst})
 
     add(_type_rows(store, "name=? COLLATE NOCASE OR short=? COLLATE NOCASE OR short=? COLLATE NOCASE",
-                   (name, base, base + "Data")), "name")
+                   (name, base, base + suffix)), "name")
     syms = store.q("SELECT s.file_id, s.start_line, s.end_line, s.qualname, f.path FROM symbols s JOIN files f ON f.id=s.file_id "
-                   "WHERE (s.name=? COLLATE NOCASE OR s.qualname=? COLLATE NOCASE) AND f.lang!='xdata' LIMIT 10", (name, name))
+                   "WHERE (s.name=? COLLATE NOCASE OR s.qualname=? COLLATE NOCASE) LIMIT 10", (name, name))
     idents: set[str] = set()
     for fid, s, e, _, _ in syms:
         for (txt,) in store.q("SELECT text FROM chunks WHERE file_id=? AND end_line>=? AND start_line<=? LIMIT 20",
@@ -304,7 +335,7 @@ def data_for_code(store: Store, name: str, k: int = 15) -> dict:
     for i in range(0, len(idents), 500):
         part = idents[i:i + 500]
         add(_type_rows(store, f"short IN ({','.join('?' * len(part))})", part), "used in code")
-    # subclasses declared in .ddf: `class Foo : Bar` -> data typed Foo is also Bar data
+    # subclasses declared in code / definition files: `class Foo : Bar` -> data typed Foo is also Bar data
     frontier = {f["type"] for f in found.values()}
     seen = set(frontier)
     for _ in range(6):
@@ -323,22 +354,23 @@ def data_for_code(store: Store, name: str, k: int = 15) -> dict:
     results = []
     via_rank = {"name": 0, "subclass": 1, "used in code": 2}
     for tid, info in sorted(found.items(), key=lambda kv: (via_rank[kv[1]["via"]], -kv[1]["files"]))[:40]:
-        info["top_assets"] = [{"path": p, "instances": n, "inbound_refs": ib} for p, n, ib in store.q(
+        info["top_files"] = [{"path": p, "instances": n, "inbound_refs": ib} for p, n, ib in store.q(
             "SELECT f.path, i.n, f.inbound FROM data_inst i JOIN data_files f ON f.id=i.file_id WHERE i.type_id=? "
             "ORDER BY f.inbound DESC, i.n DESC LIMIT ?", (tid, k))]
         results.append(info)
     return {"query": name, "code_symbols": [f"{s[4]}:{s[1]} {s[3]}" for s in syms], "data_types": results}
 
 
-def code_for_data(store: Store, q: str, k: int = 8) -> dict:
-    """What code does this asset (or data type) use: per type, its .ddf definition, the runtime class
-    (FooData -> Foo), and code that mentions the type."""
+def code_for_data(store: Store, q: str, k: int = 8, suffix: str = "") -> dict:
+    """What code does this data file (or data type) use: per type, its definition, the runtime class
+    (type_suffix: FooData -> Foo), and code that mentions the type."""
+    suffix = suffix or store.meta("data_type_suffix", "") or ""
     rows = resolve(store, q, 5) if not re.fullmatch(r"[\w.]+", q) or "/" in q else []
     types = []
     if not rows:
         types = [(n, s, 0) for _, n, s, _, _ in _type_rows(store, "name=? COLLATE NOCASE OR short=? COLLATE NOCASE", (q, q))]
         if not types:
-            rows = resolve(store, q, 5)        # a bare asset name like FX_Foo_1
+            rows = resolve(store, q, 5)        # a bare file name
     if rows:
         fid, path, _ = rows[0]
         types = store.q("SELECT t.name, t.short, i.n FROM data_inst i JOIN data_types t ON t.id=i.type_id "
@@ -346,36 +378,36 @@ def code_for_data(store: Store, q: str, k: int = 8) -> dict:
     else:
         path = ""
         if not types:
-            return {"error": f"no asset or data type matches {q!r}"}
+            return {"error": f"no data file or data type matches {q!r}"}
     out = []
     code_paths: list[str] = []
     for tname, short, n in types:
-        names = [short] + ([short[:-4]] if short.endswith("Data") and len(short) > 4 else [])
+        names = [short] + ([short[:-len(suffix)]] if suffix and short.endswith(suffix) and len(short) > len(suffix) else [])
         ph = ",".join("?" * len(names))
         defs = store.q(f"SELECT f.path, s.start_line, s.kind, s.qualname FROM symbols s JOIN files f ON f.id=s.file_id "
-                       f"WHERE (s.name IN ({ph}) OR s.qualname=? COLLATE NOCASE) AND f.lang!='xdata' "
+                       f"WHERE (s.name IN ({ph}) OR s.qualname=? COLLATE NOCASE) "
                        f"AND s.kind NOT IN ('function','method') ORDER BY (s.qualname=?) DESC LIMIT ?",
                        (*names, tname, tname, k))
         users = store.q("SELECT DISTINCT f.path FROM fts JOIN chunks c ON c.id=fts.rowid JOIN files f ON f.id=c.file_id "
-                        "WHERE fts MATCH ? AND f.lang!='xdata' LIMIT ?", (f'body:"{short}"', k * 3))
+                        "WHERE fts MATCH ? LIMIT ?", (f'body:"{short}"', k * 3))
         code_paths += [d[0] for d in defs]
         out.append({"type": tname, "instances": n,
                     "definitions": [f"{p}:{ln} [{kd}] {qn}" for p, ln, kd, qn in defs],
                     "mentioned_in": [u[0] for u in users][:k]})
-    return {"asset": path, "types": out}
+    return {"file": path, "types": out}
 
 
 # ------------------------------------------------------------------ most referenced
 
 def top_assets(store: Store, k: int = 50, under: str = "", group_depth: int = 0) -> list[dict]:
-    """Most-referenced assets (static inbound reference count); group_depth rolls up to folders."""
+    """Most-referenced data files (static inbound reference count); group_depth rolls up to folders."""
     args: list = []
     where = "inbound>0"
     if under:
         where += " AND path LIKE ?"
         args.append(under.replace("\\", "/").rstrip("/") + "/%")
     if not group_depth:
-        # The same asset key often exists under several source roots (test data copies); a reference resolves
+        # The same key often exists under several source roots (test data copies); a reference resolves
         # to all of them, so show the key once, with the copy that has the most content first.
         rows = store.q(f"SELECT path, inbound, instances, size, rkey FROM data_files WHERE {where} "
                        f"ORDER BY inbound DESC, instances DESC LIMIT ?", (*args, k * 8))
@@ -406,4 +438,4 @@ def top_assets(store: Store, k: int = 50, under: str = "", group_depth: int = 0)
         g[0] += ib
         g[1] += 1
     top = sorted(agg.items(), key=lambda kv: -kv[1][0])[:k]
-    return [{"rank": i + 1, "path": key, "inbound_refs": ib, "assets": n} for i, (key, (ib, n)) in enumerate(top)]
+    return [{"rank": i + 1, "path": key, "inbound_refs": ib, "files": n} for i, (key, (ib, n)) in enumerate(top)]

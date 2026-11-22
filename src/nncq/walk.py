@@ -14,21 +14,22 @@ from nncq import config
 DEFAULT_SKIP = ["!**/.git/**", "!**/.svn/**", "!**/node_modules/**", "!**/__pycache__/**", "!**/.vs/**",
                 "!**/.venv/**", "!**/bin/Debug/**", "!**/bin/Release/**", "!**/obj/**"]
 
-# Code only (not the .xdata data scan), case-insensitive; NNCQ_IGNORE_DEFAULTS=false turns them off.
-# Vendored / third-party, tool distributions and prebuilt headers, generated code, changelog noise.
+# Code only (not data cross-reference scans), case-insensitive; NNCQ_IGNORE_DEFAULTS=false or a profile's
+# ignore_defaults=false turns them off. Vendored / third-party, generated code.
 CODE_IGNORE_DEFAULTS = [
     "**/External/**", "**/ThirdParty/**", "**/third_party/**", "**/3rdParty/**", "**/vendor/**", "**/extern/**",
-    "**/Bin/**", "**/Prebuild/**",
     "**/Generated/**", "*.Designer.cs", "*.g.cs", "*.generated.*", "*_generated.*", "*_pb2.py", "*_pb2_grpc.py",
     "*.pb.h", "*.pb.cc", "*.min.js", "*.pyi",
-    "**/ReleaseNotes/**",
 ]
 
 
-def code_ignore(extra: str) -> str:
-    """NNCQ_IGNORE plus the defaults above (unless disabled), as one comma list."""
-    out = list(CODE_IGNORE_DEFAULTS) if os.environ.get("NNCQ_IGNORE_DEFAULTS", "true").lower() not in (
-        "0", "false", "no", "off") else []
+def code_ignore(extra: str, profile=None) -> str:
+    """NNCQ_IGNORE + the profile's ignores + the defaults above (unless disabled), as one comma list."""
+    on = os.environ.get("NNCQ_IGNORE_DEFAULTS", "true").lower() not in ("0", "false", "no", "off")
+    if profile is not None and not profile.ignore_defaults:
+        on = False
+    out = list(CODE_IGNORE_DEFAULTS) if on else []
+    out += profile.code_ignore() if profile is not None else []
     return ",".join(out + [x.strip() for x in extra.replace(";", ",").split(",") if x.strip()])
 
 

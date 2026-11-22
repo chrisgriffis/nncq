@@ -20,7 +20,7 @@ from nncq import config
 
 CACHED = {"ask", "expand", "search_code", "find_symbol", "file_outline", "find_references", "symbol_context",
           "calls", "called_by", "call_tree", "call_trace", "impact", "type_hierarchy", "file_context", "hotspots",
-          "data_for_code", "code_for_data", "asset_info", "top_assets"}
+          "data_for_code", "code_for_data", "data_file", "hot_data"}
 MAX_ENTRIES = 256
 MAX_CURSORS = 200
 

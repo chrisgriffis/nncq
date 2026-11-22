@@ -3,12 +3,12 @@
 Three strategies, picked by language:
   ast    tree-sitter: chunks at function/class boundaries, containers too big for one chunk are split
          into a header chunk + one chunk per member; symbols for every definition; call edges.
-  dsl    engine C-like definition languages (.ddf .adf .ser .hubl): brace-matched blocks at
-         class/struct/enum/component/service/... declarations. .ddf types are qualified by their
-         `module` (Entity.LayerData), which is how .xdata data names them (see datarefs.py).
+  dsl    C-like definition languages declared by a codebase profile ([[dsl]] in profile.toml): brace-matched
+         blocks at the declaration keywords the profile lists (class/struct/enum/service/...). With a
+         module_keyword, `module X;` qualifies the declarations that follow (X.Foo).
   text   everything else: line windows (markdown: by heading).
 
-engine .xdata data is not chunked; datarefs.py indexes it as a type/reference cross-reference.
+Data files covered by a profile's [[xref]] rules are not chunked; datarefs.py cross-references them.
 Pure python + tree-sitter, no torch: runs in worker processes.
 """
 from __future__ import annotations
@@ -135,12 +135,13 @@ def decode(data: bytes) -> str:
     return data.decode("utf-8", "replace")
 
 
-def process(path: str, data: bytes, lang: str, max_chars: int = 3000) -> FileResult:
+def process(path: str, data: bytes, lang: str, max_chars: int = 3000, dsl: dict | None = None) -> FileResult:
+    """dsl: the profile's spec for this language (profiles.Dsl.spec()) when it is a brace-block DSL."""
     text = decode(data)
     lines = text.splitlines(keepends=True) or [""]
     try:
-        if lang in DSL_LANGS:
-            return _dsl(path, lines, lang, max_chars)
+        if dsl is not None:
+            return _dsl(path, lines, lang, max_chars, dsl)
         if L.is_ast_lang(lang):
             return _Ast(path, data, lines, lang, max_chars).run()
     except Exception as e:  # a parser failure must never lose the file: fall back to windows
@@ -499,16 +500,20 @@ class _Ast:
         return self._ident(named[-1], depth + 1)
 
 
-# ---------------------------------------------------------------- engine C-like DSLs
+# ---------------------------------------------------------------- brace-block definition languages (profile DSLs)
 
-DSL_LANGS = {"ddf", "adf", "ser", "hubl"}
-_DSL_DECL = re.compile(
-    r"^[ \t]*(?:\[[^\]]*\][ \t]*)*(?:@\w+[ \t]*)*"
-    r"(?:[a-z]+[ \t]+)*?"
-    r"(class|struct|enum|interface|valuetype|component|service|type|method|namespace|delegate|event|"
-    r"union|flags|module|function|entity|contract)[ \t]+([\w.:]+)(.*)$")
-_DSL_CONTAINERS = {"class", "struct", "interface", "valuetype", "component", "service", "namespace",
-                   "union", "entity", "contract", "type"}
+_DSL_RX: dict[tuple, re.Pattern] = {}
+
+
+def _dsl_decl(keywords) -> re.Pattern:
+    key = tuple(keywords)
+    rx = _DSL_RX.get(key)
+    if rx is None:
+        rx = _DSL_RX[key] = re.compile(
+            r"^[ \t]*(?:\[[^\]]*\][ \t]*)*(?:@\w+[ \t]*)*"
+            r"(?:[a-z]+[ \t]+)*?"
+            r"(" + "|".join(re.escape(k) for k in key) + r")[ \t]+([\w.:]+)(.*)$")
+    return rx
 
 
 def _strip_code(line: str, in_block: bool) -> tuple[str, bool]:
@@ -538,8 +543,11 @@ def _strip_code(line: str, in_block: bool) -> tuple[str, bool]:
     return "".join(out), in_block
 
 
-def _dsl(path: str, lines: list[str], lang: str, max_chars: int) -> FileResult:
+def _dsl(path: str, lines: list[str], lang: str, max_chars: int, spec: dict) -> FileResult:
     r = FileResult(lang, "dsl")
+    decl = _dsl_decl(spec["keywords"])
+    containers = set(spec["containers"])
+    module_kw = spec.get("module_keyword") or ""
     clean, blk = [], False
     for ln in lines:
         c, blk = _strip_code(ln, blk)
@@ -561,19 +569,19 @@ def _dsl(path: str, lines: list[str], lang: str, max_chars: int) -> FileResult:
                 return start
         return len(clean) - 1
 
-    module: list[str] = []      # ddf `module X;` qualifies the types that follow (= .xdata type names)
+    module: list[str] = []      # `module X;` (spec module_keyword) qualifies the types that follow
 
     def scope(s: int, e: int, parents: list[str], ctx_sym: str, ctx_kind: str):
         gap_s = s
         i = s
         while i <= e:
-            m = _DSL_DECL.match(lines[i])
+            m = decl.match(lines[i])
             if not m or clean[i].strip() == "":
                 i += 1
                 continue
             kw, name = m.group(1), m.group(2)
-            if kw in ("module", "namespace") and clean[i].rstrip().endswith(";"):
-                if kw == "module" and lang == "ddf":
+            if kw in ("module", "namespace", module_kw) and clean[i].rstrip().endswith(";"):
+                if module_kw and kw == module_kw:
                     module[:] = [name]
                 i += 1
                 continue
@@ -590,7 +598,7 @@ def _dsl(path: str, lines: list[str], lang: str, max_chars: int) -> FileResult:
                 full = base.group(1)
                 r.edges.append(Edge(qual, re.split(r"::|\.", full)[-1], "inherits", i + 1, full))
             size = sum(len(lines[k]) for k in range(start, end + 1))
-            if size > max_chars and kw in _DSL_CONTAINERS and end > i:
+            if size > max_chars and kw in containers and end > i:
                 body = next((k for k in range(i, end + 1) if "{" in clean[k]), i)
                 r.chunks.append(_mk(lines, start, body, qual, kw, ".".join(parents)))
                 scope(body + 1, end, parents + [name], qual, kw)

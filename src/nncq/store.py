@@ -2,7 +2,7 @@
 
 Code (tiered, see worker.py):
   files, chunks (tier 0 = no vector, 1 = card vector, 2 = full vector), fts (bm25), vecs, symbols, edges
-engine data cross-reference (datarefs.py, no chunks/vectors):
+Data cross-reference (datarefs.py, a profile's [[xref]] rules; no chunks/vectors):
   data_files, data_types, data_inst (type x file), data_assets (reference targets), data_refs
 """
 from __future__ import annotations
@@ -74,12 +74,16 @@ def fts_body(text: str) -> str:
     return text + ("\n" + " ".join(sorted(extra)) if extra else "")
 
 
+def strip_ext(path: str) -> str:
+    """Path without the extension of its last component (references name data files without one)."""
+    head, sep, name = path.replace("\\", "/").rpartition("/")
+    stem = name.rsplit(".", 1)[0] if "." in name.lstrip(".") else name
+    return head + sep + stem
+
+
 def rkey(path: str) -> str:
     """Reversed lowercase path without extension: suffix lookups become indexed prefix ranges."""
-    p = path.replace("\\", "/").lower()
-    if p.endswith(".xdata"):
-        p = p[:-4]
-    return p[::-1]
+    return strip_ext(path.lower())[::-1]
 
 
 class Store:

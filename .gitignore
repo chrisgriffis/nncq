@@ -9,3 +9,6 @@ profiles/*
 !profiles/_template/
 # in-repo git worktrees for parallel work
 .worktrees/
+# exported profile archives (nncq profile export): the folder is kept, its contents are private
+archive/*
+!archive/.gitkeep

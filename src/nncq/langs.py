@@ -24,18 +24,10 @@ TEXT_LANG_BY_EXT = {
 }
 FILENAME_LANG = {"CMakeLists.txt": "cmake", "Makefile": "make", "Dockerfile": "dockerfile"}
 
-# engine. .ddf/.adf/.ser/.hubl = C-like type/service definition languages: brace-block chunker.
-# .xdata (XML asset data) is NOT in this map: datarefs.py keeps a static type/reference cross-reference of it.
-# .fb is a zip container (binary) and .buildlayout is build output: not indexed.
-engine_LANG_BY_EXT = {
-    ".ddf": "ddf", ".adf": "adf", ".ser": "ser", ".hubl": "hubl",
-    ".build": "xml", ".xaml": "xml",
-}
 
-
-def build_ext_map(extra: str = "") -> dict[str, str]:
-    """All indexed extensions. extra: '.foo,.bar=cpp' (no '=lang' -> plain text chunking)."""
-    m = {**TEXT_LANG_BY_EXT, **AST_LANG_BY_EXT, **engine_LANG_BY_EXT}
+def build_ext_map(extra: str = "", more: dict[str, str] | None = None) -> dict[str, str]:
+    """All indexed extensions. extra: '.foo,.bar=cpp' (no '=lang' -> plain text chunking); more: from a profile."""
+    m = {**TEXT_LANG_BY_EXT, **AST_LANG_BY_EXT, **(more or {})}
     for item in filter(None, (x.strip() for x in extra.split(","))):
         ext, _, lang = item.partition("=")
         ext = ext if ext.startswith(".") else "." + ext

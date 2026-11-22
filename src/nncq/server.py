@@ -43,8 +43,7 @@ generated map (how the question was read, what the hits cover, one line of facts
 other) with refs; then expand(refs) for exact code or structure. search_code gives raw code blocks;
 use find_symbol / file_outline / read_code to zoom in; the graph tools (symbol_context, called_by, calls,
 call_tree, call_trace, impact, type_hierarchy, file_context, hotspots) answer structural questions without
-reading files. Graph links are by name (static, no build): ambiguity is reported. engine: data_for_code,
-code_for_data, asset_info, top_assets. If a result has index_state, part of the index is still catching up:
+reading files. Graph links are by name (static, no build): ambiguity is reported. If a result has index_state, part of the index is still catching up:
 it says what, where and since when; keyword and graph results are still valid. Long answers are trimmed to
 stay readable: `paged` names each cut field and the more(cursor) call that returns the rest. Repeating a
 call is free (answers are cached until the index changes).
@@ -53,6 +52,24 @@ the best hits with graph tools, expand only the refs your conclusion rests on, t
 and briefly, without narrating tool use; give path:line detail when it helps or is asked for. A weak strength
 means re-ask in the code's own words (interpreted vocabulary), not a bigger k. Name-only graph edges are leads
 until expanded."""
+
+DATA_NOTE = """Data cross-reference (workspaces with data rules): data_for_code (which data files use this code type),
+code_for_data (the code behind a data file's types), data_file (what a data file instantiates, references and is
+referenced by; any path suffix), hot_data (most referenced data files)."""
+
+
+def instructions(rs: "list[repos.Repo] | None" = None) -> str:
+    """Base instructions + the data tools when a workspace has data rules + each profile's notes."""
+    rs = list(repos.load().values()) if rs is None else rs
+    out = [INSTRUCTIONS]
+    if any(r.xrefs for r in rs):
+        out.append(DATA_NOTE)
+    for r in rs:
+        p = r.profile
+        if p is not None and (p.description or p.mcp_notes):
+            out.append(f"Workspace {r.name} (repo={r.name}): " + " ".join(x for x in (p.description, p.mcp_notes) if x))
+    return "\n\n".join(out)
+
 
 _local = threading.local()
 _jobs: dict[str, dict] = {}
@@ -65,7 +82,7 @@ _info = {"mode": "stdio", "started": time.time(), "mcp_url": "", "dashboard": ""
 _events: deque = deque(maxlen=300)        # (time, message) for the dashboard
 _calls: deque = deque(maxlen=60)
 _tool_stats: dict[str, dict] = {}
-_ARG_KEYS = ("question", "query", "refs", "name", "to", "pattern", "path", "asset", "type_name", "what", "cursor")
+_ARG_KEYS = ("question", "query", "refs", "name", "to", "pattern", "path", "file", "type_name", "what", "cursor")
 _from_web = contextvars.ContextVar("nncq_from_web", default=False)   # dashboard: full answers, no paging
 
 
@@ -224,7 +241,7 @@ class _Watch:
         from watchdog.events import FileSystemEventHandler
         from watchdog.observers import Observer
         self.r = r
-        self.exts = set(indexer.ext_map()) | {".xdata"}
+        self.exts = set(indexer.ext_map(r)) | {"." + x.glob.rsplit(".", 1)[-1].lower() for x in r.xrefs if "." in x.glob}
         self.pending: set[str] = set()
         self.last = 0.0
         self.lock = threading.Lock()
@@ -282,7 +299,8 @@ class _Watch:
 
 def build(stdio: bool = False) -> FastMCP:
     s = config.settings()
-    mcp = FastMCP("nncq", instructions=INSTRUCTIONS, host=s.host, port=s.port, stateless_http=True,
+    loaded = list(repos.load().values())
+    mcp = FastMCP("nncq", instructions=instructions(loaded), host=s.host, port=s.port, stateless_http=True,
                   json_response=True, log_level="WARNING")
     if not config.is_loopback(s.host):
         from mcp.server.transport_security import TransportSecuritySettings
@@ -319,7 +337,7 @@ def build(stdio: bool = False) -> FastMCP:
     async def search_code(query: str, k: int = 10, path: str = "", lang: str = "", repo: str = "") -> dict:
         """Raw hybrid code search (keywords + meaning + reranker): whole functions/classes as code blocks.
         Prefer ask for questions; use this when you want the code text of the top matches directly.
-        path: substring or glob filter on file path (e.g. 'Engine/Entity' or '*.ddf'). lang: e.g. 'cpp,csharp'."""
+        path: substring or glob filter on file path (e.g. 'src/net' or '*.idl'). lang: e.g. 'cpp,csharp'."""
         return await _run(_with, repo, lambda r, st: search.search(st, query, k, path, lang), paths_of_results,
                           True)
 
@@ -353,7 +371,7 @@ def build(stdio: bool = False) -> FastMCP:
     @mcp.tool()
     async def symbol_context(name: str, path: str = "", repo: str = "") -> dict:
         """One-call card for a symbol: definition, bases/derived/members (types) or callers/callees/overrides
-        (functions), engine data types that use it, how widely it is mentioned."""
+        (functions), data types that use it (profiles with data rules), how widely it is mentioned."""
         return await _run(_with, repo, lambda r, st: graph.symbol_context(st, name, path))
 
     @mcp.tool()
@@ -400,25 +418,27 @@ def build(stdio: bool = False) -> FastMCP:
         under: path prefix restricting where the symbols are defined."""
         return await _run(_with, repo, lambda r, st: graph.hotspots(st, what, under, k))
 
-    @mcp.tool()
-    async def data_for_code(name: str, k: int = 15, repo: str = "") -> dict:
-        """engine: which .xdata data types/assets use this code type (entity Foo -> FooData, subclasses too)."""
-        return await _run(_with, repo, lambda r, st: datarefs.data_for_code(st, name, k))
+    if any(r.xrefs for r in loaded):     # data tools only exist when a profile declares [[xref]] rules
+        @mcp.tool()
+        async def data_for_code(name: str, k: int = 15, repo: str = "") -> dict:
+            """Which data types / data files use this code type (naming convention Foo -> FooData and
+            subclasses included)."""
+            return await _run(_with, repo, lambda r, st: datarefs.data_for_code(st, name, k))
 
-    @mcp.tool()
-    async def code_for_data(asset: str, k: int = 8, repo: str = "") -> dict:
-        """engine: the code (.ddf / C++ / C#) that defines and implements the types an asset uses."""
-        return await _run(_with, repo, lambda r, st: datarefs.code_for_data(st, asset, k))
+        @mcp.tool()
+        async def code_for_data(file: str, k: int = 8, repo: str = "") -> dict:
+            """The code that defines and implements the types a data file (or data type) uses."""
+            return await _run(_with, repo, lambda r, st: datarefs.code_for_data(st, file, k))
 
-    @mcp.tool()
-    async def asset_info(asset: str, k: int = 25, repo: str = "") -> dict:
-        """engine: what a .xdata asset instantiates, what it references and what references it. Any path suffix."""
-        return await _run(_with, repo, lambda r, st: datarefs.asset_info(st, asset, k))
+        @mcp.tool()
+        async def data_file(file: str, k: int = 25, repo: str = "") -> dict:
+            """What a data file instantiates, what it references and what references it. Any path suffix."""
+            return await _run(_with, repo, lambda r, st: datarefs.asset_info(st, file, k))
 
-    @mcp.tool()
-    async def top_assets(k: int = 50, under: str = "", group_depth: int = 0, repo: str = "") -> dict:
-        """engine: most-referenced assets (static inbound refs); group_depth > 0 rolls up to folders."""
-        return await _run(_with, repo, lambda r, st: {"assets": datarefs.top_assets(st, k, under, group_depth)})
+        @mcp.tool()
+        async def hot_data(k: int = 50, under: str = "", group_depth: int = 0, repo: str = "") -> dict:
+            """Most-referenced data files (static inbound refs); group_depth > 0 rolls up to folders."""
+            return await _run(_with, repo, lambda r, st: {"files": datarefs.top_assets(st, k, under, group_depth)})
 
     @mcp.tool()
     async def index_status(repo: str = "") -> dict:
@@ -481,8 +501,9 @@ def build(stdio: bool = False) -> FastMCP:
     @mcp.tool()
     async def index_repo(path: str, name: str = "", dirs: str = "", fresh: bool = False) -> dict:
         """Register a workspace and build (or refresh) its index in the background: parsing, symbols, graph
-        and the .xdata cross-reference first (CPU, minutes), then embeddings on the GPU. Read-only on the workspace.
-        dirs: comma-separated subfolders to index for code (e.g. 'src/Code'); empty = everything."""
+        and the data cross-reference first (CPU, minutes), then embeddings on the GPU. Read-only on the workspace.
+        A workspace with a profile (profiles/<name>) is indexed as the profile says; name it to use the profile.
+        dirs: comma-separated subfolders to index for code (e.g. 'src,tools'); empty = everything."""
         def f():
             if (o := _owned()) is not None:
                 return o
@@ -506,7 +527,7 @@ _gpu_cache: dict = {"at": 0.0}
 _mcp: FastMCP | None = None
 WEB_TOOLS = {"ask", "expand", "search_code", "grep_code", "find_symbol", "file_outline", "find_references", "read_code",
              "symbol_context", "calls", "called_by", "call_tree", "call_trace", "impact", "type_hierarchy",
-             "file_context", "hotspots", "data_for_code", "code_for_data", "asset_info", "top_assets"}
+             "file_context", "hotspots", "data_for_code", "code_for_data", "data_file", "hot_data"}
 
 
 async def web_tool(name: str, args: dict) -> dict:

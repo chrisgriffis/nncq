@@ -92,21 +92,29 @@ class Settings:
     bg_when: str            # always | idle
     idle_minutes: float
     extra_extensions: str
-    data: bool              # maintain the engine .xdata type/reference cross-reference
+    data: bool              # run the profile's data cross-reference rules ([[xref]] in profile.toml)
     ignore: str
     repos: str              # name=path;name2=path2 (what `nncq index` with no args indexes)
     index_procs: int        # CPU processes for chunking (T0)
     embed_tier: int         # 0 = no vectors, 1 = card vectors only, 2 = card then full-chunk vectors
     rerank: bool
-    text_langs: str         # non-code formats to index besides code + engine DSLs
+    text_langs: str         # non-code formats to index besides code + profile DSLs
     max_response_kb: int    # tool answers above this are trimmed and paged with more(cursor); 0 = no limit
     cache_minutes: float    # identical tool calls within this window are answered from memory; 0 = off
-    lite: bool              # NNCQ_PROFILE=lite: no torch, no models, no GPU (keyword + graph + data xref only)
+    lite: bool              # NNCQ_MODE=lite: no torch, no models, no GPU (keyword + graph + data xref only)
+
+
+def mode() -> str:
+    """full | lite. NNCQ_MODE; NNCQ_PROFILE=full|lite is the old name (profiles now mean codebase profiles)."""
+    v = os.environ.get("NNCQ_MODE", "").strip().lower()
+    if not v and os.environ.get("NNCQ_PROFILE", "").strip().lower() in ("full", "lite"):
+        v = os.environ["NNCQ_PROFILE"].strip().lower()
+    return "lite" if v == "lite" else "full"
 
 
 def settings() -> Settings:
     e = os.environ.get
-    lite = e("NNCQ_PROFILE", "full").strip().lower() == "lite"
+    lite = mode() == "lite"
     return Settings(
         host=e("NNCQ_HOST", "127.0.0.1"),
         port=_int("NNCQ_PORT", 8765),

@@ -232,7 +232,7 @@ def cmd_data(a):
     try:
         res = {
             "top": lambda: datarefs.top_assets(st, a.k, a.arg or "", a.group),
-            "asset": lambda: datarefs.asset_info(st, a.arg, a.k),
+            "file": lambda: datarefs.asset_info(st, a.arg, a.k),
             "uses": lambda: datarefs.data_for_code(st, a.arg, a.k),
             "code": lambda: datarefs.code_for_data(st, a.arg, a.k),
         }[a.view]()
@@ -240,6 +240,38 @@ def cmd_data(a):
         st.close()
     _p(res)
     return 0
+
+
+def cmd_profile(a):
+    from nncq import profiles
+    if a.action == "list":
+        for p in profiles.load_all().values():
+            print(f"{p.name:16} {p.root or '(workspace not found on this machine)'}  {p.path}")
+            if p.root is None:
+                for c in p.roots:
+                    print(f"{'':16}   {c}: {p.accepts(Path(c).expanduser()) or 'ok'}")
+        return 0
+    if a.action == "new":
+        from nncq import init
+        return 0 if init.profile_wizard(a.name, a.path, ask=sys.stdin.isatty()) else 1
+    if a.action == "show":
+        p = profiles.get(a.name)
+        if p is None:
+            raise SystemExit(f"no profile {a.name!r} in {profiles.DIR}")
+        print(p.path.read_text(encoding="utf-8"))
+        print(f"# workspace on this machine: {p.root or 'not found'}")
+        return 0
+    if a.action == "export":
+        names = [a.name] if a.name else list(profiles.load_all())
+        for n in names:
+            print(profiles.export(n, Path(a.path) if a.path else None))
+        return 0
+    if a.action == "import":
+        if not a.name:
+            raise SystemExit("nncq profile import <file> [--as name] [--force]")
+        print(profiles.import_(Path(a.name), a.as_name, a.force))
+        return 0
+    raise SystemExit(f"unknown action {a.action}")
 
 
 def cmd_agents(a):
@@ -290,7 +322,7 @@ def cmd_doctor(a):
         print(f"[{'ok' if good else '!!'}] {what}" + (f": {detail}" if detail else ""))
     line(sys.version_info[:2] >= (3, 11), "python", sys.version.split()[0])
     if config.settings().lite:
-        line(True, "profile", "lite: torch, models and GPU not needed")
+        line(True, "mode", "lite: torch, models and GPU not needed")
     else:
         _doctor_models(line)
     try:
@@ -328,11 +360,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--yes", action="store_true", help="accept defaults")
     p.add_argument("--workspace", default="", help="workspace root to index (read-only)")
     p.add_argument("--dirs", default=None, help="code subfolders, comma-separated (empty = everything)")
-    p.add_argument("--name", default="", help="index name (default: folder name)")
+    p.add_argument("--name", default="", help="profile / index name (default: folder name)")
+    p.add_argument("--profile", default="", help="use this existing profile (profiles/<name>)")
     p.add_argument("--index", action="store_true", help="start indexing at the end")
     p.add_argument("--copilot", action="store_true", help="same as --agents copilot")
     p.add_argument("--agents", default="", help="set up these agents without asking: copilot,claude,vs")
-    p.add_argument("--lite", action="store_true", help="lite profile: no torch, no models, no GPU (keyword + graph)")
+    p.add_argument("--lite", action="store_true", help="lite mode: no torch, no models, no GPU (keyword + graph)")
     p.set_defaults(fn=cmd_init)
 
     p = sub.add_parser("agents", help="set up agents: MCP server + nncq-user skill (Copilot CLI, Claude Code, VS)")
@@ -342,9 +375,9 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("index", help="register a workspace and build/refresh its index")
     p.add_argument("path", nargs="?", default="")
     p.add_argument("--name", default="")
-    p.add_argument("--dirs", default=None, help="comma-separated code subfolders, e.g. src/Code")
+    p.add_argument("--dirs", default=None, help="comma-separated code subfolders, e.g. src,tools")
     p.add_argument("--fresh", action="store_true", help="re-parse everything (never needed for correctness)")
-    p.add_argument("--no-data", action="store_true", help="skip the .xdata cross-reference")
+    p.add_argument("--no-data", action="store_true", help="skip the profile's data cross-reference")
     p.add_argument("--no-embed", action="store_true", help="don't start the embedding worker afterwards")
     p.set_defaults(fn=cmd_index)
 
@@ -402,13 +435,21 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--repo", default="")
     p.set_defaults(fn=cmd_graph)
 
-    p = sub.add_parser("data", help="engine .xdata cross-reference")
-    p.add_argument("view", choices=["top", "asset", "uses", "code"])
+    p = sub.add_parser("data", help="data cross-reference (profiles with [[xref]] rules)")
+    p.add_argument("view", choices=["top", "file", "uses", "code"])
     p.add_argument("arg", nargs="?", default="")
     p.add_argument("-k", type=int, default=25)
     p.add_argument("--group", type=int, default=0)
     p.add_argument("--repo", default="")
     p.set_defaults(fn=cmd_data)
+
+    p = sub.add_parser("profile", help="codebase profiles: list | new | show | export | import")
+    p.add_argument("action", choices=["list", "new", "show", "export", "import"])
+    p.add_argument("name", nargs="?", default="", help="profile name (import: the archive file)")
+    p.add_argument("path", nargs="?", default="", help="new: workspace root; export: output file/dir")
+    p.add_argument("--as", dest="as_name", default="", help="import under another name")
+    p.add_argument("--force", action="store_true", help="import: overwrite an existing profile")
+    p.set_defaults(fn=cmd_profile)
 
     p = sub.add_parser("repos", help="list registered workspaces")
     p.add_argument("--remove", default="")
