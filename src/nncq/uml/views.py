@@ -210,12 +210,14 @@ def _file_types(ctx: Ctx, path: str, cap: int) -> list[Sym]:
     out = ctx.q(f"WHERE f.path=? AND s.kind IN ({','.join('?' * len(TYPE_KINDS))}) ORDER BY s.start_line LIMIT ?",
                 (path, *TYPE_KINDS, cap))
     have = {t.qualname for t in out}
+    fam = set(graph.lang_family(ctx.st, (ctx.st.q("SELECT id FROM files WHERE path=?", (path,)) or [[None]])[0][0]))
+    same = lambda d: not fam or bool(set(graph.lang_family(ctx.st, d.file_id)) & fam)
     for (parent,) in ctx.st.q("SELECT s.parent FROM symbols s JOIN files f ON f.id=s.file_id WHERE f.path=? "
                               "AND s.parent!='' GROUP BY s.parent ORDER BY MIN(s.start_line) LIMIT 60", (path,)):
         if parent in have:
             continue
         hit = [d for d in ctx.find(parent, kinds={"type"}) if d.kind in TYPE_KINDS
-               and graph.norm(d.qualname) == graph.norm(parent)][:1]       # exact: a namespace is no type
+               and graph.norm(d.qualname) == graph.norm(parent) and same(d)][:1]   # exact, same language
         out += [t for t in hit if t.qualname not in have]
         have |= {t.qualname for t in hit}
     return out[:cap]

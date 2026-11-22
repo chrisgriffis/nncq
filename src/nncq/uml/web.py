@@ -191,7 +191,7 @@ main{flex:1;display:grid;grid-template-columns:300px minmax(0,1fr) 360px;min-hei
 #canvas pre{margin:0;padding:12px;font:12px/1.35 ui-monospace,Cascadia Mono,Consolas,monospace;white-space:pre}
 #corner{display:flex;gap:4px;flex-wrap:wrap}.vh button{padding:2px 8px;font-size:12px;white-space:nowrap}
 .hl rect,.hl circle,.hl polygon,.hl path.basic{stroke:var(--acc)!important;stroke-width:3px!important}
-#canvas g[data-n]{cursor:pointer}
+#canvas g[data-n]{cursor:pointer}#canvas{cursor:grab}#canvas.panning{cursor:grabbing;user-select:none}#canvas.panning *{pointer-events:none}
 .card{padding:10px 12px;border-bottom:1px solid var(--line)}.card .t{font-size:14px;font-weight:600;word-break:break-all}
 .kv{display:grid;grid-template-columns:auto 1fr;gap:3px 8px;font-size:12px;margin-top:6px}.kv span:nth-child(odd){color:var(--dim);text-align:right}
 .chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}.chip{font-size:11px;padding:2px 8px;border-radius:10px;background:#1a1e28;cursor:pointer}.chip:hover{color:var(--acc)}
@@ -209,6 +209,7 @@ pre.code .hl{background:#2b2a14;display:block}
 body.embed header{padding:6px 10px;gap:8px}body.embed header b{font-size:13px}
 #bpin{filter:grayscale(1);opacity:.45;padding:1px 6px}#bpin.on{filter:none;opacity:1;border-color:var(--acc);background:#1d2a44}
 .hb{padding:1px 8px;color:var(--dim)}.hb:hover{color:var(--fg)}
+.spin{display:inline-block;width:11px;height:11px;border:2px solid #262b36;border-top-color:var(--acc);border-radius:50%;animation:sp .7s linear infinite;vertical-align:-2px}@keyframes sp{to{transform:rotate(360deg)}}
 .hint{margin-top:8px;font-size:11px;color:var(--dim)}.hint .mono{font-size:11px;color:#9fb3cc}
 #mmbox{position:relative;height:170px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;overflow:hidden;cursor:grab}
 #mmbox svg{position:absolute;left:0;top:0;pointer-events:none;max-width:none}#mmv{position:absolute;border:1.5px solid var(--acc);background:#5aa9ff1f;border-radius:2px;pointer-events:none}
@@ -218,7 +219,7 @@ body.embed header{padding:6px 10px;gap:8px}body.embed header b{font-size:13px}
 .mdv .cm{color:#5f6b7a;font:11px ui-monospace,Consolas,monospace}
 pre .k,.mdv .k{color:#c792ea}pre .s,.mdv .s{color:#c3e88d}pre .c,.mdv .c{color:#5f6b7a;font-style:italic}pre .n,.mdv .n{color:#f78c6c}pre .pp,.mdv .pp{color:#89ddff}pre .h{color:#82aaff;font-weight:600}pre .ty{color:#ffcb6b}
 .b.k-class{background:#1b2a44;color:#7cc0ff}.b.k-object{background:#13332e;color:#5fd4c0}.b.k-sequence{background:#14301f;color:#6fdc9e}.b.k-component{background:#26303f;color:#a9bbd6}
-.b.k-file{background:#232a33;color:#b8c6d8;border:1px solid #3d4a5c}.b.o-agent{background:#f2f4f7;color:#000;font-weight:600}.b.o-user{background:#d7dae0;color:#111}.b.o-auto{background:none;color:#5d6573;padding:0 2px}
+.b.k-file{background:#232a33;color:#b8c6d8;border:1px solid #3d4a5c}.b.o-agent{background:#f2f4f7;color:#000;font-weight:600}.b.o-user{background:#d7dae0;color:#111}.b.o-auto{background:#26303f;color:#a9bbd6}
 .b.k-package{background:#262033;color:#c3a8f0}.b.k-deployment{background:#2d2a18;color:#e0cc6e}.b.k-composition{background:#33203a;color:#e39ff0}
 .form input,.form select{min-width:0;width:100%}
 @media (max-width:1100px){main{grid-template-columns:minmax(170px,24%) minmax(0,1fr) minmax(220px,30%)}}
@@ -229,7 +230,7 @@ pre .k,.mdv .k{color:#c792ea}pre .s,.mdv .s{color:#c3e88d}pre .c,.mdv .c{color:#
 <header><b><span class="noemb">nncq · model explorer</span><span class="emb">Model explorer</span></b><a href="./" class="dim noemb">← dashboard</a>
  <button id="bpin" class="emb" title="pin: keep this diagram when the Symbol explorer moves (unpinned, the Model explorer follows it)">📌</button>
  <select id="repo" title="index"></select><span id="mstate" class="dim"></span><span class="sp"></span>
- <button id="bbuild" title="build / refresh the UML model (CPU)"><span class="noemb">Build UML model</span><span class="emb">Build</span></button>
+ <button id="bbuild" title="Re-derive the UML model from the index (only stale/changed parts); cached views regenerate on next open">⟳ Refresh</button>
  <a id="bsolo" class="emb hb" href="views" target="_blank" title="open the Model explorer on its own page">↗</a><button id="bcol" class="emb hb" title="collapse the Model explorer">–</button></header>
 <main>
  <div class="col">
@@ -242,7 +243,7 @@ pre .k,.mdv .k{color:#c792ea}pre .s,.mdv .s{color:#c3e88d}pre .c,.mdv .c{color:#
  <div class="col" style="min-width:0">
   <div class="vh"><span class="t" id="vt">No diagram open</span><span id="vb"></span><span class="sp" style="flex:1"></span>
    <div class="tabs" id="tabs"><a data-t="diagram" class="on">Diagram</a><a data-t="ascii">ASCII</a><a data-t="mermaid">Mermaid</a><a data-t="json">JSON</a><a data-t="report">Report</a></div>
-   <span id="corner"><button id="zo">−</button><button id="zi">+</button><button id="bmd" title="Markdown export: Mermaid + element links">Generate .md</button><button id="bpv" title="preview the exported Markdown as a Markdown viewer renders it">Preview .md</button><button id="bvs" title="write the .md to cache/exports and open it in VS Code (Ctrl+Shift+V previews it; Mermaid needs the 'Markdown Preview Mermaid Support' extension)">Open in VS Code</button></span><button id="bdel" title="delete this stored view / composition">Delete</button></div>
+   <span id="corner"><button id="zo" title="zoom out (wheel, key -)">−</button><button id="zi" title="zoom in (wheel, key +)">+</button><button id="zf" title="fit (double-click the background, key 0)">fit</button><button id="z1" title="actual size (key 1)">100%</button><button id="bmd" title="Markdown export: Mermaid + element links">Generate .md</button><button id="bpv" title="preview the exported Markdown as a Markdown viewer renders it">Preview .md</button><button id="bvs" title="write the .md to cache/exports and open it in VS Code (Ctrl+Shift+V previews it; Mermaid needs the 'Markdown Preview Mermaid Support' extension)">Open in VS Code</button></span><button id="bdel" title="delete this stored view / composition">Delete</button></div>
   <div id="canvas"><div id="out"><div class="dim" style="padding:20px">Pick a diagram or generate one.</div></div></div>
  </div>
  <div class="col"><div class="scroll" id="side"><div class="dim" style="padding:14px">Click a node for details.</div></div></div>
@@ -281,7 +282,11 @@ function pinUi(){$('#bpin').classList.toggle('on',pinned())}
 $('#bpin').onclick=()=>{localStorage.setItem('nncq.mpin',pinned()?'0':'1');pinUi()};pinUi();
 $('#bcol').onclick=()=>{const h=host();if(h)h.collapse('model')};
 $('#bsolo').onclick=()=>{$('#bsolo').href='views'+(tok?'?token='+encodeURIComponent(tok):'')+location.hash};
-$('#bbuild').onclick=async()=>{$('#bbuild').disabled=true;const j=await api('api/uml/build?repo='+encodeURIComponent(repo));$('#mstate').textContent=j.error||('build: '+(j.reason||'started — watch the dashboard console'));setTimeout(()=>{$('#bbuild').disabled=false;init()},4000)};
+$('#bbuild').onclick=async()=>{const b=$('#bbuild');b.disabled=true;b.innerHTML='<span class="spin"></span> Refreshing…';
+ const done=()=>{b.disabled=false;b.textContent='⟳ Refresh';init()};
+ try{const j=await api('api/uml/build?repo='+encodeURIComponent(repo));$('#mstate').textContent=j.error||('refresh: '+(j.reason||j.state||'started'));if(j.error)return done()}catch(e){return done()}
+ const t0=Date.now();const tick=async()=>{try{const d=await (await fetch('api/status',{headers:H,cache:'no-store'})).json();const r=(d.repos||[]).find(x=>x.name===repo)||{};
+   if(r.job&&r.job.state==='running'&&Date.now()-t0<6e5)return setTimeout(tick,2000)}catch(e){}done()};setTimeout(tick,1500)};
 async function list(){let d;try{d=await T('uml_views',{group_by:$('#gb').value})}catch(e){$('#list').innerHTML=`<div class="err" style="padding:10px">${esc(e.message)}</div>`;return}
  const f=$('#filter').value.toLowerCase();let h='';
  for(const [g,vs] of Object.entries(d.groups||{})){const xs=vs.filter(v=>!f||(v.title+v.key).toLowerCase().includes(f));if(!xs.length)continue;
@@ -292,12 +297,12 @@ $('#list').onclick=e=>{const v=e.target.closest('[data-k]');if(v)go(v.dataset.k)
 
 /* ---------- open / draw ---------- */
 const isFile=v=>String(v.key||'').startsWith('composition:file:');
-const originBadge=v=>v.origin==='auto'?'':`<span class="b o-${esc(v.origin)}" title="${esc(v.provenance?v.provenance.tag+'\n'+v.provenance.detail:'made via MCP')}">${v.origin==='agent'?'mcp-agent':esc(v.origin)}</span>`;
+const originBadge=v=>v.origin==='auto'?'<span class="b o-auto" title="generated from the index, on demand; regenerated when its sources change">auto</span>':`<span class="b o-${esc(v.origin)}" title="${esc(v.provenance?v.provenance.tag+'\n'+v.provenance.detail:'made via MCP')}">${v.origin==='agent'?'mcp-agent':esc(v.origin)}</span>`;
 const kindBadge=v=>isFile(v)?'<span class="b k-file" title="file composition (generated on demand)">file</span>':`<span class="b k-${esc(v.kind)}">${esc(v.kind)}</span>`;
 function go(key,q){location.hash='#/uml/view/'+encodeURIComponent(key.startsWith('composition:')?key:'view:'+key)+(q||'')}
 async function open(key){try{const d=await T('uml_view',{key,format:'json'});show(d);return d}catch(e){return null}}
-function show(d){cur=d;selN=null;zoom=1;$('#vt').textContent=d.title;
- $('#vb').innerHTML=`${kindBadge(d)} ${originBadge(d)||'<span class="b o-auto">generated</span>'}`+(d.stale||(d.report&&d.report.staleness)?' <span class="b w">stale</span>':'')+(d.report&&d.report.unbound?' <span class="b x">unbound refs</span>':'');
+function show(d){cur=d;selN=null;$('#vt').textContent=d.title;
+ $('#vb').innerHTML=`${kindBadge(d)} ${originBadge(d)}`+(d.stale||(d.report&&d.report.staleness)?' <span class="b w">stale</span>':'')+(d.report&&d.report.unbound?' <span class="b x">unbound refs</span>':'');
 
  document.querySelectorAll('#list .vi').forEach(x=>x.classList.toggle('on',x.dataset.k===d.key));draw()}
 document.querySelectorAll('#tabs a').forEach(a=>a.onclick=()=>{tab=a.dataset.t;document.querySelectorAll('#tabs a').forEach(x=>x.classList.toggle('on',x===a));draw()});
@@ -309,7 +314,7 @@ async function draw(){if(!cur)return;const o=$('#out');
  if(tab==='ascii'||(tab==='diagram'&&!MERMAID)){o.innerHTML=`<pre>${esc(await text('ascii'))}</pre>`+(MERMAID?'':'<div class="dim" style="padding:8px 12px">Mermaid is not vendored (nncq uml init fetches it once): showing ASCII.</div>');nodeLinks();return}
  const src=await text('mermaid');if(tab==='mermaid'){o.innerHTML=`<pre>${hlc(src,'mermaid')}</pre>`;return}
  if(!window.mermaid){o.innerHTML='<div class="dim" style="padding:20px">loading renderer…</div>';return}
- try{const {svg}=await mermaid.render('mm'+(++mm),src);o.innerHTML=svg;zoomTo(zoom);wire();mini()}catch(e){o.innerHTML=`<div class="err" style="padding:12px">Mermaid: ${esc(e.message||e)}</div><pre>${esc(src)}</pre>`}}
+ try{const {svg}=await mermaid.render('mm'+(++mm),src);o.innerHTML=svg;restoreView();wire();mini()}catch(e){o.innerHTML=`<div class="err" style="padding:12px">Mermaid: ${esc(e.message||e)}</div><pre>${esc(src)}</pre>`}}
 function zoomTo(z){zoom=z;const s=$('#out svg');if(s){const w=s.viewBox&&s.viewBox.baseVal?s.viewBox.baseVal.width:s.getBBox().width;s.style.width=(w*z)+'px';s.style.maxWidth='none';s.removeAttribute('height')}mmView()}
 /* ---------- overview: a scaled live copy of the diagram with the visible area; click / drag pans ---------- */
 let mmk=1;
@@ -329,8 +334,28 @@ function mmPan(ev){const s=$('#out svg'),c=$('#mmini');if(!s||!c)return;const cv
  cv.scrollLeft+=px-(cr.left-off.left)-cv.clientWidth/2;cv.scrollTop+=py-(cr.top-off.top)-cv.clientHeight/2;mmView()}
 $('#mmbox').addEventListener('pointerdown',e=>{if(!$('#mmini'))return;e.preventDefault();const b=$('#mmbox');b.setPointerCapture(e.pointerId);mmPan(e);
  const mv=ev=>mmPan(ev),up=()=>{b.removeEventListener('pointermove',mv);b.removeEventListener('pointerup',up)};b.addEventListener('pointermove',mv);b.addEventListener('pointerup',up)});
-$('#canvas').addEventListener('scroll',mmView);addEventListener('resize',()=>{if(cur&&tab==='diagram')mini()});
-$('#zi').onclick=()=>zoomTo(zoom*1.25);$('#zo').onclick=()=>zoomTo(zoom/1.25);
+$('#canvas').addEventListener('scroll',()=>{mmView();if(!pan||panned)saveView()});addEventListener('resize',()=>{if(cur&&tab==='diagram')mini()});
+/* ---------- pan / zoom on the SVG itself (width from its viewBox: crisp at any zoom); state kept per view ---------- */
+const VS={},CV=$('#canvas');
+function svgSize(){const s=$('#out svg'),vb=s.viewBox&&s.viewBox.baseVal;return {w:vb&&vb.width||s.getBBox().width,h:vb&&vb.height||s.getBBox().height}}
+function saveView(){if(cur&&$('#out svg'))VS[cur.key]={z:zoom,x:CV.scrollLeft,y:CV.scrollTop}}
+function fit(){if(!$('#out svg'))return;const {w,h}=svgSize();zoomTo(Math.max(.05,Math.min(2,(CV.clientWidth-24)/w,(CV.clientHeight-24)/h)));CV.scrollLeft=0;CV.scrollTop=0;saveView();mmView()}
+function restoreView(){const v=cur&&VS[cur.key];if(!v||!CV.clientWidth)return fit();zoomTo(v.z);CV.scrollLeft=v.x;CV.scrollTop=v.y;mmView()}
+function zoomAt(z,mx,my){const s=$('#out svg');if(!s)return;z=Math.max(.05,Math.min(8,z));const r=CV.getBoundingClientRect(),sr=s.getBoundingClientRect();
+ mx=mx??r.left+CV.clientWidth/2;my=my??r.top+CV.clientHeight/2;const ox=sr.left-r.left+CV.scrollLeft,oy=sr.top-r.top+CV.scrollTop;
+ const px=(CV.scrollLeft+mx-r.left-ox)/zoom,py=(CV.scrollTop+my-r.top-oy)/zoom;zoomTo(z);
+ CV.scrollLeft=px*z+ox-(mx-r.left);CV.scrollTop=py*z+oy-(my-r.top);saveView();mmView()}
+$('#zi').onclick=()=>zoomAt(zoom*1.25);$('#zo').onclick=()=>zoomAt(zoom/1.25);$('#zf').onclick=fit;$('#z1').onclick=()=>zoomAt(1);
+CV.addEventListener('wheel',e=>{if(tab!=='diagram'||!$('#out svg'))return;e.preventDefault();zoomAt(zoom*Math.pow(1.0015,-e.deltaY),e.clientX,e.clientY)},{passive:false});
+let pan=null,panned=false;     /* drag pans; a drag of 5px or more is a pan, so node clicks still work */
+CV.addEventListener('pointerdown',e=>{if(e.button!==0||tab!=='diagram'||!$('#out svg'))return;pan={x:e.clientX,y:e.clientY,sx:CV.scrollLeft,sy:CV.scrollTop,id:e.pointerId};panned=false});
+CV.addEventListener('pointermove',e=>{if(!pan)return;const dx=e.clientX-pan.x,dy=e.clientY-pan.y;if(!panned&&Math.hypot(dx,dy)<5)return;
+ if(!panned){panned=true;try{CV.setPointerCapture(pan.id)}catch(x){}CV.classList.add('panning')}CV.scrollLeft=pan.sx-dx;CV.scrollTop=pan.sy-dy});
+const endPan=()=>{pan=null;CV.classList.remove('panning')};CV.addEventListener('pointerup',endPan);CV.addEventListener('pointercancel',endPan);
+CV.addEventListener('click',e=>{if(panned){e.stopPropagation();e.preventDefault();panned=false}},true);
+CV.addEventListener('dblclick',e=>{if(tab==='diagram'&&!e.target.closest('[data-n]')){e.preventDefault();fit()}});
+document.addEventListener('keydown',e=>{if(tab!=='diagram'||/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)||$('#mod').classList.contains('on')||e.ctrlKey||e.metaKey||e.altKey)return;
+ const k=e.key;if(k==='+'||k==='=')zoomAt(zoom*1.25);else if(k==='-'||k==='_')zoomAt(zoom/1.25);else if(k==='0')fit();else if(k==='1')zoomAt(1);else return;e.preventDefault()});
 function nodeOf(raw){if(!cur)return null;const id=raw.replace(/^n_/,'');const ns=cur.model.nodes;let n=ns.find(x=>x.id===id);
  if(!n)n=ns.find(x=>(x.ports||[]).some(p=>p.id===id));return n}
 function wire(){const svg=$('#out svg');if(!svg)return;
@@ -451,7 +476,7 @@ $('#bvs').onclick=async()=>{if(!cur)return;const j=await L('export_md',{key:cur.
    #/uml/default?s=<symbol>&p=<file or folder> (or none: the workspace overview): the best diagram for that target */
 let seq=0;
 function useRepo(r){if(r&&r!==repo&&[...$('#repo').options].some(o=>o.value===r)){repo=r;$('#repo').value=r}}
-async function dflt(s,p){const my=++seq;$('#out').innerHTML='<div class="dim" style="padding:20px">loading the default diagram…</div>';
+async function dflt(s,p){const my=++seq;$('#out').innerHTML='<div class="dim" style="padding:20px"><span class="spin"></span> generating…</div>';
  $('#vt').textContent=s||p||'Workspace';$('#vb').innerHTML='';
  try{const d=await T('uml_view',{kind:'default',subject:s||'',path:p||'',format:'json'});if(my!==seq)return;show(d);
   const sn=s&&String(s).split(/::|\./).pop();
