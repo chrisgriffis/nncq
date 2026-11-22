@@ -1,6 +1,6 @@
 ---
 name: nncq-user
-description: Use when nncq MCP tools (ask, expand, call_trace, called_by, impact, data_for_code, ...) are available and the user asks how code works, what calls what, what breaks if X changes, or how code and engine data relate.
+description: Use when nncq MCP tools (ask, expand, call_trace, called_by, impact, data_for_code, ...) are available and the user asks how code works, what calls what, what breaks if X changes, or how code and data files relate.
 ---
 
 # nncq: investigate quietly, answer plainly
@@ -18,7 +18,7 @@ Answers are small, cached and deterministic. Make many narrow calls quietly, the
 ## Tool choice
 - Exact name: `find_symbol`, `symbol_context`. Exact string or regex: `grep_code`. Everything else starts with `ask`.
 - Structure without code: `expand(refs, what=context|callers|callees|outline)`, `file_context`.
-- engine: `data_for_code`, `code_for_data`, `asset_info`.
+- Code <-> data files (only when the workspace profile has data rules): `data_for_code`, `code_for_data`, `data_file`, `hot_data`.
 - Diagrams: `uml_view(kind, subject)` (ascii in chat, markdown for files). Composing views / compositions: `uml_protocol`.
 - `more(cursor)` only if the trimmed part matters.
 
