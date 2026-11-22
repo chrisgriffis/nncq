@@ -98,9 +98,9 @@ def _diff(old: dict, new: dict) -> dict:
     a = {n["id"]: n.get("label") for n in old.get("nodes", [])}
     b = {n["id"]: n.get("label") for n in new.get("nodes", [])}
     out = {"added": [b[k] for k in b.keys() - a.keys()][:30], "removed": [a[k] for k in a.keys() - b.keys()][:30]}
-    ea = {e["id"] for e in old.get("edges", [])} | {m.get("label", "") + m["to"] for m in old.get("messages", [])}
+    e_old = {e["id"] for e in old.get("edges", [])} | {m.get("label", "") + m["to"] for m in old.get("messages", [])}
     eb = {e["id"] for e in new.get("edges", [])} | {m.get("label", "") + m["to"] for m in new.get("messages", [])}
-    out["relations_added"], out["relations_removed"] = len(eb - ea), len(ea - eb)
+    out["relations_added"], out["relations_removed"] = len(eb - e_old), len(e_old - eb)
     return {k: v for k, v in out.items() if v}
 
 

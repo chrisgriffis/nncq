@@ -142,7 +142,7 @@ def cmd_status(a):
     s = _server()
     print(f"server: {s.get('mode', 'http')} pid {s['pid']}; MCP {s['url'] or '(stdio)'}; dashboard {s.get('dashboard', '-')}"
           if s else "server: not running")
-    print("embedding: off (lite profile)" if config.settings().lite else
+    print("embedding: off (lite mode)" if config.settings().lite else
           f"embedding: {'PAUSED' if worker.paused() else 'enabled'} (tier {config.settings().embed_tier})")
     for r in (repos.load().values() if not a.repo else [_repo(a.repo)]):
         st = indexer.status(r)
@@ -231,8 +231,8 @@ def cmd_data(a):
     r, st = _store(a.repo)
     try:
         res = {
-            "top": lambda: datarefs.top_assets(st, a.k, a.arg or "", a.group),
-            "file": lambda: datarefs.asset_info(st, a.arg, a.k),
+            "top": lambda: datarefs.hot_data(st, a.k, a.arg or "", a.group),
+            "file": lambda: datarefs.data_file(st, a.arg, a.k),
             "uses": lambda: datarefs.data_for_code(st, a.arg, a.k),
             "code": lambda: datarefs.code_for_data(st, a.arg, a.k),
         }[a.view]()

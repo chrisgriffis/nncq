@@ -211,7 +211,7 @@ def candidates(store: Store, query: str, k: int = 10, path: str = "", lang: str 
     notes = []
     vec = vectors(store) if not s.lite else None
     if s.lite:
-        pass                                         # lite profile: keyword + graph only, by design (no note)
+        pass                                         # lite mode: keyword + graph only, by design (no note)
     elif vec.n and models_ready():
         try:
             with _gpu_turn():
