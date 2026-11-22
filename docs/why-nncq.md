@@ -38,6 +38,8 @@ gives you plus things neither has. It plugs into Copilot in Visual Studio over M
   questions that share no words with the code.
 - Answers sized for an agent: `ask` returns a short map of where the answer is (a few KB), and the agent opens
   only what it needs.
+- Local only: one index per person, on their machine, matching their synced changelist. nncq adds no new
+  place your code goes (no server, no cloud, no shared index).
 
 ---
 

@@ -9,7 +9,7 @@
 - **Hybrid retrieval.** BM25 keywords, Nemotron embeddings and a cross-encoder reranker, plus a engine code↔data cross-reference.
 - **Not a hosted service, just a repo and a run.** Nothing leaves the machine. The MCP process also starts a local web page for the interactive side, but only when you open it.
 
-> **Status: phase 1 working.** Indexing (tree-sitter + engine DSLs, `.xdata` cross-reference), the GPU embedding worker, hybrid search, the graph views, the MCP server (24 tools) and the CLI are in and tested on a 4,200-file slice of the sample workspace. Not yet: Linux `init.sh`, LAN mode, editor plugins.
+> **Status: phase 1 working.** Indexing (tree-sitter + engine DSLs, `.xdata` cross-reference), the GPU embedding worker, hybrid search, the graph views, the MCP server (24 tools) and the CLI are in and tested on a 4,200-file slice of the sample workspace. Not yet: Linux `init.sh`, editor plugins.
 
 ## Contents
 
@@ -118,6 +118,7 @@ A grep skill is good when you know the exact string. It falls short when you don
 - There are no cloud APIs, no telemetry and no external services. The server binds to `127.0.0.1` only. A non-loopback bind is refused unless `NNCQ_TOKEN` is set.
 - For a machine with no internet, copy the models from another checkout with `init.ps1 -SeedModels <hub dir>`. pip still needs a wheel cache or mirror.
 - Everything lives inside the clone (`.venv/`, `cache/`, `.env`). Deleting the folder uninstalls it.
+- No shared server, on purpose: nncq adds no new place your code or index goes, so there is no data-security question to answer before a coworker installs it.
 
 ## Requirements and cost
 
@@ -411,12 +412,12 @@ Every option, with comments: `.env.example`.
 
 - **The graph is name-based, not type-resolved.** See [the trade-off](#the-symbol-graph-how-does-it-know-that-without-a-build). LSP-precise references would need a buildable project. Possible later via SCIP for languages where that is cheap (C#, Python, TS).
 - **Data↔code goes through type names**, not runtime paths. Which asset a running game actually loads is out of scope; see `docs/ideas.md`.
-- **One GPU, one machine.** LAN sharing (one indexer, many clients, behind a token) is planned but not built.
+- **One machine per person, by design.** There is no shared or LAN server. Each person indexes their own synced workspace, so the index always matches the changelist they have, and code never leaves their machine. Coworkers without a GPU use the lite profile.
 
 ## Roadmap
 
 - **Phase 1 (MVP):** indexer, embedding worker, hybrid search, graph tools, MCP server, CLI, `init`.
-- **Phase 2:** changelist stamping and CL-range deltas (`docs/ideas.md`), Linux `init.sh`, LAN mode with a token.
+- **Phase 2:** changelist stamping and CL-range deltas (`docs/ideas.md`), Linux `init.sh`.
 - **Editor plugins** (they call the same local server):
   - **Visual Studio:** symbol card, call tree, impact and type hierarchy for the symbol under the caret. A semantic search panel. "What data uses this" for engine types.
   - **editor:** from a selected asset or type, show the code that defines and implements it (`code_for_data`), and jump from code to the assets that use it.
