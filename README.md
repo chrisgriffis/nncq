@@ -2,14 +2,25 @@
 
 # no-net-code-query (nncq)
 
-**Ask questions, don't search the code.** nncq is a local RAG backend for AI coding agents. Over MCP, an agent asks in plain words and gets an intelligent answer across the whole codebase, not a pile of search hits: which few places matter, why, and how they call each other.
+**Ask questions, don't search the code.**
 
-**Plug it into your agent and it navigates like the engineer who wrote the engine.** Who calls this, what does it call, how does execution get here from the frame loop, what breaks if I change it: each is one tool call that answers in milliseconds, across millions of lines, with no build, no `compile_commands.json` and no IDE index. The agent stops grepping and guessing and starts tracing.
+nncq is not another search tool. Search gives you lines that match a string. nncq gives your coding agent the structure of the codebase: whole functions and classes, who calls what, how execution gets from A to B, what breaks if X changes, and, for engine, which data uses which code. It answers in plain words, across millions of lines, with no build, no IDE index and nothing leaving your machine.
 
-- **Call trees both ways, instantly.** `called_by` and `calls` with every call site at `file:line`, `call_tree` N levels deep, `call_trace` as debugger-style stacks back to entry points, `impact` for the blast radius, and type hierarchies up and down. Ambiguous names are flagged, not hidden.
-- **AST-driven, so it's efficient.** tree-sitter cuts code at function and class boundaries. Every hit is a whole unit with its path, symbol and parent, and only what matters reaches the agent's context.
-- **Hybrid retrieval.** BM25 keywords, Nemotron embeddings and a cross-encoder reranker, plus a engine code<->data cross-reference. No GPU? The lite profile keeps the graph and the cross-reference.
-- **Not a hosted service, just a repo and a run.** Nothing leaves the machine. The MCP process also starts a local web page for the interactive side, but only when you open it.
+### Two ways to use it
+
+**1. Supercharge your coding agent (the main use).** Add nncq to Copilot CLI, Claude Code or Visual Studio over MCP (`nncq agents` does it for you). Your agent stops grepping and guessing and starts tracing:
+
+- `ask` a question, get a short map of the few places that matter and how they connect, not ten code dumps
+- `called_by` / `calls` / `call_tree`: callers and callees with `file:line`, N levels deep
+- `call_trace`: debugger-style stacks showing how execution reaches a function
+- `impact`: the blast radius before you change a signature
+- `data_for_code` / `code_for_data`: engine code <-> `.xdata` assets in milliseconds
+
+Every answer is sized for the agent's context (a few KB), so it can ask many questions and still have room to think. You ask the agent; the agent investigates and hands you one digest.
+
+**2. A web view for you (optional).** The same index in your browser at `http://127.0.0.1:8765/`: ask box, answer maps, a symbol explorer with call trees both ways, and index/GPU status. It starts only when you open it.
+
+Runs on any machine in the lite profile (keyword search + graph, no GPU), or with an NVIDIA GPU for meaning-based search and reranking.
 
 > **Status: phase 1 working.** Indexing (tree-sitter + engine DSLs, `.xdata` cross-reference), the GPU embedding worker, hybrid search, the graph views, the MCP server (24 tools) and the CLI are in and tested on a 4,200-file slice of the sample workspace. Not yet: Linux `init.sh`, editor plugins.
 
@@ -332,8 +343,7 @@ git clone <this repo> no-net-code-query; cd no-net-code-query
 .venv\Scripts\nncq index C:/work\my-workspace --dirs src/Code   # T0 + data xref
 ```
 
-Then start your agent (Copilot CLI, Claude Code or Visual Studio). It launches nncq over stdio itself.
-`nncq start` runs a standalone HTTP server instead, for several clients at once.
+Then start your agent (Copilot CLI, Claude Code or Visual Studio). It launches nncq over stdio itself. `nncq start` runs a standalone HTTP server instead, for several clients at once.
 
 ### Profiles: full and lite
 
@@ -346,19 +356,11 @@ Then start your agent (Copilot CLI, Claude Code or Visual Studio). It launches n
 | Graph, `.xdata` cross-reference, `ask` / `expand`, all graph tools | yes | yes, identical |
 | Match strength in `ask` | strong / fair / weak | `unrated`: verify top hits |
 
-Lite is the coworker default: the graph tools and the data cross-reference, which need no GPU, carry most of
-the value for structural questions. What lite loses is "find code that does X" when the question shares no
-words with the code; the agent compensates partly by re-asking with the `code_vocabulary` that `ask` returns.
-Upgrading is in place: run `.\init.ps1` without `-Lite` (installs the `gpu` extra and models, sets
-`NNCQ_PROFILE=full`), and the worker embeds the existing index. Nothing is re-parsed.
+Lite is the coworker default: the graph tools and the data cross-reference, which need no GPU, carry most of the value for structural questions. What lite loses is "find code that does X" when the question shares no words with the code; the agent compensates partly by re-asking with the `code_vocabulary` that `ask` returns. Upgrading is in place: run `.\init.ps1` without `-Lite` (installs the `gpu` extra and models, sets `NNCQ_PROFILE=full`), and the worker embeds the existing index. Nothing is re-parsed.
 
 ### Agent setup: `nncq agents`
 
-`init` detects the agents on the machine and offers to set each up; `nncq agents` (or
-`init.ps1 -Agents copilot,claude,vs`) does it again at any time. Per agent it registers nncq as a stdio MCP
-server and installs the [`nncq-user`](nncq-user.skill.md) skill, which teaches the agent to investigate with
-several narrow `ask`s, connect hits with the graph tools, `expand` only what the answer rests on, and reply
-with one compiled digest instead of raw tool output.
+`init` detects the agents on the machine and offers to set each up; `nncq agents` (or `init.ps1 -Agents copilot,claude,vs`) does it again at any time. Per agent it registers nncq as a stdio MCP server and installs the [`nncq-user`](nncq-user.skill.md) skill, which teaches the agent to investigate with several narrow `ask`s, connect hits with the graph tools, `expand` only what the answer rests on, and reply with one compiled digest instead of raw tool output.
 
 | Agent | MCP server | Skill |
 |---|---|---|
@@ -366,9 +368,7 @@ with one compiled digest instead of raw tool output.
 | Claude Code | `claude mcp add --scope user nncq ...` | `~/.claude/skills/nncq-user/SKILL.md` |
 | Visual Studio (Copilot agent mode) | `%USERPROFILE%\.mcp.json` | no global location: paste into custom instructions |
 
-Existing config files are merged (a `.bak-nncq` copy is kept); the workspace is never written to. A short
-version of the skill also goes to every client in the MCP server instructions, so agents without the skill
-still get the gist. `nncq mcp-config` prints the raw entries for anything else.
+Existing config files are merged (a `.bak-nncq` copy is kept); the workspace is never written to. A short version of the skill also goes to every client in the MCP server instructions, so agents without the skill still get the gist. `nncq mcp-config` prints the raw entries for anything else.
 
 Why this rather than Copilot in Visual Studio with Visual Assist: [docs/why-nncq.md](docs/why-nncq.md).
 
