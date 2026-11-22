@@ -15,7 +15,8 @@ def routes(snapshot, control, tool=None) -> list[Route]:
     """snapshot() -> dict for /api/status; control(action, repo) -> dict for POST /api/<action>;
     tool(name, args) -> awaitable dict for POST /api/tool/<name> (the search and symbol pages)."""
     async def page(request: Request):
-        return HTMLResponse(HTML)
+        from nncq.codeview import CODEVIEW_JS
+        return HTMLResponse(HTML.replace("/*__CODEVIEW__*/", CODEVIEW_JS))
 
     async def status(request: Request):
         import anyio
@@ -211,7 +212,8 @@ ul.tree{list-style:none;margin:0;padding-left:16px}ul.tree.root{padding-left:0}
 .empty{padding:20px;color:var(--dim);text-align:center}
 .spin{display:inline-block;width:12px;height:12px;border:2px solid var(--t0);border-top-color:var(--acc);border-radius:50%;animation:sp .7s linear infinite;vertical-align:-2px}
 @keyframes sp{to{transform:rotate(360deg)}}
-.cpath{padding:6px 12px;font-size:11px;color:var(--dim);border-bottom:1px solid var(--line);display:flex;gap:8px}.cpath:empty{display:none}
+.cpath{padding:6px 12px;font-size:11px;color:var(--dim);border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:center}.cpath .ced{color:var(--acc);cursor:pointer}.cpath .ced:hover{text-decoration:underline}
+#sedit .nce{background:var(--panel2)}.pb[hidden]{display:none!important}.cpath:empty{display:none}
 </style></head><body>
 <div id="banner"></div>
 <div id="page">
@@ -388,21 +390,11 @@ async function applyHash(){nav=true;try{const p=new URLSearchParams(location.has
   if(syncOn)$('#sq').value=cur?cur.sym:''}finally{nav=false;restoringM=false}}     /* sync views: the field shows the selection */
 window.addEventListener('popstate',applyHash);
 
-/* ---------- code rendering with light highlighting ---------- */
-const KW=new Set(('if else for while do switch case default break continue return goto try catch throw finally new delete class struct enum union namespace using typedef template typename public private protected virtual override final static const constexpr inline extern volatile mutable explicit friend operator sizeof this nullptr true false void bool char int float double long short unsigned signed auto decltype '+
- 'local function end then elseif nil and or not in repeat until self def import from as pass lambda None True False with yield async await var let interface abstract sealed readonly get set ref out base is foreach internal string object').split(' '));
-function hl(line,lang){const cm=lang==='lua'?'--':lang==='py'?'#':'//';let out='',i=0;
- const re=/("(?:[^"\\]|\\.)*"?|'(?:[^'\\]|\\.)*'?)|(\b\d[\w.]*\b)|([A-Za-z_]\w*)|(#\s*\w+)/g;let m;
- const ci=(()=>{let q=null;for(let j=0;j<line.length;j++){const ch=line[j];if(q){if(ch==='\\'){j++;continue}if(ch===q)q=null}else if(ch==='"'||ch==="'")q=ch;else if(line.startsWith(cm,j))return j}return -1})();
- const code=ci>=0?line.slice(0,ci):line;
- while((m=re.exec(code))){out+=esc(code.slice(i,m.index));const s=m[0];
-  out+=m[1]?`<span class="s">${esc(s)}</span>`:m[2]?`<span class="n">${esc(s)}</span>`:m[3]?(KW.has(s)?`<span class="k">${s}</span>`:esc(s)):(lang!=='py'?`<span class="pp">${esc(s)}</span>`:esc(s));i=m.index+s.length}
- out+=esc(code.slice(i));if(ci>=0)out+=`<span class="c">${esc(line.slice(ci))}</span>`;return out}
-const langOf=p=>/\.lua$/i.test(p)?'lua':/\.py$/i.test(p)?'py':'c';
-function codeHtml(text,start,path,mark){const lang=langOf(path);
- const many=mark instanceof Set;return String(text).replace(/\r/g,'').split('\n').map((l,i)=>{const no=start+i,on=many?mark.has(no):no===mark;return `<span class="l${on?' hl':''}"${!many&&on?' id="mk"':''}><span class="ln">${no}</span>${hl(l,lang)}</span>`}).join('')}
-function numbered(code){const rows=String(code).replace(/\r/g,'').split('\n');const m=/^(\d+): /.exec(rows[0]||'');const start=m?+m[1]:1;
- return {start,text:rows.map(r=>r.replace(/^\d+: /,'')).join('\n')}}
+/* ---------- code: the shared code view (codeview.py) with symbol links, and its editor ---------- */
+/*__CODEVIEW__*/
+NC.api=async(u,b)=>{const r=await fetch(u,{method:'POST',headers:{...H,'Content-Type':'application/json'},body:JSON.stringify({...b,...(multi&&sel?{repo:sel}:{})})});return r.json()};
+NC.onPick=(l)=>{if(l.sym)openSym(l.sym,l.path||'');else if(l.file){target('sym');showFile(l.file,1)}};
+const numbered=NC.numbered;
 
 /* ---------- search: ask -> how it was read + what came back, then files; a file opens in the right viewer ---------- */
 let ans=null,fsel=-1,view='hits';
@@ -497,7 +489,7 @@ async function openFile(i,ref){const d=ans;fsel=i;setHash({f:i||''});document.qu
  try{const x=await T('expand',{refs:f.hs.map(h=>h.ref).join(','),what:'code'});if(ans!==d||fsel!==i)return;
   for(const it of x.items||[]){const el=$(`#vhits pre[data-ref="${it.ref}"]`);if(!el)continue;
    if(it.error||!it.code){el.innerHTML=`<span class="err" style="padding:0 12px">${esc(it.error||'no code')}</span>`;continue}
-   const c=numbered(it.code);el.innerHTML=codeHtml(c.text,c.start,f.p,peeks);
+   const c=numbered(it.code);NC.fill(el,c.text,c.start,f.p,peeks);
    const m=/start=(\d+), end=(\d+)/.exec(it.more||'');
    if(m)el.insertAdjacentHTML('afterend',`<div class="more" data-p="${esc(f.p)}" data-a="${m[1]}" data-b="${m[2]}">show the remaining ${+m[2]-+m[1]+1} lines</div>`)}}
  catch(e){$('#vhits').insertAdjacentHTML('afterbegin',`<div class="err" style="padding:6px 12px">${esc(e.message)}</div>`)}}
@@ -505,7 +497,7 @@ $('#vhits').addEventListener('click',async e=>{const s=e.target.closest('.sym[da
  const hc=e.target.closest('.hit>.hh>.tw');if(hc){hc.closest('.hit').classList.toggle('cl');return}
  const m=e.target.closest('.more');if(!m)return;m.innerHTML='<span class="spin"></span>';
  const d=await T('read_code',{path:m.dataset.p,start:+m.dataset.a,end:+m.dataset.b});const c=numbered(d.code);
- m.previousElementSibling.insertAdjacentHTML('beforeend',codeHtml(c.text,c.start,d.path));m.remove()});
+ const more=document.createElement('span');m.previousElementSibling.appendChild(more);NC.fill(more,c.text,c.start,d.path);m.remove()});
 
 /* ---------- symbol explorer ---------- */
 let tmode=localStorage.getItem('nncq.tmode')||'callers',cur=null,nodes=[],selNode=null;
@@ -585,11 +577,16 @@ $('#tree').addEventListener('click',async e=>{const r=e.target.closest('[data-r]
  if(nd.callPath&&tmode==='callees')show(nd.callPath,nd.callLine);else if(nd.path)show(nd.path,nd.line,nd.end);
  else if(nd.sym&&tmode==='types')openSym(nd.sym)});
 $('#tree').addEventListener('dblclick',e=>{const row=e.target.closest('.tn');if(!row)return;const nd=nodes[+row.dataset.id];if(nd.sym&&!nd.noroot)openSym(nd.sym,nd.dpath||nd.path)});
-async function show(path,line,end){setView('sym');$('#cpath').innerHTML=`<span class="mono">${esc(path)}</span><span>${line?':'+line:''}</span>`;$('#sview').innerHTML='<span class="spin"></span>';
+async function show(path,line,end){setView('sym');closeEdit();$('#cpath').innerHTML=`<span class="mono">${esc(path)}</span><span>${line?':'+line:''}</span><span style="flex:1"></span><a class="ced" data-path="${esc(path)}" data-line="${line||1}" title="edit this file here (Ctrl+S saves, Esc cancels)">Edit</a>`;$('#sview').innerHTML='<span class="spin"></span>';
  try{const a=Math.max(1,(line||1)-15),b=end&&end-line<300?end+8:(line||1)+60;const d=await T('read_code',{path,start:a,end:b});const c=numbered(d.code);
-  $('#sview').innerHTML=codeHtml(c.text,c.start,d.path,line);const mkr=$('#mk'),box=$('#sview').parentElement;
-  if(mkr)box.scrollTop=mkr.offsetTop-box.clientHeight/2}
+  const box=$('#sview').parentElement,center=()=>{const mkr=$('#sview #mk');if(mkr)box.scrollTop=mkr.offsetTop-box.clientHeight/2};
+  const done=NC.fill($('#sview'),c.text,c.start,d.path,line);center();const top=box.scrollTop;await done;if(box.scrollTop===top)center()}   /* again once links and layout settle */
  catch(e){$('#sview').innerHTML=`<span class="err">${esc(e.message)}</span>`}}
+/* edit mode for the symbol explorer's code: the shared editor in place of the view */
+function closeEdit(){const e=$('#sedit');if(e){e.remove();$('#sview').parentElement.hidden=false}}
+$('#cpath').addEventListener('click',e=>{const a=e.target.closest('.ced');if(!a)return;e.preventDefault();closeEdit();const pb=$('#sview').parentElement;pb.hidden=true;
+ const box=document.createElement('div');box.id='sedit';box.style.cssText='flex:1;min-height:0;display:flex;flex-direction:column';pb.after(box);const path=a.dataset.path,line=+a.dataset.line;
+ NC.editor(box,{repo:multi&&sel?sel:'',path,line,onClose:()=>{closeEdit();TC.clear();show(path,line)},onSaved:()=>TC.clear()})});
 function chips(list,label){if(!list||!list.length)return'';return `<div class="chips"><span class="dim" style="font-size:11px;padding:2px 0">${label}</span>${list.slice(0,12).map(s=>{
  if(typeof s==='object')return `<span class="chip" data-s="${esc(s.sym)}" data-p="${esc(s.path||'')}" title="${esc(s.sym)} · ${esc(s.path||'')}:${s.def_line||s.line||''}">${short(s.sym)}${s.times>1?` <span class="dim">×${s.times}</span>`:''}${s.test?' <span class="dim">test</span>':''}${s.by_name?' <i class="dim">by name</i>':''}</span>`;
  const m=reCaller.exec(s)||reCall.exec(s);

@@ -247,6 +247,21 @@ def test_markdown_lists_members_and_called_methods(repo):
         st.close()
 
 
+def test_code_links_resolve_calls_types_includes_and_definitions(repo):
+    from nncq import codeview
+    st = _st(repo)
+    try:
+        ls = codeview.links(st, "lib/src/Device.cpp")["links"]
+        by = {(x["name"], x["kind"]): x for x in ls}
+        assert by[("connect", "call")]["sym"] == "dev::Conn::connect"
+        assert by[("Device.hpp", "include")]["file"] == "lib/include/Device.hpp"
+        assert any(x.get("def") and x["sym"] == "dev::Device::run" for x in ls)
+        assert all(x["line"] >= 1 for x in ls)
+        assert codeview.links(st, "lib/src/Device.cpp", 1, 2)["links"] and not codeview.links(st, "nope.cpp")["links"]
+    finally:
+        st.close()
+
+
 def test_ascii_is_bounded():
     m = {"kind": "class", "title": "big", "nodes": [{"id": f"n{i}", "label": f"C{i}", "members": []}
                                                    for i in range(50)], "edges": []}

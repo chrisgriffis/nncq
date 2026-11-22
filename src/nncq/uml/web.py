@@ -47,7 +47,30 @@ def routes(tool) -> list[Route]:
     """tool(name, args) -> awaitable dict: the server's web_tool (same tools agents use)."""
 
     async def page(request: Request):
-        return HTMLResponse(PAGE.replace("__MERMAID__", "1" if vendor.path() else "0"))
+        from nncq.codeview import CODEVIEW_JS
+        return HTMLResponse(PAGE.replace("__MERMAID__", "1" if vendor.path() else "0").replace("/*__CODEVIEW__*/", CODEVIEW_JS))
+
+    async def code_links(request: Request):
+        """POST /api/code/links {repo, path, start, end}: symbol links for those lines (codeview.links)."""
+        import anyio
+        try:
+            a = await request.json()
+        except ValueError:
+            a = {}
+
+        def run():
+            from nncq.codeview import links
+            from nncq.store import Store
+            r = _repo(a.get("repo", ""))
+            st = Store(r.db, cache_mb=16)
+            try:
+                return links(st, str(a.get("path", "")), int(a.get("start") or 1), int(a.get("end") or 1 << 30))
+            finally:
+                st.close()
+        try:
+            return JSONResponse(await anyio.to_thread.run_sync(run))
+        except (KeyError, ValueError, OSError) as e:
+            return JSONResponse({"error": f"{type(e).__name__}: {e}", "links": []})
 
     async def mermaid_js(request: Request):
         p = vendor.path()
@@ -74,6 +97,7 @@ def routes(tool) -> list[Route]:
         return JSONResponse(await tool("uml_build", {"repo": request.query_params.get("repo", "")}))
 
     return [Route("/views", page), Route("/vendor/mermaid.min.js", mermaid_js),
+            Route("/api/code/links", code_links, methods=["POST"]),
             Route("/api/uml/local/{op}", local, methods=["POST"]), Route("/api/uml/build", build, methods=["POST"])]
 
 
@@ -110,8 +134,9 @@ def _local(op: str, a: dict) -> dict:
         if b"\r\n" in cur and "\r\n" not in text:
             text = text.replace("\n", "\r\n")
         p.write_bytes(text.encode("utf-8"))
+        _reindex(r, rel)
         return {"ok": True, "path": rel, "sha1": hashlib.sha1(p.read_bytes()).hexdigest(),
-                "vcs": vcs.for_root(r.root).status(rel)}
+                "vcs": vcs.for_root(r.root).status(rel), "reindex": "started"}
     if op == "vcs":
         v = vcs.for_root(r.root)
         what = a.get("op", "status")
@@ -120,6 +145,18 @@ def _local(op: str, a: dict) -> dict:
         out = getattr(v, what)(rel)
         return {**v.info(), **(out if isinstance(out, dict) else {"result": out})}
     return {"error": f"unknown op {op!r}"}
+
+
+def _reindex(r, rel: str) -> None:
+    """After a save: drop cached answers and re-index that one file (delta) in the background, so symbol links,
+    graph answers and diagram staleness follow the edit."""
+    from nncq import answers
+    answers.bump()
+    try:
+        from nncq import server
+        server._refresh(r, [rel])
+    except Exception:                       # no server around (tests, CLI): the watcher or the next update does it
+        pass
 
 
 def _code_exe() -> str | None:
@@ -197,7 +234,7 @@ main{flex:1;display:grid;grid-template-columns:300px minmax(0,1fr) 360px;min-hei
 .chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}.chip{font-size:11px;padding:2px 8px;border-radius:10px;background:#1a1e28;cursor:pointer}.chip:hover{color:var(--acc)}
 .acts{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
 pre.code{margin:0;padding:8px;font:12px/1.45 ui-monospace,Cascadia Mono,Consolas,monospace;white-space:pre;overflow:auto;max-height:46vh;background:var(--panel2)}
-pre.code .hl{background:#2b2a14;display:block}
+pre.code .hl{background:#2b2a14;display:block}pre.code span.l{display:block;padding-right:10px}pre.code .ln{display:inline-block;width:46px;padding-right:10px;text-align:right;color:#475060;user-select:none}
 #notice{position:fixed;top:14px;left:50%;transform:translateX(-50%);background:#3a2d08;color:#ffd987;border:1px solid var(--warn);padding:9px 16px;border-radius:9px;z-index:50;display:none;box-shadow:0 6px 30px #000a}
 .modal{position:fixed;inset:0;background:#000a;display:none;align-items:center;justify-content:center;z-index:40}.modal.on{display:flex}
 .mbox{background:var(--panel);border:1px solid var(--line);border-radius:10px;width:min(1100px,94vw);height:min(760px,90vh);display:flex;flex-direction:column}
@@ -444,6 +481,7 @@ async function symbolCard(q,path){const box=$('#more');box.innerHTML='<div class
   box.innerHTML=`<div class="card">${ch(d.bases,'bases')}${ch((d.derived||[]),'derived')}${ch(d.callers,'called by')}${ch(calls,'calls')}</div>`}catch(e){box.innerHTML=''}}
 $('#side').onclick=async e=>{const sx=e.target.closest('[data-symx]');const h=sx&&host();
  if(h&&!e.ctrlKey&&!e.shiftKey&&!e.metaKey){e.preventDefault();h.openSym(sx.dataset.symx,sx.dataset.symp);return}
+ const ed_=e.target.closest('[data-edit]');if(ed_)return editFile(ed_.dataset.edit,+ed_.dataset.ln);
  const t=e.target.closest('[data-go],[data-a],[data-mem],[data-sym],[data-open],[data-msg],[data-src]');if(!t)return;
  if(t.dataset.src)return source(t.dataset.src,+t.dataset.ln||1);
  if(t.dataset.go)return pick(t.dataset.go,true);
@@ -458,52 +496,28 @@ $('#side').onclick=async e=>{const sx=e.target.closest('[data-symx]');const h=sx
  if(a==='edit')return editFile(l.path,l.line);
  const j=await L(a,{path:l.path});if(j.error)notice(j.error)};
 async function source(path,line,end){const box=$('#more')||$('#side');const a=Math.max(1,(line||1)-6),b=end&&end-line<200?end+3:(line||1)+50;
- try{const d=await T('read_code',{path,start:a,end:b});const lg=langOf(path),rows=String(d.code||'').split('\n').map(r=>{const m=/^(\d+): ?(.*)$/.exec(r);return m?`<span class="${+m[1]===line?'hl':''}"><span class="c" style="font-style:normal">${m[1].padStart(5)}</span>  ${hlc(m[2],lg)}</span>`:esc(r)}).join('\n');
-  box.innerHTML=`<div class="card"><div class="mono dim">${esc(path)}:${line}</div></div><pre class="code">${rows}</pre>`}catch(e){box.innerHTML=`<div class="err" style="padding:10px">${esc(e.message)}</div>`}}
+ try{const d=await T('read_code',{path,start:a,end:b});const c=NC.numbered(d.code||'');
+  box.innerHTML=`<div class="card"><div class="mono dim" style="display:flex;gap:8px">${esc(path)}:${line}<span style="flex:1"></span><a data-edit="${esc(path)}" data-ln="${line||1}" title="edit this file (Ctrl+S saves)">Edit</a></div></div><pre class="code"></pre>`;
+  NC.fill(box.querySelector('pre.code'),c.text,c.start,path,line);const mk=box.querySelector('#mk');if(mk)mk.scrollIntoView({block:'center'})}catch(e){box.innerHTML=`<div class="err" style="padding:10px">${esc(e.message)}</div>`}}
 
 /* ---------- editors: source file (+ git / p4) and diagram JSON ---------- */
 let ed=null;
 function modal(title,txt,btns,stat,html){$('#mt').textContent=title;$('#mtext').value=txt;$('#mtext').hidden=html!=null;$('#mview').hidden=html==null;
  if(html!=null){$('#mview').innerHTML=html;$('#mview').scrollTop=0}$('#mbtns').innerHTML=btns;$('#mstat').innerHTML=stat||'';$('#mod').classList.add('on')}
 $('#mclose').onclick=()=>{$('#mod').classList.remove('on');ed=null};
-async function editFile(path,line){const d=await L('read',{path});if(d.error)return notice(d.error);ed={type:'file',path,sha1:d.sha1};
- const v=d.vcs||{},isP4=v.vcs==='p4',isGit=v.vcs==='git';
- const b=`<button data-e="save">Save</button>`+(isP4?`<button data-v="edit">p4 edit</button><button data-v="add">p4 add</button><button data-v="revert">p4 revert</button>`:'')+(isGit?`<button data-v="stage">git stage</button><button data-v="revert">git revert</button>`:'');
- modal(d.abs,d.text,b,vstat(v,d.readonly));const ta=$('#mtext');const pos=d.text.split('\n').slice(0,Math.max(0,(line||1)-1)).join('\n').length;ta.focus();ta.setSelectionRange(pos,pos);ta.scrollTop=Math.max(0,((line||1)-8)*17)}
-const vstat=(v,ro)=>`${esc(v.vcs||'no vcs')}: ${esc(v.state||'')}${ro?' · <span class="err">read-only</span>':''}${v.error||v.note?' · '+esc(v.error||v.note):''}`;
-$('#mbtns').onclick=async e=>{const t=e.target.closest('button');if(!t||!ed)return;
- if(ed.type==='file'){if(t.dataset.e==='save'){const j=await L('save',{path:ed.path,text:$('#mtext').value,sha1:ed.sha1});if(j.error){$('#mstat').innerHTML=`<span class="err">${esc(j.error)}</span>`;return}ed.sha1=j.sha1;$('#mstat').innerHTML='saved · '+vstat(j.vcs||{});return}
-  const j=await L('vcs',{path:ed.path,op:t.dataset.v});$('#mstat').innerHTML=j.error?`<span class="err">${esc(j.error)}</span>`:'ok · '+vstat(j.status||j);
-  if(!j.error&&t.dataset.v==='revert'){const d=await L('read',{path:ed.path});if(!d.error){$('#mtext').value=d.text;ed.sha1=d.sha1}}return}
-};
+async function editFile(path,line){ed=null;modal(path,'','','','<div id="edhost" style="height:100%"></div>');$('#mview').style.padding='0';
+ NC.editor($('#edhost'),{repo,path,line,onClose:()=>{$('#mod').classList.remove('on');$('#mview').style.padding=''}})}
 $('#bdel').onclick=async()=>{if(!cur||!confirm('Delete '+cur.key+'?'))return;try{await T('uml_delete',{key:cur.key});cur=null;$('#out').innerHTML='';list()}catch(e){notice(e.message)}};
 $('#bmd').onclick=async()=>{if(!cur)return;const md=await text('markdown');ed=null;
  modal(cur.key+'.md',md,'<button id="cp">Copy</button><button id="dl">Download</button>','Same export as MCP uml_view(format=markdown): Mermaid with element links + link list.',`<pre class="code" style="max-height:none;margin:0">${hlc(md,'md')}</pre>`);
  $('#cp').onclick=async()=>{try{await navigator.clipboard.writeText(md);$('#mstat').textContent='copied'}catch(e){$('#mtext').select();document.execCommand('copy');$('#mstat').textContent='copied'}};
  $('#dl').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([md],{type:'text/markdown'}));a.download=cur.key.replace(/[^\w.-]+/g,'_')+'.md';a.click()}};
 
-/* ---------- light syntax colouring: C / C++ / Python / CMake / JSON / Mermaid / Markdown (no network) ---------- */
-const KW={c:'if else for while do switch case default break continue return goto try catch throw new delete class struct enum union namespace using typedef template typename public private protected virtual override final static const constexpr inline extern volatile mutable explicit friend operator sizeof this nullptr true false void bool char int float double long short unsigned signed auto decltype noexcept',
- py:'def class return if elif else for while in not and or is None True False import from as with try except finally raise pass break continue lambda yield async await global nonlocal del assert self',
- cmake:'if elseif else endif foreach endforeach function endfunction macro endmacro set unset option project add_library add_executable target_link_libraries target_include_directories target_compile_definitions target_compile_options target_sources find_package include add_subdirectory message install PUBLIC PRIVATE INTERFACE STATIC SHARED',
- mermaid:'flowchart graph subgraph end classDiagram sequenceDiagram class direction style classDef click href participant actor note Note over link cssClass LR TB RL BT _blank',json:'true false null'};
-const KWS={};for(const k in KW)KWS[k]=new Set(KW[k].split(' '));
-const langOf=p=>/\.pyi?$/i.test(p)?'py':/(^|\/)CMakeLists\.txt$|\.cmake$/i.test(p)?'cmake':/\.md$/i.test(p)?'md':/\.json$/i.test(p)?'json':'c';
-function hl1(line,lang){const cm={c:'//',py:'#',cmake:'#',mermaid:'%%'}[lang];let ci=-1;
- if(cm){let q=null;for(let j=0;j<line.length;j++){const ch=line[j];if(q){if(ch==='\\'){j++;continue}if(ch===q)q=null}else if(ch==='"'||(ch==="'"&&lang!=='cmake'&&lang!=='mermaid'))q=ch;else if(line.startsWith(cm,j)){ci=j;break}}}
- const code=ci>=0?line.slice(0,ci):line,kw=KWS[lang]||new Set();let out='',i=0,m;
- const re=/("(?:[^"\\]|\\.)*"?|'(?:[^'\\]|\\.)*'?)|(\b\d[\w.]*\b)|([A-Za-z_][\w]*)|(#\s*\w+|\$\{[^}]*\}|-->|-\.->|--o|<\|--|\.\.>|==>)/g;
- while((m=re.exec(code))){out+=esc(code.slice(i,m.index));const t=m[0];
-  if(m[1]){const key=lang==='json'&&/^\s*:/.test(code.slice(m.index+t.length));out+=`<span class="${key?'pp':'s'}">${esc(t)}</span>`}
-  else if(m[2])out+=`<span class="n">${esc(t)}</span>`;
-  else if(m[3])out+=kw.has(t)?`<span class="k">${t}</span>`:(lang==='c'&&/^[A-Z]\w*[a-z]\w*$/.test(t)?`<span class="ty">${t}</span>`:esc(t));
-  else out+=(lang==='py'&&t[0]==='#')?esc(t):`<span class="pp">${esc(t)}</span>`;i=m.index+t.length}
- out+=esc(code.slice(i));if(ci>=0)out+=`<span class="c">${esc(line.slice(ci))}</span>`;return out}
-function hlc(text,lang){const ls=String(text??'').replace(/\r/g,'').split('\n');if(lang!=='md')return ls.map(l=>hl1(l,lang)).join('\n');
- let fence=null;return ls.map(l=>{if(/^\s*```/.test(l)){fence=fence?null:(l.trim().slice(3)||'text');return `<span class="k">${esc(l)}</span>`}
-  if(fence)return hl1(l,fence==='mermaid'?'mermaid':fence==='python'?'py':fence==='json'?'json':'c');
-  if(/^\s*<!--/.test(l))return `<span class="c">${esc(l)}</span>`;if(/^#{1,6}\s/.test(l))return `<span class="h">${esc(l)}</span>`;
-  return esc(l).replace(/^(\s*[-*]\s)/,'<span class="k">$1</span>').replace(/`([^`]+)`/g,'<span class="s">`$1`</span>').replace(/\[([^\]]+)\]\(([^)]+)\)/g,'[<span class="h">$1</span>](<span class="pp">$2</span>)')}).join('\n')}
+/* ---------- the shared code view (codeview.py): colouring, symbol links, editor ---------- */
+/*__CODEVIEW__*/
+NC.api=(u,b)=>api(u,{...b,repo});const hlc=NC.text,langOf=NC.langOf;
+NC.onPick=(l)=>{const p=l.sym?l.path:l.file;if(!p)return;source(p,l.sym?l.to_line:1);
+ const x=l.sym&&synced()&&host();if(x&&x.modelPick)x.modelPick({h:location.hash,q:l.sym,path:l.path||''})};
 
 /* ---------- Preview .md: the export rendered the way a Markdown viewer would (headings, lists, links, mermaid) ---------- */
 function mdInline(t){return esc(t).replace(/`([^`]+)`/g,'<code>$1</code>').replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>').replace(/(^|[^*])\*([^*]+)\*/g,'$1<i>$2</i>')
