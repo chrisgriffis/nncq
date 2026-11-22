@@ -214,7 +214,8 @@ def _file_types(ctx: Ctx, path: str, cap: int) -> list[Sym]:
                               "AND s.parent!='' GROUP BY s.parent ORDER BY MIN(s.start_line) LIMIT 60", (path,)):
         if parent in have:
             continue
-        hit = [d for d in ctx.find(parent, kinds={"type"}) if d.kind in TYPE_KINDS][:1]
+        hit = [d for d in ctx.find(parent, kinds={"type"}) if d.kind in TYPE_KINDS
+               and graph.norm(d.qualname) == graph.norm(parent)][:1]       # exact: a namespace is no type
         out += [t for t in hit if t.qualname not in have]
         have |= {t.qualname for t in hit}
     return out[:cap]
@@ -247,7 +248,7 @@ def class_view(st: Store, subject: str = "", under: str = "", depth: int = 1, me
                max_nodes: int = 40, path: str = "") -> tuple[dict, set, set]:
     """path: the types declared in that file (a Python module also gets its module, imports and importers)."""
     ctx = Ctx(st)
-    path = path.replace("\\", "/").strip("/")
+    fpath = path = path.replace("\\", "/").strip("/")          # `path` is reused by the edge loops below
     focus = _focus_types(ctx, subject, under, max_nodes, path)
     if not focus:
         raise ValueError(f"no class/struct/interface/enum matches {subject or under or path!r}")
@@ -325,12 +326,12 @@ def class_view(st: Store, subject: str = "", under: str = "", depth: int = 1, me
                    (x["kind"] == k or k == "depends") for x in edges.values()):
             edges.setdefault(e["id"], e)
     extra_nodes: list[dict] = []
-    if path:
-        extra_nodes = _module_context(ctx, path, [nodes[t.qualname] for t in focus if t.path == path], edges)
-    title = f"Classes: {subject or under or path}"
-    model = {"version": MODEL_VERSION, "kind": "class", "title": title, "subject": subject or under or path,
+    if fpath:
+        extra_nodes = _module_context(ctx, fpath, [nodes[t.qualname] for t in focus if t.path == fpath], edges)
+    title = f"Classes: {subject or under or fpath}"
+    model = {"version": MODEL_VERSION, "kind": "class", "title": title, "subject": subject or under or fpath,
              "layout": {"direction": "TB"}, "nodes": list(nodes.values()) + extra_nodes, "edges": list(edges.values()),
-             "params": {"depth": depth, "members": members, "under": under, **({"path": path} if path else {})}}
+             "params": {"depth": depth, "members": members, "under": under, **({"path": fpath} if fpath else {})}}
     return model, ctx.deps, ctx.scopes
 
 

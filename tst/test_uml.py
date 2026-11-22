@@ -184,7 +184,7 @@ def test_file_scoped_and_default_views(repo):
         assert {x["label"] for x in m["nodes"]} >= {"Conn", "Item", "Logger"} and "Device" not in {
             x["label"] for x in m["nodes"]} and ("lib/include/Conn.hpp", "@file") in deps
         m, _, _ = views.class_view(st, path="lib/src/Device.cpp")          # source: the types it implements
-        assert "Device" in {x["label"] for x in m["nodes"]}
+        assert "Device" in {x["label"] for x in m["nodes"]} and m["title"] == "Classes: lib/src/Device.cpp"
         m, _, _ = views.class_view(st, path="py/svc/service.py")
         mod = next(x for x in m["nodes"] if x["type"] == "module" and x["label"] == "service")
         assert any(e["from"] == mod["id"] and e["kind"] == "imports" for e in m["edges"])

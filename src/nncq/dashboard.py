@@ -167,6 +167,11 @@ pre.code{margin:0;padding:8px 0;overflow:auto;max-height:340px;font:12px/1.5 ui-
 pre.code.tall{max-height:none}
 .code span.l{display:block;padding-right:12px}.code span.l.hl{background:#2b2a14}
 .code .ln{display:inline-block;width:56px;padding-right:12px;text-align:right;color:#475060;user-select:none}
+/* element kinds: same hues as the Model explorer's diagrams */
+.kind.k-class,.badge.k-class{background:#1b2a44;color:#7cc0ff}.kind.k-interface,.badge.k-interface,.kind.k-trait,.badge.k-trait{background:#2a1f44;color:#c9a8ff}
+.kind.k-enum,.badge.k-enum{background:#3a2d10;color:#f0c050}.kind.k-struct,.badge.k-struct,.kind.k-union,.badge.k-union,.kind.k-record,.badge.k-record{background:#13332e;color:#5fd4c0}
+.kind.k-function,.badge.k-function,.kind.k-method,.badge.k-method{background:#14301f;color:#6fdc9e}.kind.k-field,.badge.k-field,.kind.k-variable,.badge.k-variable,.kind.k-constant,.badge.k-constant,.kind.k-property,.badge.k-property{background:#2d2a18;color:#e0cc6e}
+.kind.k-namespace,.badge.k-namespace,.kind.k-module,.badge.k-module{background:#262033;color:#c3a8f0}
 .k{color:#c792ea}.s{color:#c3e88d}.c{color:#5f6b7a;font-style:italic}.n{color:#f78c6c}.pp{color:#89ddff}
 /* symbols */
 #s-symbols{height:min(300px,32vh);flex:none}#s-symbols.idle{height:auto}
@@ -475,7 +480,7 @@ async function openFile(i,ref){const d=ans;fsel=i;setHash({f:i||''});document.qu
  $('#vhits').innerHTML=f.hs.map(h=>{const [a,b]=span(h.at);
   const facts=[['signature',h.sig&&`<span class="sig">${esc(h.sig)}</span>`],['doc',h.doc&&esc(h.doc)],['calls',h.calls&&esc(h.calls)],['callers',h.callers&&esc(h.callers)],
    ['bases',h.bases&&esc(h.bases)],['members',h.members&&esc(h.members)+(h.derived?` · ${h.derived} derived`:'')],['also at',h.also_at&&esc(h.also_at.join(', '))]].filter(x=>x[1]);
-  return `<div class="hit" id="h-${h.ref}"><div class="hh"><span class="hc tw" title="roll up / unroll">▾</span><span class="dim" style="font-size:11px">#${h.rank}</span><span class="kind">${esc(h.kind)}</span>
+  return `<div class="hit" id="h-${h.ref}"><div class="hh"><span class="hc tw" title="roll up / unroll">▾</span><span class="dim" style="font-size:11px">#${h.rank}</span><span class="kind k-${esc(h.kind)}">${esc(h.kind)}</span>
     <span class="sym" data-sym="${esc(h.sym)}" data-path="${esc(f.p)}" title="open in the symbol view">${short(h.sym)}</span><span class="dim mono">${a}-${b}</span>
     <span class="why">${String(h.why||'').split(' · ').filter(Boolean).map(w=>`<span>${esc(w)}</span>`).join('')}</span></div>
    ${facts.length?`<div class="facts">${facts.map(([l,v])=>`<span class="lab">${l}</span><div>${v}</div>`).join('')}</div>`:''}
@@ -503,7 +508,7 @@ function short(sym){const p=String(sym).split(/::|\./);const l=p.pop();return (p
 function mk(o){o.id=nodes.length;nodes.push(o);return o}
 function tnode(nd){const car=nd.leaf?'':nd.open?'▾':'▸';const lab=nd.label||short(nd.sym);
  return `<li><div class="tn ${selNode===nd.id?'cur':''}" data-id="${nd.id}"><span class="car" data-t="${nd.id}">${nd.loading?'<span class="spin"></span>':car}</span><span class="nm" title="${esc(nd.sym||'')}">${lab}</span>
-  ${nd.badge?`<span class="badge ${nd.bw?'w':''}">${esc(nd.badge)}</span>`:''}${nd.sym&&nd.path&&!nd.noroot?`<span class="rr" data-r="${nd.id}" title="explore this symbol">◎</span>`:''}<span class="f" title="${esc(nd.path||'')}">${nd.path?'&lrm;'+esc(nd.path)+(nd.line?':'+nd.line:''):''}</span></div>
+  ${nd.badge?`<span class="badge ${nd.bw?'w':'k-'+esc(nd.badge)}">${esc(nd.badge)}</span>`:''}${nd.sym&&nd.path&&!nd.noroot?`<span class="rr" data-r="${nd.id}" title="explore this symbol">◎</span>`:''}<span class="f" title="${esc(nd.path||'')}">${nd.path?'&lrm;'+esc(nd.path)+(nd.line?':'+nd.line:''):''}</span></div>
   ${nd.open&&nd.kids?`<ul class="tree">${nd.kids.map(tnode).join('')||'<li class="dim" style="padding:2px 22px">none</li>'}</ul>`:''}</li>`}
 function drawTree(){const roots=nodes.filter(x=>x.root);$('#tree').innerHTML=roots.length?`<ul class="tree root">${roots.map(tnode).join('')}</ul>`:'<div class="empty">Find a symbol, or click one in search hits.</div>'}
 function ancestors(nd){const s=new Set();for(let p=nd;p;p=p.parent!=null?nodes[p.parent]:null)s.add(p.sym);return s}
@@ -576,7 +581,7 @@ async function openSym(name,path,again){if(!nav)target('sym');$('#sq').value=nam
   if(!nav)srecentAdd(cur.sym,p);else srecent();follow({s:cur.sym,p});
   const facts=[d.call_sites_total&&`<span class="chip"><b>${esc(d.call_sites_total)}</b></span>`,d.mentioned_in_files!=null&&`<span class="chip">mentioned in <b>${n(d.mentioned_in_files)}</b> files</span>`,
    d.defined_at.length>1&&`<span class="chip">${d.defined_at.length} definitions</span>`].filter(Boolean).join('');
-  $('#scard').innerHTML=`<div class="t">${short(cur.sym)} <span class="kind">${esc(d.kind||'')}</span></div>
+  $('#scard').innerHTML=`<div class="t">${short(cur.sym)} <span class="kind k-${esc(d.kind||'')}">${esc(d.kind||'')}</span></div>
    ${d.parent?`<div class="dim" style="font-size:11px">in <span class="chip" data-s="${esc(d.parent)}">${esc(d.parent)}</span></div>`:''}
    ${d.signature?`<div class="sig">${esc(d.signature)}</div>`:''}<div class="chips">${facts}</div>
    ${chips(d.bases,'bases')}${chips(d.derived,'derived')}${chips(d.callers,'callers')}${chips((d.calls||[]).filter(s=>!/ambiguous|not in index/.test(s)),'calls')}`;

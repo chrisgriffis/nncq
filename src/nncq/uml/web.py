@@ -189,7 +189,7 @@ main{flex:1;display:grid;grid-template-columns:300px minmax(0,1fr) 360px;min-hei
 .tabs{display:flex;background:var(--panel2);border-radius:7px;padding:2px}.tabs a{padding:2px 9px;border-radius:5px;color:var(--dim);font-size:12px}.tabs a.on{background:#1d2a44;color:var(--fg)}
 #canvas{flex:1;overflow:auto;position:relative;background:var(--panel2)}#canvas svg{max-width:none;display:block;margin:10px}
 #canvas pre{margin:0;padding:12px;font:12px/1.35 ui-monospace,Cascadia Mono,Consolas,monospace;white-space:pre}
-#corner{position:absolute;right:10px;top:8px;display:flex;gap:6px;z-index:2}
+#corner{display:flex;gap:4px;flex-wrap:wrap}.vh button{padding:2px 8px;font-size:12px;white-space:nowrap}
 .hl rect,.hl circle,.hl polygon,.hl path.basic{stroke:var(--acc)!important;stroke-width:3px!important}
 #canvas g[data-n]{cursor:pointer}
 .card{padding:10px 12px;border-bottom:1px solid var(--line)}.card .t{font-size:14px;font-weight:600;word-break:break-all}
@@ -242,8 +242,8 @@ pre .k,.mdv .k{color:#c792ea}pre .s,.mdv .s{color:#c3e88d}pre .c,.mdv .c{color:#
  <div class="col" style="min-width:0">
   <div class="vh"><span class="t" id="vt">No diagram open</span><span id="vb"></span><span class="sp" style="flex:1"></span>
    <div class="tabs" id="tabs"><a data-t="diagram" class="on">Diagram</a><a data-t="ascii">ASCII</a><a data-t="mermaid">Mermaid</a><a data-t="json">JSON</a><a data-t="report">Report</a></div>
-   <button id="bdel">Delete</button></div>
-  <div id="canvas"><div id="corner"><button id="zo">−</button><button id="zi">+</button><button id="bmd" title="Markdown export: Mermaid + element links">Generate .md</button><button id="bpv" title="preview the exported Markdown as a Markdown viewer renders it">Preview .md</button><button id="bvs" title="write the .md to cache/exports and open it in VS Code (Ctrl+Shift+V previews it; Mermaid needs the 'Markdown Preview Mermaid Support' extension)">Open in VS Code</button></div><div id="out"><div class="dim" style="padding:20px">Pick a diagram or generate one.</div></div></div>
+   <span id="corner"><button id="zo">−</button><button id="zi">+</button><button id="bmd" title="Markdown export: Mermaid + element links">Generate .md</button><button id="bpv" title="preview the exported Markdown as a Markdown viewer renders it">Preview .md</button><button id="bvs" title="write the .md to cache/exports and open it in VS Code (Ctrl+Shift+V previews it; Mermaid needs the 'Markdown Preview Mermaid Support' extension)">Open in VS Code</button></span><button id="bdel" title="delete this stored view / composition">Delete</button></div>
+  <div id="canvas"><div id="out"><div class="dim" style="padding:20px">Pick a diagram or generate one.</div></div></div>
  </div>
  <div class="col"><div class="scroll" id="side"><div class="dim" style="padding:14px">Click a node for details.</div></div></div>
 </main>
