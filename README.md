@@ -333,6 +333,8 @@ Copilot CLI (`~/.copilot/mcp-config.json`):
 { "mcpServers": { "nncq": { "type": "http", "url": "http://127.0.0.1:8765/mcp", "tools": ["*"] } } }
 ```
 
+**Agent skill:** [`nncq-user.skill.md`](nncq-user.skill.md) tells the agent how to use nncq well: decompose a question into several narrow `ask`s, connect hits with the graph tools, `expand` only what the answer rests on, and reply with one compiled digest. For Claude Code copy it to `.claude/skills/nncq-user/SKILL.md`; for Copilot, add it to the repo's custom instructions. A short version of the same guidance is sent to every client in the MCP server instructions.
+
 Day to day: `nncq sync` (p4 sync plus delta), `nncq status`, `nncq pause` / `nncq resume`, `nncq stop`.
 
 **Linux / Ubuntu:** nothing in the core is Windows-specific (no Windows-only dependencies, paths stored as `/`). It needs an `init.sh` equivalent of `init.ps1`. Idle detection uses `xprintidle` when available. It has not been tested on Linux yet.
