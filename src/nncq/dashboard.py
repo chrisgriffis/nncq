@@ -68,6 +68,7 @@ svg{display:block}
 .xs.off{cursor:default;pointer-events:none}body.drag{cursor:col-resize;user-select:none}body.drag iframe{pointer-events:none}
 .xc{padding:0 7px;line-height:18px;color:var(--dim);flex:none}.xc:hover{color:var(--fg)}
 .pt{font-size:12px;font-weight:600;white-space:nowrap}
+.syncb{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--dim);white-space:nowrap;cursor:pointer;flex:none}.syncb input{margin:0;accent-color:var(--acc)}.syncb:has(input:checked){color:var(--acc)}
 #left{background:none}#left>.xh{display:flex;align-items:center;gap:8px;padding:3px 4px 7px 6px}#left>.xh .sp{flex:1}
 #dashb{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:12px;padding:0 4px 4px 2px;container-type:inline-size}
 #mpane{background:var(--panel);border:1px solid var(--line);border-radius:10px}#mpane.col{background:none;border:0}
@@ -171,7 +172,7 @@ pre.code.tall{max-height:none}
 .kind.k-class,.badge.k-class{background:#1b2a44;color:#7cc0ff}.kind.k-interface,.badge.k-interface,.kind.k-trait,.badge.k-trait{background:#2a1f44;color:#c9a8ff}
 .kind.k-enum,.badge.k-enum{background:#3a2d10;color:#f0c050}.kind.k-struct,.badge.k-struct,.kind.k-union,.badge.k-union,.kind.k-record,.badge.k-record{background:#13332e;color:#5fd4c0}
 .kind.k-function,.badge.k-function,.kind.k-method,.badge.k-method{background:#14301f;color:#6fdc9e}.kind.k-field,.badge.k-field,.kind.k-variable,.badge.k-variable,.kind.k-constant,.badge.k-constant,.kind.k-property,.badge.k-property{background:#2d2a18;color:#e0cc6e}
-.kind.k-namespace,.badge.k-namespace,.kind.k-module,.badge.k-module{background:#262033;color:#c3a8f0}
+.kind.k-file{background:#232a33;color:#b8c6d8}.kind.k-namespace,.badge.k-namespace,.kind.k-module,.badge.k-module{background:#262033;color:#c3a8f0}
 .k{color:#c792ea}.s{color:#c3e88d}.c{color:#5f6b7a;font-style:italic}.n{color:#f78c6c}.pp{color:#89ddff}
 /* symbols */
 #s-symbols{height:min(300px,32vh);flex:none}#s-symbols.idle{height:auto}
@@ -230,7 +231,7 @@ ul.tree{list-style:none;margin:0;padding-left:16px}ul.tree.root{padding-left:0}
  <div class="xs" data-i="0" title="drag to resize · double-click to reset"></div>
 
  <section id="right" class="pane xp" data-pane="sym">
-  <div class="ph"><b class="pt">Symbol explorer</b><span class="navb"><a onclick="history.back()" title="back (Alt+←, mouse back)">‹</a><a onclick="history.forward()" title="forward (Alt+→)">›</a></span><div class="seg" id="vtab"><a data-v="hits">Active search</a><a data-v="sym">Symbol</a></div><a id="mlink" href="views" title="show this symbol / file in the Model explorer (UML / SysML diagrams; ctrl-click: on its own page)" style="font-size:12px;color:var(--acc);white-space:nowrap">Model explorer</a><span id="vtitle" class="mono"></span><button class="xc" data-col="sym" title="collapse the Symbol explorer (its strip expands it again)">–</button></div>
+  <div class="ph"><b class="pt">Symbol explorer</b><span class="navb"><a onclick="history.back()" title="back (Alt+←, mouse back)">‹</a><a onclick="history.forward()" title="forward (Alt+→)">›</a></span><div class="seg" id="vtab"><a data-v="hits">Active search</a><a data-v="sym">Symbol</a></div><a id="mlink" href="views" title="show this symbol / file in the Model explorer (UML / SysML diagrams; ctrl-click: on its own page)" style="font-size:12px;color:var(--acc);white-space:nowrap">Model explorer</a><span id="vtitle" class="mono"></span><label class="syncb" title="Sync views: symbol / file selections show their default diagram in the Model explorer, diagram selections reveal their code here, and Back / Forward restore both panes together. Off: each explorer navigates on its own."><input type="checkbox" id="csync">Sync views</label><button class="xc" data-col="sym" title="collapse the Symbol explorer (its strip expands it again)">–</button></div>
   <div class="vb pb" id="vhits" style="padding:0"><div class="empty">Ask something, then pick a file.</div></div>
   <div class="vb" id="vsym" hidden>
    <form class="ph" id="sform" onsubmit="event.preventDefault();findSym($('#sq').value)">
@@ -377,8 +378,9 @@ async function applyHash(){nav=true;try{const p=new URLSearchParams(location.has
   if(!q){if(ans||$('#q').value)home(true)}
   else if(!ans||ans._key!==q+'\n'+qp+'\n'+kk){$('#q').value=q;$('#qpath').value=qp;$('#qk').value=kk;await doSearch()}
   const f=+(p.get('f')||0);if(ans&&ans.files&&ans.files[f]&&fsel!==f)openFile(f);
-  const s=p.get('s')||'';if(s&&(!cur||cur.req!==s))await openSym(s,p.get('p')||'');
-  const v=p.get('v');if(v&&v!==view)setView(v)}finally{nav=false}}
+  if(syncOn&&p.has('m')){restoringM=true;mrestore(p.get('m'))}        /* sync views: one history for both panes */
+  const s=p.get('s')||'',sf=p.get('sf')||'';if(s&&(!cur||cur.req!==s))await openSym(s,p.get('p')||'');else if(!s&&sf&&(cur||$('#cpath').textContent.indexOf(sf)<0))showFile(sf);
+  const v=p.get('v');if(v&&v!==view)setView(v)}finally{nav=false;restoringM=false}}
 window.addEventListener('popstate',applyHash);
 
 /* ---------- code rendering with light highlighting ---------- */
@@ -569,16 +571,17 @@ function chips(list,label){if(!list||!list.length)return'';return `<div class="c
  const sym=m?(reCaller.test(s)?m[1]:((/^(\S+) /.exec(m[4]||'')||[])[1]||m[2])):s.split(' ')[0];return `<span class="chip" data-s="${esc(sym)}" title="${esc(s)}">${short(sym)}</span>`}).join('')}${list.length>12?`<span class="dim" style="font-size:11px">+${list.length-12}</span>`:''}</div>`}
 $('#scard').addEventListener('click',e=>{const c=e.target.closest('[data-s]');if(c)openSym(c.dataset.s,c.dataset.p||'')});
 function findSym(q){q=(q||'').trim();if(q)openSym(q)}
-async function openSym(name,path,again){if(!nav)target('sym');$('#sq').value=name;setHash({s:name,p:path||''},!again);setView('sym');
+/* quiet: a selection synced from the Model explorer (no pane swap, no history entry of its own, no follow back) */
+async function openSym(name,path,again,quiet){if(!nav&&!quiet)target('sym');$('#sq').value=name;setHash({s:name,p:path||'',sf:''},!again&&!quiet);setView('sym');
  $('#scard').innerHTML='<span class="spin"></span>';
  try{let d;try{d=await T('symbol_context',{name,path:path||''})}catch(e){d={error:e.message}}
   if(d.error||!d.defined_at){const f=await T('find_symbol',{name});const defs=(f.definitions||[]).map(s=>reDef.exec(s)).filter(Boolean);
-   if(defs.length===1)return openSym(defs[0][1],defs[0][3],true);
+   if(defs.length===1)return openSym(defs[0][1],defs[0][3],true,quiet);
    $('#scard').innerHTML=`<div class="t">${esc(name)}</div><div class="dim">${defs.length?defs.length+' definitions: pick one':'not found'+(d.error?': '+esc(d.error):'')}</div>
     <div class="chips">${defs.map(m=>`<span class="chip" data-s="${esc(m[1])}" data-p="${esc(m[3])}" title="${esc(m[3])}:${m[4]}"><b>${esc(m[1])}</b> <span class="dim">${esc(m[2])} · ${esc(base(m[3]))}</span></span>`).join('')}</div>`;return}
   const at=String(d.defined_at[0]),m=/^(.+):(\d+)(?:-(\d+))?$/.exec(at),p=m?m[1]:at,a=m?+m[2]:1,b=m&&m[3]?+m[3]:a;
   cur={sym:d.symbol||name,req:name,path:p,line:a,end:b,kind:d.kind};$('#s-symbols').classList.remove('idle');setView('sym');
-  if(!nav)srecentAdd(cur.sym,p);else srecent();follow({s:cur.sym,p});
+  if(!nav&&!quiet)srecentAdd(cur.sym,p);else srecent();if(!quiet)follow({s:cur.sym,p});
   const facts=[d.call_sites_total&&`<span class="chip"><b>${esc(d.call_sites_total)}</b></span>`,d.mentioned_in_files!=null&&`<span class="chip">mentioned in <b>${n(d.mentioned_in_files)}</b> files</span>`,
    d.defined_at.length>1&&`<span class="chip">${d.defined_at.length} definitions</span>`].filter(Boolean).join('');
   $('#scard').innerHTML=`<div class="t">${short(cur.sym)} <span class="kind k-${esc(d.kind||'')}">${esc(d.kind||'')}</span></div>
@@ -618,16 +621,35 @@ const mpinned=()=>localStorage.getItem('nncq.mpin')==='1';
 function dhash(t){const p=new URLSearchParams();if(t&&t.s)p.set('s',t.s);if(t&&t.p)p.set('p',t.p);if(multi&&sel)p.set('repo',sel);const q=p.toString();return '#/uml/default'+(q?'?'+q:'')}
 function mnav(h,push){if(!frReady){frPend=h;return}const w=fr.contentWindow;if(w.location.hash===h)return;
  if(push)w.location.hash=h;else w.location.replace(w.location.pathname+w.location.search+h)}
-fr.addEventListener('load',()=>{frReady=true;if(frPend){const h=frPend;frPend=null;mnav(h)}});
+fr.addEventListener('load',()=>{frReady=true;syncUi();if(frPend){const h=frPend;frPend=null;mnav(h)}});
 function curTarget(){return view==='sym'&&cur?{s:cur.sym,p:cur.path}:view==='hits'&&ans&&ans.files&&fsel>=0?{p:ans.files[fsel].p}:null}
-function follow(t){lastT=t;$('#mlink').href='views'+dhash(curTarget()||t);if(skipFollow||noFollow||mpinned())return;
+function follow(t){lastT=t;$('#mlink').href='views'+dhash(curTarget()||t);if(skipFollow||noFollow||restoringM||mpinned())return;
  if(PS.c.model){missed=true;return}missed=false;mnav(dhash(t))}
 function catchUp(){if(missed&&lastT&&!mpinned()){missed=false;mnav(dhash(lastT))}}
 $('#mlink').addEventListener('click',e=>{if(e.ctrlKey||e.metaKey||e.shiftKey||e.button)return;e.preventDefault();
  target('model',true);missed=false;mnav(dhash(curTarget()),true)});
 /* called by the embedded Model explorer (same origin) */
-window.nncqHost={openSym(q,p){target('sym');noFollow=true;Promise.resolve(openSym(q,p||'')).finally(()=>{noFollow=false})},
- collapse(p){setCol(p,true)},modelHash(h){setHash({m:h&&h!=='#'?h.replace(/^#/,''):''})}};
+let restoringM=false;
+/* Sync views: one shared setting (this header, the Model explorer's header, localStorage, the URL) */
+let syncOn=(()=>{const h=new URLSearchParams(location.hash.slice(1));return h.has('sync')?h.get('sync')==='1':localStorage.getItem('nncq.sync')==='1'})();
+function syncUi(){$('#csync').checked=syncOn;try{const c=fr.contentDocument&&fr.contentDocument.querySelector('#csync');if(c)c.checked=syncOn}catch(e){}}
+function setSync(v){if(v===syncOn)return syncUi();syncOn=v;localStorage.setItem('nncq.sync',v?'1':'0');syncUi();
+ if(v){const t=curTarget();const m=t&&!mpinned()?dhash(t).slice(1):'';setHash({sync:'1',...(m?{m}:{})},true);if(m)mrestore(m)}   /* one entry */
+ else setHash({sync:''})}
+$('#csync').addEventListener('change',e=>setSync(e.target.checked));
+function mrestore(m){const h='#'+(m||'/uml/default');if(frReady){const w=fr.contentWindow;if(w.location.hash!==h)w.location.replace(w.location.pathname+w.location.search+h)}else frPend=h}
+function showFile(path,line){cur=null;nodes=[];drawTree();$('#s-symbols').classList.add('idle');$('#sq').value='';
+ $('#scard').innerHTML=`<div class="t">${esc(base(path))} <span class="kind k-file">file</span></div><div class="dim mono" style="font-size:11px">${esc(path)}</div>`;show(path,line||1);vtitle(path)}
+/* a code target for a Model explorer selection: {q, path, line} -> the symbol / file in the Symbol explorer, quietly */
+function syncCode(t){if(t.q)return openSym(t.q,t.path||'',true,true);if(t.path){setHash({s:'',p:'',sf:t.path});showFile(t.path,t.line)}}
+window.nncqHost={syncOn:()=>syncOn,setSync,openSym(q,p){target('sym');noFollow=true;Promise.resolve(openSym(q,p||'')).finally(()=>{noFollow=false})},
+ collapse(p){setCol(p,true)},modelHash(h){setHash({m:h&&h!=='#'?h.replace(/^#/,''):''})},
+ /* the Model explorer navigates (list, chips, links): one history entry here, the frame itself is only replaced */
+ modelNav(h){setHash({m:h.replace(/^#/,'')},true);mrestore(h.replace(/^#/,''))},
+ /* a node picked in a diagram: one entry holding both the model selection and the symbol / file it maps to */
+ modelPick(t){setHash({m:t.h.replace(/^#/,''),...(t.q?{s:t.q,p:t.path||'',sf:''}:t.path?{s:'',p:'',sf:t.path}:{})},true);
+  if(t.h)mrestore(t.h.replace(/^#/,''));if(t.q||t.path)syncCode(t)},
+ syncCode(t){syncCode(t)}};
 function srecent(){const r=JSON.parse(localStorage.getItem('nncq.srecent')||'[]');
  $('#srecent').innerHTML=r.map(x=>`<a data-s="${esc(x.s)}" data-p="${esc(x.p||'')}" class="${cur&&cur.sym===x.s?'cur':''}" title="${esc(x.s)}${x.p?' · '+esc(x.p):''}">${esc(String(x.s).split(/::|\./).slice(-2).join('::'))}</a>`).join('')}
 function srecentAdd(s,p){const r=[{s,p},...JSON.parse(localStorage.getItem('nncq.srecent')||'[]').filter(x=>x.s!==s)].slice(0,10);
@@ -642,7 +664,7 @@ function debugPanel(){const d=document.createElement('div');d.id='dbg';document.
 /* ---------- start ---------- */
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll()});
 document.addEventListener('keydown',e=>{if(e.key==='/'&&!/INPUT|SELECT/.test(document.activeElement.tagName)){e.preventDefault();setCol('dash',false);$('#q').focus()}});
-document.addEventListener('click',e=>{const s=e.target.closest('summary');if(s&&!e.target.closest('.tw'))e.preventDefault()},true);new MutationObserver(()=>rzApply($('#answer'))).observe($('#answer'),{childList:true});rzApply();segs();recent();srecent();layout();
+document.addEventListener('click',e=>{const s=e.target.closest('summary');if(s&&!e.target.closest('.tw'))e.preventDefault()},true);new MutationObserver(()=>rzApply($('#answer'))).observe($('#answer'),{childList:true});rzApply();segs();recent();srecent();layout();syncUi();if(syncOn&&!new URLSearchParams(location.hash.slice(1)).has('sync'))history.replaceState(null,'','#'+(()=>{const h=new URLSearchParams(location.hash.slice(1));h.set('sync','1');return h})());
 {const h0=new URLSearchParams(location.hash.slice(1)),m0=(h0.get('m')||'').replace(/^#/,''),s0=h0.get('s')||'';
  const nt=(performance.getEntriesByType('navigation')[0]||{}).type;
  if(nt!=='reload'&&nt!=='back_forward'){if(m0&&!s0)target('model',true);else if(s0&&!m0)target('sym',true)}
