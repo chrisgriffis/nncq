@@ -27,6 +27,14 @@ QUESTIONS = [
 
 
 GPU_ONLY = {"NNCQ_EMBED_TIER", "NNCQ_BG_WHEN", "NNCQ_GPU_MIN_FREE_MB"}
+QUESTIONS.append(("NNCQ_UML", "Build the UML/SysML model at index time (classes, components, packages; else later "
+                              "with `nncq uml init`) (true/false)", "true"))
+
+
+def _uml() -> None:
+    """The pinned Mermaid build for the dashboard's diagrams (the only network step for UML)."""
+    from nncq.uml import vendor
+    vendor.fetch()
 
 
 def _set_env(key: str, val: str) -> None:
@@ -137,6 +145,7 @@ def main(a) -> int:
     else:
         ok = _models(a.seed_models)
     _parsers()
+    _uml()
     r = _workspace(a)
     from nncq import agents
     targets = [t for t in (a.agents or "").split(",") if t.strip()] or (["copilot"] if a.copilot else None)

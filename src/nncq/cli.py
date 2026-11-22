@@ -414,6 +414,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--remove", default="")
     p.set_defaults(fn=cmd_repos)
 
+    from nncq.uml import cli as uml_cli
+    uml_cli.add_parser(sub)
+
     a = ap.parse_args(argv)
     for f in (sys.stdout, sys.stderr):
         if hasattr(f, "reconfigure"):

@@ -335,7 +335,7 @@ def render(st: Store, r: dict, fmt: str) -> str:
 def summary(r: dict) -> dict:
     rep = json.loads(r["report"] or "null")
     out = {"key": r["key"], "element": element_of(r), "kind": r["kind"], "title": r["title"], "origin": r["origin"],
-           "group": r["grp"] or "", "updated": time.strftime("%Y-%m-%d %H:%M", time.localtime(r["updated"] or 0))}
+           "group": r["grp"] or "", "rev": r["hash"], "updated": time.strftime("%Y-%m-%d %H:%M", time.localtime(r["updated"] or 0))}
     if r["dirty"]:
         out["stale"] = "pending re-check (files it depends on changed)"
     elif r["stale"]:
@@ -345,15 +345,27 @@ def summary(r: dict) -> dict:
     return out
 
 
+def ascii_ok(r: dict, model: dict) -> bool:
+    """ASCII covers plain views of ordinary elements: not compositions, nor views showing compositions/diagrams."""
+    return r["kind"] != "composition" and not any(n.get("type") in ("composition", "view") or
+                                                  str(n.get("element", "")).startswith(("composition:", "view:"))
+                                                  for n in model.get("nodes", [])) \
+        and not any(str(g.get("element", "")).startswith(("composition:", "view:")) for g in model.get("groups", []))
+
+
 def get(st: Store, key: str, fmt: str = "ascii") -> dict:
     r = _row(st, key)
     if r is None:
         return {"error": f"no view or composition {key!r}", "hint": "uml_views lists them"}
     r = check(st, r)
+    if fmt == "ascii" and not ascii_ok(r, json.loads(r["model"])):
+        return {"error": "ASCII is for plain views; this one is or contains a composition / diagram",
+                "hint": "use format=markdown (or mermaid)", "key": r["key"], "element": element_of(r)}
     out = summary(r)
     out.pop("stale", None) if not r["stale"] else None
     if fmt == "json":
         out["model"] = json.loads(r["model"])
+        out["node_revs"] = {n["id"]: _hash(n)[:10] for n in out["model"].get("nodes", [])}
         if r["origin"] != "auto":
             out["spec"] = json.loads(r["spec"])
     else:

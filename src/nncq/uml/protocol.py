@@ -99,7 +99,8 @@ RULES = """Rules:
   intent, wrong for facts). Stale views/compositions carry `staleness`: per member changed|missing|moved;
   repair by re-upserting with corrected refs.
 - Output: format=ascii for chat, markdown for files/PRs (pure ```mermaid block + element list linking to the
-  dashboard; links carry revisions, the page flags outdated exports), json for edits."""
+  dashboard; links carry revisions, the page flags outdated exports), json for edits. ASCII only renders plain
+  views (no compositions / embedded diagrams) and is capped ('+N more'): use markdown for the rest."""
 
 EXAMPLE_VIEW = {"key": "device-connect", "kind": "class", "title": "How devices connect",
                 "nodes": [{"id": "mgr", "ref": "sym:servicehost::ConnectionManager", "members": "auto"},

@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 WIDTH = 110
+MAX_NODES, MAX_EDGES, MAX_MESSAGES = 30, 60, 80
 _ARROW = {"inherits": "--|>", "realizes": "..|>", "composes": "*-->", "aggregates": "o-->", "associates": "--->",
           "depends": "..>", "depends-on": "..>", "uses": "..>", "imports": "..>", "includes": "..>",
           "instantiates": "..> «create»", "instance_of": "..> «instanceOf»", "connects": "----", "flows-to": "==>",
@@ -139,7 +140,9 @@ def _sequence(model: dict) -> list[str]:
     parts = model["nodes"]
     col = {p["id"]: i for i, p in enumerate(parts)}
     msgs = model.get("messages", [])
-    w = max(14, min(34, max([len(m.get("label", "")) + 6 for m in msgs] + [len(p["label"]) + 2 for p in parts])))
+    parts = parts[:12]
+    col = {p["id"]: i for i, p in enumerate(parts)}
+    w = max(14, min(24 if len(parts) > 6 else 34, max([len(m.get("label", "")) + 6 for m in msgs] + [len(p["label"]) + 2 for p in parts])))
     x = [i * w + w // 2 for i in range(len(parts))]
     width = len(parts) * w
     head = [" "] * width
@@ -182,6 +185,24 @@ def _sequence(model: dict) -> list[str]:
 
 
 def render(model: dict) -> str:
+    """Bounded: at most MAX_NODES boxes / MAX_EDGES relations / MAX_MESSAGES messages, then a '+N more' footer."""
+    more = []
+    if len(model.get("nodes", [])) > MAX_NODES and model.get("kind") != "sequence":
+        keep = model["nodes"][:MAX_NODES]
+        ids = {n["id"] for n in keep}
+        more.append(f"+{len(model['nodes']) - MAX_NODES} more elements")
+        model = {**model, "nodes": keep, "edges": [e for e in model.get("edges", []) if e["from"] in ids and e["to"] in ids]}
+    if len(model.get("edges", [])) > MAX_EDGES:
+        more.append(f"+{len(model['edges']) - MAX_EDGES} more relations")
+        model = {**model, "edges": model["edges"][:MAX_EDGES]}
+    if len(model.get("messages", [])) > MAX_MESSAGES:
+        more.append(f"+{len(model['messages']) - MAX_MESSAGES} more messages")
+        model = {**model, "messages": model["messages"][:MAX_MESSAGES]}
+    text = _render(model)
+    return text + (f"\n({', '.join(more)}: use the markdown export for the whole diagram)" if more else "")
+
+
+def _render(model: dict) -> str:
     k = model.get("kind")
     names = {n["id"]: n.get("label") or n["id"] for n in model["nodes"]}
     for n in model["nodes"]:
@@ -201,7 +222,7 @@ def render(model: dict) -> str:
         out += _tree(model)
     rel = _relations(model, names)
     if rel:
-        out += ["Relations:"] + rel[:200] + ([f"  ... {len(rel) - 200} more"] if len(rel) > 200 else [])
+        out += ["Relations:"] + rel
     for x in model.get("notes", []):
         out.append(f"Note{' on ' + names.get(x['on'], x['on']) if x.get('on') else ''}: {x['text']}")
     stale = [n for n in model["nodes"] if n.get("stale")]
