@@ -18,7 +18,9 @@ Authoritative schema, element-id scheme, rules, examples: call `uml_protocol`. T
 - `uml_view(key=..., format=json)`: model with stable ids, source spans, absolute paths.
 
 ## Generate
-`uml_view(kind, subject, under, depth, format)`. kind: class | object | component | package | deployment | sequence. subject: type | component | entry function. Stored and reused; regenerated when its sources change.
+`uml_view(kind, subject, under, depth, path, format)`. kind: class | object | component | package | deployment | sequence. subject: type | component | entry function. `path` = a file: class -> the types it declares or defines members of; component -> its build target(s). Stored and reused; regenerated when its sources change.
+- No kind = the default diagram for a target: type -> class view, function -> sequence, folder (`path`) -> packages, nothing -> component overview, any file (`path`) -> its **file composition**.
+- File composition: key `composition:file:<path>` (also `uml_view(key="file:<path>")`), origin auto, made on demand only. Groups: per namespace types (with members) / functions (+ key calls) / globals, related types, includes, included-by, component, the file's sub-diagrams. Rebuilt when stale (parts first); never hand-edit it: to customize, upsert a copy under your own id. ASCII refuses it (use markdown).
 
 ## Author
 `uml_upsert(spec)`. Same `key` (view) / `id` (composition) = replace.
@@ -27,8 +29,10 @@ Authoritative schema, element-id scheme, rules, examples: call `uml_protocol`. T
   {"id":"lib","ref":"comp:DeviceLib"},{"id":"api","ref":"sym:ns::DeviceApi"},
   {"id":"seq","ref":"view:connect-flow"},
   {"id":"hw","bespoke":{"type":"block","label":"Hardware"}}],
- "connectors":[{"from":"lib","to":"hw","kind":"flows-to","label":"usb"}]}
+ "connectors":[{"from":"lib","to":"hw","kind":"flows-to","label":"usb"}],
+ "groups":[{"id":"core","label":"Core","members":["lib","api"]}]}
 ```
+Composition `groups` draw sub-frames (optional `parent` = enclosing group id).
 View: `{"key","kind","title","nodes":[{"id","ref"|"label","members":"auto"|"none","expand"}],"edges":[{"from","to","kind","label"}],"auto_edges":true}`.
 Node/member ids: `[A-Za-z_]\w*`, unique per object. Keys/ids: `[A-Za-z0-9][\w.-]*`, no `:`.
 
