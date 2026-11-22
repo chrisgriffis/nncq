@@ -4,6 +4,7 @@ Code (tiered, see worker.py):
   files, chunks (tier 0 = no vector, 1 = card vector, 2 = full vector), fts (bm25), vecs, symbols, edges
 engine data cross-reference (datarefs.py, no chunks/vectors):
   data_files, data_types, data_inst (type x file), data_assets (reference targets), data_refs
+UML (nncq/uml/schema.py): extra symbol/edge columns, components, views (+ what they depend on, for staleness)
 """
 from __future__ import annotations
 
@@ -14,8 +15,9 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from nncq.chunker import FileResult
+from nncq.uml import schema as uml_schema
 
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "2"     # 2: UML columns on symbols/edges + UML tables (nncq/uml/schema.py), migrated in place
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
@@ -93,7 +95,9 @@ class Store:
             self.db.execute("PRAGMA journal_mode=WAL")
             self.db.execute("PRAGMA synchronous=NORMAL")
             self.db.executescript(SCHEMA)
-            if self.meta("schema") is None:
+            if uml_schema.migrate(self.db) and self.meta("schema") is not None:
+                self.db.execute("DELETE FROM meta WHERE key='uml_facts'")    # old rows: re-parse before UML views
+            if self.meta("schema") != SCHEMA_VERSION:
                 self.set_meta("schema", SCHEMA_VERSION)
         self.db.execute(f"PRAGMA cache_size=-{cache_mb * 1024}")
         self.db.execute("PRAGMA temp_store=MEMORY")
@@ -136,6 +140,7 @@ class Store:
     def replace_file(self, path: str, size: int, mtime_ns: int, sha1: str, prio: float, r: FileResult) -> None:
         """Caller holds a transaction (tx()). Chunks start at tier 0 (lexical/graph only)."""
         db = self.db
+        uml_schema.touch(db, path)
         row = db.execute("SELECT id FROM files WHERE path=?", (path,)).fetchone()
         keep: dict[tuple, tuple[int, bytes]] = {}
         if row:
@@ -163,12 +168,16 @@ class Store:
             db.execute("INSERT INTO fts(rowid, path, symbol, body) VALUES(?,?,?,?)",
                        (cid, path, c.symbol + " " + " ".join(split_ident(c.symbol.split(":")[-1].split(".")[-1])),
                         fts_body(c.text)))
-        db.executemany("INSERT INTO symbols(file_id, name, qualname, kind, parent, start_line, end_line, signature) "
-                       "VALUES(?,?,?,?,?,?,?,?)",
-                       ((fid, s.name, s.qualname, s.kind, s.parent, s.start_line, s.end_line, s.signature)
-                        for s in r.symbols))
-        db.executemany("INSERT INTO edges(file_id, src, dst, kind, line, label) VALUES(?,?,?,?,?,?)",
-                       ((fid, e.src, e.dst, e.kind, e.line, e.label or None) for e in r.edges))
+        db.executemany("INSERT INTO symbols(file_id, name, qualname, kind, parent, start_line, end_line, signature, "
+                       "visibility, mods, rtype, params, tparams, stereo, start_col, end_col) "
+                       "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                       ((fid, s.name, s.qualname, s.kind, s.parent, s.start_line, s.end_line, s.signature,
+                         s.visibility or None, s.mods or None, s.rtype or None, s.params or None, s.tparams or None,
+                         s.stereo or None, s.start_col if s.start_col >= 0 else None,
+                         s.end_col if s.end_col >= 0 else None) for s in r.symbols))
+        db.executemany("INSERT INTO edges(file_id, src, dst, kind, line, label, role, col) VALUES(?,?,?,?,?,?,?,?)",
+                       ((fid, e.src, e.dst, e.kind, e.line, e.label or None, e.role or None,
+                         e.col if e.col >= 0 else None) for e in r.edges))
 
     def touch_file(self, path: str, size: int, mtime_ns: int) -> None:
         """Content unchanged (same sha1) but stat changed, e.g. p4 sync of an identical revision."""
@@ -177,6 +186,7 @@ class Store:
     def delete_file(self, path: str) -> None:
         row = self.db.execute("SELECT id FROM files WHERE path=?", (path,)).fetchone()
         if row:
+            uml_schema.touch(self.db, path)
             self._clear_file(self.db, row[0])
             self.db.execute("DELETE FROM files WHERE id=?", (row[0],))
 

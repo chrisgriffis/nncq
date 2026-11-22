@@ -4,6 +4,8 @@ Vectors are added later by worker.py.
 Full / stat-delta:  update(repo)          enumerate with ripgrep, stat, re-chunk new/changed, drop removed
 Path delta:         update_paths(repo, p) for the watcher (exact file list)
 The engine .xdata cross-reference (datarefs.py) is refreshed alongside when NNCQ_DATA is on.
+UML (nncq/uml): when on for the index, the same parse records UML facts, and the repo-level model (components,
+file dependencies, build configurations) is rebuilt or refreshed after the code pass.
 Read-only on the workspace: files are only listed, stat'ed and read; everything is written under cache/.
 
 Sync cost is proportional to what changed, never to the workspace (sync with P4V / p4 as usual):
@@ -27,6 +29,7 @@ from pathlib import Path
 from nncq import chunker, config, datarefs, langs, sysutil, walk
 from nncq.repos import Repo
 from nncq.store import Store
+from nncq.uml import model as uml_model
 
 BATCH = 256          # files per write transaction
 POOL_MIN = 64        # below this many files, chunk in-process (pool start-up costs more)
@@ -66,7 +69,8 @@ def open_store(repo: Repo) -> Store:
 # ------------------------------------------------------------- per-file work (runs in pool processes)
 
 def _work(job):
-    root, rel, lang, max_chars, max_bytes, known_sha1 = job
+    root, rel, lang, max_chars, max_bytes, known_sha1, *rest = job
+    uml = bool(rest and rest[0])
     try:
         data = (Path(root) / rel).read_bytes()
     except OSError as e:
@@ -78,7 +82,7 @@ def _work(job):
         return rel, "new", sha1, chunker.FileResult(lang, "skipped", error=f"larger than {max_bytes // 1024} KB")
     if b"\0" in data[:8192] and not data.startswith((b"\xff\xfe", b"\xfe\xff")):
         return rel, "new", sha1, chunker.FileResult(lang, "skipped", error="binary")
-    return rel, "new", sha1, chunker.process(rel, data, lang, max_chars)
+    return rel, "new", sha1, chunker.process(rel, data, lang, max_chars, uml=uml)
 
 
 def folders(paths, depth: int = 4, k: int = 6) -> list[str]:
@@ -111,10 +115,11 @@ def _end(store: Store) -> None:
 
 
 def _apply(store: Store, root: Path, todo: list[tuple[str, str, tuple[int, int]]],
-           known: dict[str, tuple[int, int, str]], log, label: str, state: dict | None = None) -> dict:
+           known: dict[str, tuple[int, int, str]], log, label: str, state: dict | None = None,
+           uml: bool = False) -> dict:
     """todo: [(rel, lang, (size, mtime_ns))]. Chunk them (pool if many) and write in batches."""
     s = config.settings()
-    jobs = [(str(root), rel, lang, s.chunk_chars, s.max_file_kb * 1024, (known.get(rel) or (0, 0, None))[2])
+    jobs = [(str(root), rel, lang, s.chunk_chars, s.max_file_kb * 1024, (known.get(rel) or (0, 0, None))[2], uml)
             for rel, lang, _ in todo]
     stat = {rel: st for rel, _, st in todo}
     out = {"changed": 0, "same": 0, "gone": 0, "errors": 0}
@@ -179,6 +184,10 @@ def update(repo: Repo, full: bool = False, data: bool | None = None, log=print) 
         log(f"[{repo.name}] {len(files)} code files under {repo.root}"
             + (f" ({', '.join(repo.dirs)})" if repo.dirs else ""))
         stats = walk.stat_many(repo.root, files)
+        uml = uml_model.enabled(store)
+        if uml and not uml_model.facts_ready(store) and store.file_stats() and not full:
+            log(f"[{repo.name}] UML facts missing: re-parsing every file once (vectors are kept)")
+            full = True
         known = {} if full else store.file_stats()
         todo = [(p, lang_of(p, m), st) for p, st in stats.items() if (known.get(p) or (None, None))[:2] != st]
         removed = [p for p in store.file_stats() if p not in stats]
@@ -187,10 +196,16 @@ def update(repo: Repo, full: bool = False, data: bool | None = None, log=print) 
             with store.tx():
                 for p in removed:
                     store.delete_file(p)
-        res = _apply(store, repo.root, todo, known, log, "code", state) if todo else {"changed": 0}
+        res = _apply(store, repo.root, todo, known, log, "code", state, uml) if todo else {"changed": 0}
         res["removed"] = len(removed)
         store.set_meta("indexed_at", time.time())
         log(f"[{repo.name}] code: {res}")
+        if uml:
+            store.set_meta("uml_facts", uml_model.FACTS_VERSION)
+            if todo or removed or store.meta("uml_built_at") is None:
+                state["phase"] = "uml"
+                store.set_meta("sync", json.dumps(state))
+                res["uml"] = uml_model.build(store, repo.root, log)
         if s.data if data is None else data:
             state["phase"] = "data"
             store.set_meta("sync", json.dumps(state))
@@ -232,10 +247,16 @@ def update_paths(repo: Repo, paths: list[str], store: Store | None = None, log=p
                 with store.tx():
                     for p in gone:
                         store.delete_file(p)
-            res = _apply(store, repo.root, todo, known, log, "code", state) if todo else {"changed": 0}
+            res = _apply(store, repo.root, todo, known, log, "code", state, uml_model.enabled(store)) \
+                if todo else {"changed": 0}
             res["removed"] = len(gone)
             if xdata and s.data:
                 res["data_files"] = datarefs.scan_paths(store, repo.root, xdata, log)
+            if (todo or gone) and uml_model.enabled(store) and uml_model.facts_ready(store):
+                new = any(p not in known for p, _, _ in todo)
+                u = uml_model.refresh(store, repo.root, [x[0] for x in todo] + gone, bool(gone) or new, log)
+                if u:
+                    res["uml"] = u
         finally:
             if not busy:
                 _end(store)
@@ -256,6 +277,7 @@ def status(repo: Repo) -> dict:
                  file_errors=st.q("SELECT COUNT(*) FROM files WHERE error IS NOT NULL")[0][0],
                  indexed_at=_ts(st.meta("indexed_at")), data_scanned_at=_ts(st.meta("data_scanned_at")),
                  db_mb=round(sum(f.stat().st_size for f in repo.db.parent.glob("index.db*")) / 2**20))
+        c["uml"] = uml_model.state(st)
         return c
     finally:
         st.close()
