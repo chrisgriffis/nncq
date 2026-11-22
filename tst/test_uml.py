@@ -23,6 +23,8 @@ public:
 };
 class Device : public IDevice {
 public:
+    Device();
+    ~Device();
     static Device& instance();
     bool open(const std::string& host) override;
     void run();
@@ -149,6 +151,7 @@ def test_model_components_and_generated_views(repo):
         kinds = {(e["kind"], n_["label"]) for e in m["edges"] for n_ in m["nodes"] if n_["id"] == e["to"]}
         assert {("realizes", "IDevice"), ("composes", "Conn"), ("aggregates", "Item")} <= kinds
         mem = {x["name"]: x for x in n["Device"]["members"]}
+        assert len({x["id"] for x in n["Device"]["members"]}) == len(n["Device"]["members"])
         assert mem["open"]["vis"] == "+" and mem["open"]["impl"]["path"] == "lib/src/Device.cpp"
         assert n["Device"]["ref"]["abs"].endswith("Device.hpp") and n["Device"]["ref"]["col"] == 0
         assert ("lib/include/Device.hpp", "dev::Device") in deps
@@ -216,6 +219,45 @@ def test_file_scoped_and_default_views(repo):
         keys = {x["key"] for xs in catalog.list_views(st, "origin")["groups"]["auto"] for x in [xs]}
         assert "composition:file:lib/include/Device.hpp" in keys and "class:*|path=lib/include/Device.hpp" in keys
         assert catalog.view(st, "default", "dev::Device", fmt="json")["default_for"]["kind"] == "class"
+    finally:
+        st.close()
+
+
+def test_type_hierarchy_has_structured_derived_list(repo):
+    from nncq import graph
+    st = _st(repo)
+    try:
+        h = graph.type_hierarchy(st, "IDevice")
+        assert h["is_type"] and h["path"] == "lib/include/Device.hpp"
+        assert [(x["type"], x["path"], x["depth"]) for x in h["derived"]] == [("dev::Device", "lib/include/Device.hpp", 1)]
+        assert h["derived"][0]["line"] > 0 and "dev::Device  lib/include/Device.hpp:" in h["derived_tree"]
+        assert not graph.type_hierarchy(st, "dev::Device::run")["is_type"]
+    finally:
+        st.close()
+
+
+def test_markdown_lists_members_and_called_methods(repo):
+    st = _st(repo)
+    try:
+        md = catalog.view(st, "class", "Device", fmt="markdown")["markdown"]
+        assert "  - [run()](" in md and "/uml/method/sym%3Adev%3A%3ADevice%3A%3Arun?view=class%3ADevice" in md
+        md = catalog.view(st, "sequence", "Device::run", fmt="markdown")["markdown"]
+        assert "\nCalls:\n" in md and "/uml/method/sym%3Adev%3A%3AConn%3A%3Aconnect?" in md
+    finally:
+        st.close()
+
+
+def test_code_links_resolve_calls_types_includes_and_definitions(repo):
+    from nncq import codeview
+    st = _st(repo)
+    try:
+        ls = codeview.links(st, "lib/src/Device.cpp")["links"]
+        by = {(x["name"], x["kind"]): x for x in ls}
+        assert by[("connect", "call")]["sym"] == "dev::Conn::connect"
+        assert by[("Device.hpp", "include")]["file"] == "lib/include/Device.hpp"
+        assert any(x.get("def") and x["sym"] == "dev::Device::run" for x in ls)
+        assert all(x["line"] >= 1 for x in ls)
+        assert codeview.links(st, "lib/src/Device.cpp", 1, 2)["links"] and not codeview.links(st, "nope.cpp")["links"]
     finally:
         st.close()
 

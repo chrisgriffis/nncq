@@ -329,7 +329,9 @@ def find_symbol(store: Store, name: str, kind: str = "", path: str = "", limit: 
         ks = {x.strip() for x in kind.split(",")}
         rows = [r for r in rows if r.kind in ks or ("type" in ks and graph.is_type(r.kind))]
     return {"name": name, "match": how, "total": len(rows),
-            "definitions": [r.line() + (f"\n    {r.signature}" if r.signature else "") for r in rows[:limit]]}
+            "definitions": [r.line() + (f"\n    {r.signature}" if r.signature else "") for r in rows[:limit]],
+            "definitions_list": [{"sym": r.qualname, "kind": r.kind, "path": r.path, "start": r.start, "end": r.end,
+                                  "signature": r.signature or ""} for r in rows[:limit]]}
 
 
 def file_outline(store: Store, path: str) -> dict:

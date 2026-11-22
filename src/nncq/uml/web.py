@@ -47,7 +47,30 @@ def routes(tool) -> list[Route]:
     """tool(name, args) -> awaitable dict: the server's web_tool (same tools agents use)."""
 
     async def page(request: Request):
-        return HTMLResponse(PAGE.replace("__MERMAID__", "1" if vendor.path() else "0"))
+        from nncq.codeview import CODEVIEW_JS
+        return HTMLResponse(PAGE.replace("__MERMAID__", "1" if vendor.path() else "0").replace("/*__CODEVIEW__*/", CODEVIEW_JS))
+
+    async def code_links(request: Request):
+        """POST /api/code/links {repo, path, start, end}: symbol links for those lines (codeview.links)."""
+        import anyio
+        try:
+            a = await request.json()
+        except ValueError:
+            a = {}
+
+        def run():
+            from nncq.codeview import links
+            from nncq.store import Store
+            r = _repo(a.get("repo", ""))
+            st = Store(r.db, cache_mb=16)
+            try:
+                return links(st, str(a.get("path", "")), int(a.get("start") or 1), int(a.get("end") or 1 << 30))
+            finally:
+                st.close()
+        try:
+            return JSONResponse(await anyio.to_thread.run_sync(run))
+        except (KeyError, ValueError, OSError) as e:
+            return JSONResponse({"error": f"{type(e).__name__}: {e}", "links": []})
 
     async def mermaid_js(request: Request):
         p = vendor.path()
@@ -74,6 +97,7 @@ def routes(tool) -> list[Route]:
         return JSONResponse(await tool("uml_build", {"repo": request.query_params.get("repo", "")}))
 
     return [Route("/views", page), Route("/vendor/mermaid.min.js", mermaid_js),
+            Route("/api/code/links", code_links, methods=["POST"]),
             Route("/api/uml/local/{op}", local, methods=["POST"]), Route("/api/uml/build", build, methods=["POST"])]
 
 
@@ -110,8 +134,9 @@ def _local(op: str, a: dict) -> dict:
         if b"\r\n" in cur and "\r\n" not in text:
             text = text.replace("\n", "\r\n")
         p.write_bytes(text.encode("utf-8"))
+        _reindex(r, rel)
         return {"ok": True, "path": rel, "sha1": hashlib.sha1(p.read_bytes()).hexdigest(),
-                "vcs": vcs.for_root(r.root).status(rel)}
+                "vcs": vcs.for_root(r.root).status(rel), "reindex": "started"}
     if op == "vcs":
         v = vcs.for_root(r.root)
         what = a.get("op", "status")
@@ -120,6 +145,18 @@ def _local(op: str, a: dict) -> dict:
         out = getattr(v, what)(rel)
         return {**v.info(), **(out if isinstance(out, dict) else {"result": out})}
     return {"error": f"unknown op {op!r}"}
+
+
+def _reindex(r, rel: str) -> None:
+    """After a save: drop cached answers and re-index that one file (delta) in the background, so symbol links,
+    graph answers and diagram staleness follow the edit."""
+    from nncq import answers
+    answers.bump()
+    try:
+        from nncq import server
+        server._refresh(r, [rel])
+    except Exception:                       # no server around (tests, CLI): the watcher or the next update does it
+        pass
 
 
 def _code_exe() -> str | None:
@@ -191,13 +228,13 @@ main{flex:1;display:grid;grid-template-columns:300px minmax(0,1fr) 360px;min-hei
 #canvas pre{margin:0;padding:12px;font:12px/1.35 ui-monospace,Cascadia Mono,Consolas,monospace;white-space:pre}
 #corner{display:flex;gap:4px;flex-wrap:wrap}.vh button{padding:2px 8px;font-size:12px;white-space:nowrap}body.embed .vh{gap:5px;padding:6px 8px}body.embed .vh button{padding:1px 6px;font-size:11px}body.embed .tabs a{padding:2px 6px}
 .hl rect,.hl circle,.hl polygon,.hl path.basic{stroke:var(--acc)!important;stroke-width:3px!important}
-#canvas g[data-n]{cursor:pointer}#canvas{cursor:grab}#canvas.panning{cursor:grabbing;user-select:none}#canvas.panning *{pointer-events:none}
+#canvas g[data-n]{cursor:pointer}#out .lnk{cursor:pointer}#out text.lnk:hover,#out .lnk:hover text{fill:var(--acc)!important;text-decoration:underline}#out g.lnk:hover p{color:var(--acc)!important;text-decoration:underline}#out text.messageText.hl{fill:var(--acc)!important;font-weight:600}#canvas{cursor:grab}#canvas.panning{cursor:grabbing;user-select:none}#canvas.panning *{pointer-events:none}
 .card{padding:10px 12px;border-bottom:1px solid var(--line)}.card .t{font-size:14px;font-weight:600;word-break:break-all}
 .kv{display:grid;grid-template-columns:auto 1fr;gap:3px 8px;font-size:12px;margin-top:6px}.kv span:nth-child(odd){color:var(--dim);text-align:right}
 .chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}.chip{font-size:11px;padding:2px 8px;border-radius:10px;background:#1a1e28;cursor:pointer}.chip:hover{color:var(--acc)}
 .acts{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
 pre.code{margin:0;padding:8px;font:12px/1.45 ui-monospace,Cascadia Mono,Consolas,monospace;white-space:pre;overflow:auto;max-height:46vh;background:var(--panel2)}
-pre.code .hl{background:#2b2a14;display:block}
+pre.code .hl{background:#2b2a14;display:block}pre.code span.l{display:block;padding-right:10px}pre.code .ln{display:inline-block;width:46px;padding-right:10px;text-align:right;color:#475060;user-select:none}
 #notice{position:fixed;top:14px;left:50%;transform:translateX(-50%);background:#3a2d08;color:#ffd987;border:1px solid var(--warn);padding:9px 16px;border-radius:9px;z-index:50;display:none;box-shadow:0 6px 30px #000a}
 .modal{position:fixed;inset:0;background:#000a;display:none;align-items:center;justify-content:center;z-index:40}.modal.on{display:flex}
 .mbox{background:var(--panel);border:1px solid var(--line);border-radius:10px;width:min(1100px,94vw);height:min(760px,90vh);display:flex;flex-direction:column}
@@ -208,8 +245,10 @@ pre.code .hl{background:#2b2a14;display:block}
 #mstate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:0 1 auto}header>*{flex:none}header>#mstate{flex:0 1 auto}
 body.embed header{padding:6px 10px;gap:8px}body.embed header b{font-size:13px}
 #bpin{filter:grayscale(1);opacity:.45;padding:1px 6px}#bpin.on{filter:none;opacity:1;border-color:var(--acc);background:#1d2a44}
-.hb{padding:1px 8px;color:var(--dim)}.hb:hover{color:var(--fg)}
+.hb{padding:1px 8px;color:var(--dim)}.syncb{align-items:center;gap:4px;font-size:11px;color:var(--dim);white-space:nowrap;cursor:pointer}.syncb input{margin:0 4px 0 0;padding:0;accent-color:var(--acc);vertical-align:-2px}.syncb:has(input:checked){color:var(--acc)}.hb:hover{color:var(--fg)}
 .spin{display:inline-block;width:11px;height:11px;border:2px solid #262b36;border-top-color:var(--acc);border-radius:50%;animation:sp .7s linear infinite;vertical-align:-2px}@keyframes sp{to{transform:rotate(360deg)}}
+.cw{position:relative;display:flex;flex:1;min-width:0}.cw>input{flex:1;min-width:0;padding-right:26px!important}
+.cx{position:absolute;right:6px;top:50%;transform:translateY(-50%);color:var(--dim);cursor:pointer;font-size:16px;line-height:1;display:none;padding:0 4px;user-select:none}.cx:hover{color:var(--fg)}
 .hint{margin-top:8px;font-size:11px;color:var(--dim)}.hint .mono{font-size:11px;color:#9fb3cc}
 #mmbox{position:relative;height:170px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;overflow:hidden;cursor:grab}
 #mmbox svg{position:absolute;left:0;top:0;pointer-events:none;max-width:none}#mmv{position:absolute;border:1.5px solid var(--acc);background:#5aa9ff1f;border-radius:2px;pointer-events:none}
@@ -228,6 +267,7 @@ pre .k,.mdv .k{color:#c792ea}pre .s,.mdv .s{color:#c3e88d}pre .c,.mdv .c{color:#
 </style></head><body>
 <div id="notice"></div>
 <header><b><span class="noemb">nncq · model explorer</span><span class="emb">Model explorer</span></b><a href="./" class="dim noemb">← dashboard</a>
+ <label class="emb syncb" title="Sync views (shared with the Symbol explorer): diagram selections reveal their code there, symbol / file selections show their default diagram here, one Back / Forward history for both"><input type="checkbox" id="csync">Sync views</label>
  <button id="bpin" class="emb" title="pin: keep this diagram when the Symbol explorer moves (unpinned, the Model explorer follows it)">📌</button>
  <select id="repo" title="index"></select><span id="mstate" class="dim"></span><span class="sp"></span>
  <button id="bbuild" title="Re-derive the UML model from the index (only stale/changed parts); cached views regenerate on next open">⟳ Refresh</button>
@@ -281,6 +321,7 @@ const pinned=()=>localStorage.getItem('nncq.mpin')==='1';
 function pinUi(){$('#bpin').classList.toggle('on',pinned())}
 $('#bpin').onclick=()=>{localStorage.setItem('nncq.mpin',pinned()?'0':'1');pinUi()};pinUi();
 $('#bcol').onclick=()=>{const h=host();if(h)h.collapse('model')};
+$('#csync').checked=synced();$('#csync').onchange=e=>{const h=host();if(h&&h.setSync)h.setSync(e.target.checked)};
 $('#bsolo').onclick=()=>{$('#bsolo').href='views'+(tok?'?token='+encodeURIComponent(tok):'')+location.hash};
 $('#bbuild').onclick=async()=>{const b=$('#bbuild');b.disabled=true;b.innerHTML='<span class="spin"></span> Refreshing…';
  const done=()=>{b.disabled=false;b.textContent='⟳ Refresh';init()};
@@ -292,6 +333,15 @@ async function list(){let d;try{d=await T('uml_views',{group_by:$('#gb').value})
  for(const [g,vs] of Object.entries(d.groups||{})){const xs=vs.filter(v=>!f||(v.title+v.key).toLowerCase().includes(f));if(!xs.length)continue;
   h+=`<div class="grp">${esc(g)} · ${xs.length}</div>`+xs.map(v=>`<div class="vi ${cur&&cur.key===v.key?'on':''}" data-k="${esc(v.key)}" title="${esc(v.key)}">${kindBadge(v)}${originBadge(v)}<span class="t">${esc(v.title)}</span>${v.stale?`<span class="b w" title="${esc(typeof v.stale==='string'?v.stale:'stale: see Report')}">stale</span>`:''}</div>`).join('')}
  $('#list').innerHTML=h||'<div class="dim" style="padding:12px">No stored diagrams yet: pick a symbol or file (its default diagram is made on demand), or let an agent compose one (uml_upsert).</div>'}
+/* every filter / search input: an inline × while it has text; click or Esc clears, re-applies, refocuses */
+const CLR=[];
+function clearable(inp,apply){const w=document.createElement('span');w.className='cw';inp.replaceWith(w);w.appendChild(inp);
+ const x=document.createElement('a');x.className='cx';x.textContent='×';x.title='clear (Esc)';w.appendChild(x);
+ const upd=()=>{x.style.display=inp.value?'block':'none'};CLR.push(upd);inp.addEventListener('input',upd);
+ const clr=()=>{inp.value='';upd();if(apply)apply();inp.focus()};x.addEventListener('click',e=>{e.preventDefault();clr()});
+ inp.addEventListener('keydown',e=>{if(e.key==='Escape'&&inp.value){e.preventDefault();e.stopPropagation();clr()}});upd()}
+setInterval(()=>CLR.forEach(f=>f()),400);            /* values set by code (history, links) */
+clearable($('#filter'),list);
 $('#filter').oninput=list;$('#gb').onchange=list;
 $('#list').onclick=e=>{const v=e.target.closest('[data-k]');if(v)go(v.dataset.k)};
 
@@ -299,7 +349,16 @@ $('#list').onclick=e=>{const v=e.target.closest('[data-k]');if(v)go(v.dataset.k)
 const isFile=v=>String(v.key||'').startsWith('composition:file:');
 const originBadge=v=>v.origin==='auto'?'<span class="b o-auto" title="generated from the index, on demand; regenerated when its sources change">auto</span>':`<span class="b o-${esc(v.origin)}" title="${esc(v.provenance?v.provenance.tag+'\n'+v.provenance.detail:'made via MCP')}">${v.origin==='agent'?'mcp-agent':esc(v.origin)}</span>`;
 const kindBadge=v=>isFile(v)?'<span class="b k-file" title="file composition (generated on demand)">file</span>':`<span class="b k-${esc(v.kind)}">${esc(v.kind)}</span>`;
-function go(key,q){location.hash='#/uml/view/'+encodeURIComponent(key.startsWith('composition:')?key:'view:'+key)+(q||'')}
+/* embedded: navigation goes through the dashboard's single history (it replaces this frame's hash); a navigation
+   made here also selects the matching code in the Symbol explorer (syncNext) */
+let syncNext=false;
+function synced(){const x=host();return !!(x&&x.syncOn&&x.syncOn())}
+function navTo(h){const x=host();if(synced()&&x.modelNav){syncNext=true;x.modelNav(h)}else location.hash=h}
+function go(key,q){navTo('#/uml/view/'+encodeURIComponent(key.startsWith('composition:')?key:'view:'+key)+(q||''))}
+const viewElem=()=>cur.key.startsWith('composition:')?cur.key:'view:'+cur.key;
+function codeOf(n){const r=n.ref||{};if(r.q)return {q:r.q,path:r.path||''};if(r.path&&n.type!=='package'&&!/\/$/.test(r.path))return {path:r.path,line:r.line||1};return null}
+function viewCode(){if(!cur)return null;if(cur.key.startsWith('composition:file:'))return {path:cur.key.slice(17)};const pm=(cur.model.params||{});
+ if(pm.path)return {path:pm.path};if(['class','sequence','object'].includes(cur.kind)&&cur.model.subject&&!/[,/]/.test(cur.model.subject))return {q:cur.model.subject};return null}
 async function open(key){try{const d=await T('uml_view',{key,format:'json'});show(d);return d}catch(e){return null}}
 function show(d){cur=d;selN=null;$('#vt').textContent=d.title;
  $('#vb').innerHTML=`${kindBadge(d)} ${originBadge(d)}`+(d.stale||(d.report&&d.report.staleness)?' <span class="b w">stale</span>':'')+(d.report&&d.report.unbound?' <span class="b x">unbound refs</span>':'');
@@ -360,15 +419,50 @@ function nodeOf(raw){if(!cur)return null;const id=raw.replace(/^n_/,'');const ns
  if(!n)n=ns.find(x=>(x.ports||[]).some(p=>p.id===id));return n}
 function wire(){const svg=$('#out svg');if(!svg)return;
  svg.querySelectorAll('[id]').forEach(el=>{const m=/(?:^|-)(n_[A-Za-z0-9_]+?)(?:-\d+)?$/.exec(el.id);if(!m)return;const n=nodeOf(m[1]);if(!n)return;
-  el.setAttribute('data-n',n.id);el.addEventListener('click',ev=>{ev.stopPropagation();pick(n.id)})});
- if(cur.kind==='sequence')svg.querySelectorAll('text.actor,.actor-box text,text').forEach(t=>{const n=cur.model.nodes.find(x=>x.label===t.textContent.trim());if(n){t.style.cursor='pointer';t.addEventListener('click',()=>pick(n.id))}})}
-function nodeLinks(){const pre=$('#out pre');if(!pre||!cur)return;pre.addEventListener('click',()=>{const s=getSelection().toString().trim();const n=cur.model.nodes.find(x=>x.label===s);if(n)pick(n.id)})}
+  el.setAttribute('data-n',n.id);el.addEventListener('click',ev=>{ev.stopPropagation();pick(n.id,true)})});
+ const on=(el,f)=>{el.classList.add('lnk');el.addEventListener('click',ev=>{ev.stopPropagation();f(ev)})};
+ /* sequence: participants -> their type / module, message labels -> the called method (alt-click: the call site) */
+ if(cur.kind==='sequence'){svg.querySelectorAll('text.actor').forEach(t=>{const n=cur.model.nodes.find(x=>x.label===t.textContent.trim());if(n)on(t.parentElement||t,()=>pick(n.id,true))});
+  const ms=(cur.model.messages||[]).filter(m=>m.kind!=='note');svg.querySelectorAll('text.messageText').forEach((t,i)=>{const m=ms[i];if(!m)return;t.setAttribute('data-msg',m.id);
+   t.setAttribute('title',(m.target?m.target.q+'  '+m.target.path+':'+(m.target.line||''):'unresolved')+(m.ref?'\ncalled at '+m.ref.path+':'+m.ref.line+' (alt-click)':''));on(t,ev=>pickMsg(m.id,true,ev.altKey))})}
+ /* class / object: each member line -> that member */
+ if(cur.kind==='class'||cur.kind==='object')svg.querySelectorAll('g.node[data-n]').forEach(g=>{const n=cur.model.nodes.find(x=>x.id===g.getAttribute('data-n'));if(!n)return;
+  const ms=(n.members||[]).slice(0,25),groups=[['.members-group',ms.filter(m=>m.kind!=='method')],['.methods-group',ms.filter(m=>m.kind==='method')]];
+  for(const [sel,list] of groups){const gg=g.querySelector(sel);if(gg)[...gg.querySelectorAll(':scope>g.label')].forEach((lab,i)=>{const m=list[i];if(m)on(lab,()=>pickMember(n.id,m.id,true))})}});
+ /* component pins -> the port (its file, or the component it needs) */
+ svg.querySelectorAll('[id]').forEach(el=>{const m=/(?:^|-)n_([A-Za-z0-9_]+?)(?:-\d+)?$/.exec(el.id);if(!m)return;const owner=cur.model.nodes.find(x=>(x.ports||[]).some(p=>p.id===m[1]));
+  if(owner)on(el,()=>pickPort(owner.id,m[1],true))})}
+function selSync(extra,code){const x=synced()&&host();if(x&&x.modelPick)x.modelPick({h:'#/uml/view/'+encodeURIComponent(viewElem())+'?view='+encodeURIComponent(cur.key)+extra,...(code||{})})}
+const symx=(q,p)=>q?`<a class="chip" data-symx="${esc(q)}" data-symp="${esc(p||'')}" href="./#s=${encodeURIComponent(q)}&p=${encodeURIComponent(p||'')}&v=sym" title="open ${esc(q)} in the Symbol explorer">Symbol explorer</a>`:'';
+const at=r=>r&&r.path?`${esc(r.path)}:${r.line||1}`:'';
+function pickMsg(id,user,site){const m=(cur.model.messages||[]).find(x=>x.id===id);if(!m)return;const t=m.target||{},nm=i=>(cur.model.nodes.find(x=>x.id===i)||{}).label||i;
+ document.querySelectorAll('#out .hl').forEach(x=>x.classList.remove('hl'));const el=document.querySelector(`#out [data-msg="${CSS.escape(id)}"]`);if(el)el.classList.add('hl');
+ if(user)selSync('&msg='+encodeURIComponent(id),t.q?{q:t.q,path:t.path||''}:null);
+ $('#side').innerHTML=`<div class="card"><div class="t">${esc(m.label||m.kind)}</div><div class="kv"><span>message</span><span>${esc(m.kind)} · ${esc(nm(m.from))} → ${esc(nm(m.to))}</span>
+   ${t.q?`<span>calls</span><span class="mono">${esc(t.q)}</span><span>defined</span><span class="mono">${at(t)}</span>`:'<span>calls</span><span class="dim">not resolved to one definition</span>'}${m.ref?`<span>call site</span><span class="mono">${at(m.ref)}</span>`:''}</div>
+  <div class="acts">${t.path?`<button data-src="${esc(t.path)}" data-ln="${t.line||1}">Source</button>`:''}${m.ref?`<button data-src="${esc(m.ref.path)}" data-ln="${m.ref.line}">Call site</button>`:''}${symx(t.q,t.path)}</div></div><div id="more"></div>`;
+ if(site&&m.ref)source(m.ref.path,m.ref.line);else if(t.q){symbolCard(t.q,t.path)}}
+function pickMember(nid,mid,user){const n=cur.model.nodes.find(x=>x.id===nid),m=n&&(n.members||[]).find(x=>x.id===mid);if(!m)return;selN=nid;hl(nid);const r=m.ref||{},im=m.impl;
+ if(user)selSync('&n='+encodeURIComponent(nid)+'&mem='+encodeURIComponent(mid),r.q?{q:r.q,path:r.path||''}:null);
+ $('#side').innerHTML=`<div class="card"><div class="t">${esc(n.label)}::${esc(m.name)}${m.kind==='method'?'()':''}</div><div class="kv"><span>member</span><span>${esc(m.vis||'')} ${esc(m.kind)}${m.type?' · '+esc(m.type):''}${(m.mods||[]).length?' · '+esc(m.mods.join(' ')):''}</span>
+   ${r.q?`<span>element</span><span class="mono">sym:${esc(r.q)}</span>`:''}${m.decl?`<span>decl</span><span class="mono">${esc(m.decl)}</span>`:''}${r.path?`<span>declared</span><span class="mono">${at(r)}</span>`:''}${im?`<span>defined</span><span class="mono">${at(im)}</span>`:''}</div>
+  <div class="acts">${r.path?`<button data-src="${esc(r.path)}" data-ln="${r.line||1}">Declaration</button>`:''}${im?`<button data-src="${esc(im.path)}" data-ln="${im.line||1}">Definition</button>`:''}<span class="chip" data-go="${esc(nid)}">${esc(n.label)}</span>${symx(r.q,r.path)}</div></div><div id="more"></div>`;
+ if(im)source(im.path,im.line,im.end);else if(r.path)source(r.path,r.line,r.end)}
+function pickPort(nid,pid,user){const n=cur.model.nodes.find(x=>x.id===nid),pt=n&&(n.ports||[]).find(x=>x.id===pid);if(!pt)return;selN=nid;hl(nid);const r=pt.ref||{};
+ const need=pt.dir==='required'?cur.model.nodes.find(x=>x.label===pt.iface):null;
+ if(user)selSync('&n='+encodeURIComponent(nid),r.path?{path:r.path,line:r.line||1}:null);
+ $('#side').innerHTML=`<div class="card"><div class="t">${esc(n.label)} · ${esc(pt.name)}</div><div class="kv"><span>pin</span><span>${esc(pt.dir||'')}${pt.iface?' · '+esc(pt.iface):''}${pt.consumers?' · used by '+pt.consumers:''}</span>${r.path?`<span>file</span><span class="mono">${at(r)}</span>`:''}</div>
+  <div class="acts">${r.path?`<button data-src="${esc(r.path)}" data-ln="${r.line||1}">Source</button>`:''}<span class="chip" data-go="${esc(nid)}">${esc(n.label)}</span>${need?`<span class="chip" data-go="${esc(need.id)}">→ ${esc(need.label)}</span>`:''}</div>
+  ${(pt.files||[]).length?`<div class="chips">${pt.files.slice(0,20).map(f=>`<span class="chip" data-src="${esc(f)}" data-ln="1">${esc(f.split('/').pop())}</span>`).join('')}</div>`:''}</div><div id="more"></div>`;
+ if(r.path)source(r.path,r.line||1)}
+function nodeLinks(){const pre=$('#out pre');if(!pre||!cur)return;pre.addEventListener('click',()=>{const s=getSelection().toString().trim();const n=cur.model.nodes.find(x=>x.label===s);if(n)pick(n.id,true)})}
 function hl(id){document.querySelectorAll('#out .hl').forEach(x=>x.classList.remove('hl'));document.querySelectorAll(`#out [data-n="${CSS.escape(id)}"]`).forEach(x=>x.classList.add('hl'))}
 
 /* ---------- node details: element, relations, callers / callees, source, local actions ---------- */
 function loc(n){const r=n.ref||{};return r.path?{path:r.path,line:r.line||1,abs:r.abs,end:r.end}:null}
 function elemId(n){if(n.element)return n.element;const r=n.ref||{};if(r.q)return 'sym:'+r.q;if(r.component)return 'comp:'+r.component;if(n.type==='package'&&r.path)return 'pkg:'+r.path;return ''}
-async function pick(id){const n=cur.model.nodes.find(x=>x.id===id);if(!n)return;selN=id;hl(id);const l=loc(n),el=elemId(n);
+async function pick(id,user){const n=cur.model.nodes.find(x=>x.id===id);if(!n)return;selN=id;hl(id);const l=loc(n),el=elemId(n);
+ const x=user&&synced()&&host();if(x&&x.modelPick)x.modelPick({h:'#/uml/view/'+encodeURIComponent(viewElem())+'?view='+encodeURIComponent(cur.key)+'&n='+encodeURIComponent(id),...(codeOf(n)||{})});
  const rels=(cur.model.edges||[]).filter(e=>e.from===id||e.to===id).map(e=>{const o=e.from===id?e.to:e.from;const on=cur.model.nodes.find(x=>x.id===o);
   return `<span class="chip" data-go="${esc(o)}">${e.from===id?'→':'←'} ${esc(e.kind)} <b>${esc(on?on.label:o)}</b>${e.label?' · '+esc(e.label):''}</span>`}).join('');
  const msgs=(cur.model.messages||[]).filter(m=>m.from===id||m.to===id).slice(0,30).map(m=>`<span class="chip" data-msg="${esc(m.id)}">${m.from===id?'→':'←'} ${esc(m.label||m.kind)}</span>`).join('');
@@ -387,65 +481,43 @@ async function symbolCard(q,path){const box=$('#more');box.innerHTML='<div class
   box.innerHTML=`<div class="card">${ch(d.bases,'bases')}${ch((d.derived||[]),'derived')}${ch(d.callers,'called by')}${ch(calls,'calls')}</div>`}catch(e){box.innerHTML=''}}
 $('#side').onclick=async e=>{const sx=e.target.closest('[data-symx]');const h=sx&&host();
  if(h&&!e.ctrlKey&&!e.shiftKey&&!e.metaKey){e.preventDefault();h.openSym(sx.dataset.symx,sx.dataset.symp);return}
- const t=e.target.closest('[data-go],[data-a],[data-mem],[data-sym],[data-open],[data-msg]');if(!t)return;
- if(t.dataset.go)return pick(t.dataset.go);
+ const ed_=e.target.closest('[data-edit]');if(ed_)return editFile(ed_.dataset.edit,+ed_.dataset.ln);
+ const t=e.target.closest('[data-go],[data-a],[data-mem],[data-sym],[data-open],[data-msg],[data-src]');if(!t)return;
+ if(t.dataset.src)return source(t.dataset.src,+t.dataset.ln||1);
+ if(t.dataset.go)return pick(t.dataset.go,true);
  if(t.dataset.open)return go(t.dataset.open.replace(/^view:/,''));
  const n=cur.model.nodes.find(x=>x.id===$('#side').dataset.id);
- if(t.dataset.msg){const m=cur.model.messages.find(x=>x.id===t.dataset.msg);if(m&&m.ref)return source(m.ref.path,m.ref.line);return}
- if(t.dataset.mem){const m=(n.members||[]).find(x=>x.id===t.dataset.mem);const r=(m&&(m.impl||m.ref))||{};if(r.path)source(r.path,r.line,r.end);return}
- if(t.dataset.sym){const s=t.dataset.sym;const hit=cur.model.nodes.find(x=>(x.ref||{}).q===s||x.label===s);if(hit)return pick(hit.id);
+ if(t.dataset.msg)return pickMsg(t.dataset.msg,true);
+ if(t.dataset.mem)return pickMember(n.id,t.dataset.mem,true);
+ if(t.dataset.sym){const s=t.dataset.sym;const hit=cur.model.nodes.find(x=>(x.ref||{}).q===s||x.label===s);if(hit)return pick(hit.id,true);
   try{const f=await T('find_symbol',{name:s});const m=/^(\S+) \[(\w+)\] (.+):(\d+)-(\d+)/.exec((f.definitions||[])[0]||'');if(m){symbolCard(m[1],m[3]);source(m[3],+m[4],+m[5])}}catch(x){}return}
  const l=loc(n);if(!l)return;const a=t.dataset.a;
  if(a==='src')return source(l.path,l.line,l.end);
  if(a==='edit')return editFile(l.path,l.line);
  const j=await L(a,{path:l.path});if(j.error)notice(j.error)};
 async function source(path,line,end){const box=$('#more')||$('#side');const a=Math.max(1,(line||1)-6),b=end&&end-line<200?end+3:(line||1)+50;
- try{const d=await T('read_code',{path,start:a,end:b});const lg=langOf(path),rows=String(d.code||'').split('\n').map(r=>{const m=/^(\d+): ?(.*)$/.exec(r);return m?`<span class="${+m[1]===line?'hl':''}"><span class="c" style="font-style:normal">${m[1].padStart(5)}</span>  ${hlc(m[2],lg)}</span>`:esc(r)}).join('\n');
-  box.innerHTML=`<div class="card"><div class="mono dim">${esc(path)}:${line}</div></div><pre class="code">${rows}</pre>`}catch(e){box.innerHTML=`<div class="err" style="padding:10px">${esc(e.message)}</div>`}}
+ try{const d=await T('read_code',{path,start:a,end:b});const c=NC.numbered(d.code||'');
+  box.innerHTML=`<div class="card"><div class="mono dim" style="display:flex;gap:8px">${esc(path)}:${line}<span style="flex:1"></span><a data-edit="${esc(path)}" data-ln="${line||1}" title="edit this file (Ctrl+S saves)">Edit</a></div></div><pre class="code"></pre>`;
+  NC.fill(box.querySelector('pre.code'),c.text,c.start,path,line);const mk=box.querySelector('#mk');if(mk)mk.scrollIntoView({block:'center'})}catch(e){box.innerHTML=`<div class="err" style="padding:10px">${esc(e.message)}</div>`}}
 
 /* ---------- editors: source file (+ git / p4) and diagram JSON ---------- */
 let ed=null;
 function modal(title,txt,btns,stat,html){$('#mt').textContent=title;$('#mtext').value=txt;$('#mtext').hidden=html!=null;$('#mview').hidden=html==null;
  if(html!=null){$('#mview').innerHTML=html;$('#mview').scrollTop=0}$('#mbtns').innerHTML=btns;$('#mstat').innerHTML=stat||'';$('#mod').classList.add('on')}
 $('#mclose').onclick=()=>{$('#mod').classList.remove('on');ed=null};
-async function editFile(path,line){const d=await L('read',{path});if(d.error)return notice(d.error);ed={type:'file',path,sha1:d.sha1};
- const v=d.vcs||{},isP4=v.vcs==='p4',isGit=v.vcs==='git';
- const b=`<button data-e="save">Save</button>`+(isP4?`<button data-v="edit">p4 edit</button><button data-v="add">p4 add</button><button data-v="revert">p4 revert</button>`:'')+(isGit?`<button data-v="stage">git stage</button><button data-v="revert">git revert</button>`:'');
- modal(d.abs,d.text,b,vstat(v,d.readonly));const ta=$('#mtext');const pos=d.text.split('\n').slice(0,Math.max(0,(line||1)-1)).join('\n').length;ta.focus();ta.setSelectionRange(pos,pos);ta.scrollTop=Math.max(0,((line||1)-8)*17)}
-const vstat=(v,ro)=>`${esc(v.vcs||'no vcs')}: ${esc(v.state||'')}${ro?' · <span class="err">read-only</span>':''}${v.error||v.note?' · '+esc(v.error||v.note):''}`;
-$('#mbtns').onclick=async e=>{const t=e.target.closest('button');if(!t||!ed)return;
- if(ed.type==='file'){if(t.dataset.e==='save'){const j=await L('save',{path:ed.path,text:$('#mtext').value,sha1:ed.sha1});if(j.error){$('#mstat').innerHTML=`<span class="err">${esc(j.error)}</span>`;return}ed.sha1=j.sha1;$('#mstat').innerHTML='saved · '+vstat(j.vcs||{});return}
-  const j=await L('vcs',{path:ed.path,op:t.dataset.v});$('#mstat').innerHTML=j.error?`<span class="err">${esc(j.error)}</span>`:'ok · '+vstat(j.status||j);
-  if(!j.error&&t.dataset.v==='revert'){const d=await L('read',{path:ed.path});if(!d.error){$('#mtext').value=d.text;ed.sha1=d.sha1}}return}
-};
+async function editFile(path,line){ed=null;modal(path,'','','','<div id="edhost" style="height:100%"></div>');$('#mview').style.padding='0';
+ NC.editor($('#edhost'),{repo,path,line,onClose:()=>{$('#mod').classList.remove('on');$('#mview').style.padding=''}})}
 $('#bdel').onclick=async()=>{if(!cur||!confirm('Delete '+cur.key+'?'))return;try{await T('uml_delete',{key:cur.key});cur=null;$('#out').innerHTML='';list()}catch(e){notice(e.message)}};
 $('#bmd').onclick=async()=>{if(!cur)return;const md=await text('markdown');ed=null;
  modal(cur.key+'.md',md,'<button id="cp">Copy</button><button id="dl">Download</button>','Same export as MCP uml_view(format=markdown): Mermaid with element links + link list.',`<pre class="code" style="max-height:none;margin:0">${hlc(md,'md')}</pre>`);
  $('#cp').onclick=async()=>{try{await navigator.clipboard.writeText(md);$('#mstat').textContent='copied'}catch(e){$('#mtext').select();document.execCommand('copy');$('#mstat').textContent='copied'}};
  $('#dl').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([md],{type:'text/markdown'}));a.download=cur.key.replace(/[^\w.-]+/g,'_')+'.md';a.click()}};
 
-/* ---------- light syntax colouring: C / C++ / Python / CMake / JSON / Mermaid / Markdown (no network) ---------- */
-const KW={c:'if else for while do switch case default break continue return goto try catch throw new delete class struct enum union namespace using typedef template typename public private protected virtual override final static const constexpr inline extern volatile mutable explicit friend operator sizeof this nullptr true false void bool char int float double long short unsigned signed auto decltype noexcept',
- py:'def class return if elif else for while in not and or is None True False import from as with try except finally raise pass break continue lambda yield async await global nonlocal del assert self',
- cmake:'if elseif else endif foreach endforeach function endfunction macro endmacro set unset option project add_library add_executable target_link_libraries target_include_directories target_compile_definitions target_compile_options target_sources find_package include add_subdirectory message install PUBLIC PRIVATE INTERFACE STATIC SHARED',
- mermaid:'flowchart graph subgraph end classDiagram sequenceDiagram class direction style classDef click href participant actor note Note over link cssClass LR TB RL BT _blank',json:'true false null'};
-const KWS={};for(const k in KW)KWS[k]=new Set(KW[k].split(' '));
-const langOf=p=>/\.pyi?$/i.test(p)?'py':/(^|\/)CMakeLists\.txt$|\.cmake$/i.test(p)?'cmake':/\.md$/i.test(p)?'md':/\.json$/i.test(p)?'json':'c';
-function hl1(line,lang){const cm={c:'//',py:'#',cmake:'#',mermaid:'%%'}[lang];let ci=-1;
- if(cm){let q=null;for(let j=0;j<line.length;j++){const ch=line[j];if(q){if(ch==='\\'){j++;continue}if(ch===q)q=null}else if(ch==='"'||(ch==="'"&&lang!=='cmake'&&lang!=='mermaid'))q=ch;else if(line.startsWith(cm,j)){ci=j;break}}}
- const code=ci>=0?line.slice(0,ci):line,kw=KWS[lang]||new Set();let out='',i=0,m;
- const re=/("(?:[^"\\]|\\.)*"?|'(?:[^'\\]|\\.)*'?)|(\b\d[\w.]*\b)|([A-Za-z_][\w]*)|(#\s*\w+|\$\{[^}]*\}|-->|-\.->|--o|<\|--|\.\.>|==>)/g;
- while((m=re.exec(code))){out+=esc(code.slice(i,m.index));const t=m[0];
-  if(m[1]){const key=lang==='json'&&/^\s*:/.test(code.slice(m.index+t.length));out+=`<span class="${key?'pp':'s'}">${esc(t)}</span>`}
-  else if(m[2])out+=`<span class="n">${esc(t)}</span>`;
-  else if(m[3])out+=kw.has(t)?`<span class="k">${t}</span>`:(lang==='c'&&/^[A-Z]\w*[a-z]\w*$/.test(t)?`<span class="ty">${t}</span>`:esc(t));
-  else out+=(lang==='py'&&t[0]==='#')?esc(t):`<span class="pp">${esc(t)}</span>`;i=m.index+t.length}
- out+=esc(code.slice(i));if(ci>=0)out+=`<span class="c">${esc(line.slice(ci))}</span>`;return out}
-function hlc(text,lang){const ls=String(text??'').replace(/\r/g,'').split('\n');if(lang!=='md')return ls.map(l=>hl1(l,lang)).join('\n');
- let fence=null;return ls.map(l=>{if(/^\s*```/.test(l)){fence=fence?null:(l.trim().slice(3)||'text');return `<span class="k">${esc(l)}</span>`}
-  if(fence)return hl1(l,fence==='mermaid'?'mermaid':fence==='python'?'py':fence==='json'?'json':'c');
-  if(/^\s*<!--/.test(l))return `<span class="c">${esc(l)}</span>`;if(/^#{1,6}\s/.test(l))return `<span class="h">${esc(l)}</span>`;
-  return esc(l).replace(/^(\s*[-*]\s)/,'<span class="k">$1</span>').replace(/`([^`]+)`/g,'<span class="s">`$1`</span>').replace(/\[([^\]]+)\]\(([^)]+)\)/g,'[<span class="h">$1</span>](<span class="pp">$2</span>)')}).join('\n')}
+/* ---------- the shared code view (codeview.py): colouring, symbol links, editor ---------- */
+/*__CODEVIEW__*/
+NC.api=(u,b)=>api(u,{...b,repo});const hlc=NC.text,langOf=NC.langOf;
+NC.onPick=(l)=>{const p=l.sym?l.path:l.file;if(!p)return;source(p,l.sym?l.to_line:1);
+ const x=l.sym&&synced()&&host();if(x&&x.modelPick)x.modelPick({h:location.hash,q:l.sym,path:l.path||''})};
 
 /* ---------- Preview .md: the export rendered the way a Markdown viewer would (headings, lists, links, mermaid) ---------- */
 function mdInline(t){return esc(t).replace(/`([^`]+)`/g,'<code>$1</code>').replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>').replace(/(^|[^*])\*([^*]+)\*/g,'$1<i>$2</i>')
@@ -468,7 +540,7 @@ $('#bpv').onclick=async()=>{if(!cur)return;const md=await text('markdown');ed=nu
  $('#cp').onclick=async()=>{try{await navigator.clipboard.writeText(md);$('#mstat').textContent='copied'}catch(e){$('#mstat').textContent='copy failed: '+e.message}};
  if(window.mermaid)mdMermaid($('#mview'))};
 $('#mview').addEventListener('click',e=>{const a=e.target.closest('a');if(!a)return;const href=a.getAttribute('href')||a.getAttribute('xlink:href')||'';const k=href.indexOf('/views#');
- if(k>=0&&href.startsWith(location.origin)){e.preventDefault();$('#mod').classList.remove('on');location.hash=href.slice(k+6)}},true);
+ if(k>=0&&href.startsWith(location.origin)){e.preventDefault();$('#mod').classList.remove('on');navTo(href.slice(k+6))}},true);
 $('#bvs').onclick=async()=>{if(!cur)return;const j=await L('export_md',{key:cur.key,open:'vscode'});
  notice(j.error?j.error:`Opened ${j.path} in VS Code: Ctrl+Shift+V for preview (Mermaid needs the "Markdown Preview Mermaid Support" extension).`)};
 
@@ -480,8 +552,11 @@ async function dflt(s,p){const my=++seq;$('#out').innerHTML='<div class="dim" st
  $('#vt').textContent=s||p||'Workspace';$('#vb').innerHTML='';
  try{const d=await T('uml_view',{kind:'default',subject:s||'',path:p||'',format:'json'});if(my!==seq)return;show(d);
   const sn=s&&String(s).split(/::|\./).pop();
-  const n=s&&(d.model.nodes.find(x=>(x.ref||{}).q===s)||d.model.nodes.find(x=>(x.ref||{}).q&&String(x.ref.q).split(/::|\./).pop()===sn&&x.type!=='module'));
-  if(n)pick(n.id);else $('#side').innerHTML=`<div class="dim" style="padding:14px">Default diagram for ${esc(s||p||'the workspace')} (${esc(d.kind)}). Click a node for details.</div>`;
+  /* exact node, then exact member (a constructor shares its class's name), then by last name */
+  const q2=String(s||'').replace(/\./g,'::'),eq=q=>!!q&&(q===s||String(q).replace(/\./g,'::')===q2),last=q=>!!q&&String(q).split(/::|\./).pop()===sn;
+  const memOf=f=>{for(const x of d.model.nodes){const y=(x.members||[]).find(y=>f((y.ref||{}).q));if(y)return [x,y]}return null};
+  const n=s&&d.model.nodes.find(x=>eq((x.ref||{}).q)),mm=s&&!n&&memOf(eq),n2=s&&!n&&!mm&&d.model.nodes.find(x=>x.type!=='module'&&last((x.ref||{}).q)),mm2=s&&!n&&!mm&&!n2&&memOf(last);
+  if(n||n2)pick((n||n2).id);else if(mm||mm2){const [x,y]=mm||mm2;pickMember(x.id,y.id)}else $('#side').innerHTML=`<div class="dim" style="padding:14px">Default diagram for ${esc(s||p||'the workspace')} (${esc(d.kind)}). Click a node for details.</div>`;
   if(!document.querySelector(`#list .vi[data-k="${CSS.escape(d.key)}"]`))list()}
  catch(e){if(my===seq){cur=null;$('#vt').textContent='No diagram';$('#out').innerHTML=`<div class="err" style="padding:20px">${esc(e.message)}</div>`}}}
 async function route(){const h=host();if(h&&h.modelHash)h.modelHash(location.hash);
@@ -493,10 +568,15 @@ async function route(){const h=host();if(h&&h.modelHash)h.modelHash(location.has
  let key=p.get('view')||'';if(m[1]==='view'&&!key)key=el.replace(/^view:/,'');
  if(m[1]==='view'&&!p.get('view'))key=el.startsWith('composition:')?el:el.replace(/^view:/,'');
  if(!key){const x=/^(sym|comp|pkg):(.+)$/.exec(el);if(x)return x[1]==='pkg'?dflt('',x[2]):dflt(x[2],'')}
- const d=key?await open(key):null;let stale=false;
+ const same=key&&cur&&cur.key===key&&!p.get('v'),sync=syncNext;syncNext=false;
+ const d=key?(same?cur:await open(key)):null;let stale=false;
+ if(d&&p.get('msg'))pickMsg(p.get('msg'));else if(d&&p.get('n')&&p.get('mem'))pickMember(p.get('n'),p.get('mem'));
+ else if(d&&p.get('n')){if(d.model.nodes.some(x=>x.id===p.get('n')))pick(p.get('n'))}else if(d&&!same&&sync){const t=viewCode(),x=host();if(t&&x&&x.syncCode)x.syncCode(t)}
  if(!d){stale=true;if(el.startsWith('view:')||el.startsWith('composition:'))await open(el.replace(/^view:/,''))}
  else{if(p.get('v')&&p.get('v')!==d.rev)stale=true;
-  if(m[1]!=='view'){const n=d.model.nodes.find(x=>elemId(x)===el);if(n){pick(n.id);if(p.get('h')&&d.node_revs&&d.node_revs[n.id]!==p.get('h'))stale=true}else stale=true}}
+  if(m[1]!=='view'){const n=d.model.nodes.find(x=>elemId(x)===el);if(n){pick(n.id);if(p.get('h')&&d.node_revs&&d.node_revs[n.id]!==p.get('h'))stale=true}
+   else{const q=el.replace(/^sym:/,''),msg=(d.model.messages||[]).find(x=>x.target&&x.target.q===q),own=d.model.nodes.find(x=>(x.members||[]).some(y=>(y.ref||{}).q===q));
+    if(msg)pickMsg(msg.id);else if(own)pickMember(own.id,own.members.find(y=>(y.ref||{}).q===q).id);else stale=true}}}
  if(stale)notice('This link came from an outdated export: regenerate the diagram.')}
 window.addEventListener('hashchange',route);
 init();

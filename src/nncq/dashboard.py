@@ -15,7 +15,8 @@ def routes(snapshot, control, tool=None) -> list[Route]:
     """snapshot() -> dict for /api/status; control(action, repo) -> dict for POST /api/<action>;
     tool(name, args) -> awaitable dict for POST /api/tool/<name> (the search and symbol pages)."""
     async def page(request: Request):
-        return HTMLResponse(HTML)
+        from nncq.codeview import CODEVIEW_JS
+        return HTMLResponse(HTML.replace("/*__CODEVIEW__*/", CODEVIEW_JS))
 
     async def status(request: Request):
         import anyio
@@ -67,7 +68,11 @@ svg{display:block}
 .xs{flex:0 0 8px;cursor:col-resize;position:relative}.xs:hover:after,.xs.on:after{content:'';position:absolute;left:3px;top:0;bottom:0;width:2px;background:var(--acc);border-radius:1px}
 .xs.off{cursor:default;pointer-events:none}body.drag{cursor:col-resize;user-select:none}body.drag iframe{pointer-events:none}
 .xc{padding:0 7px;line-height:18px;color:var(--dim);flex:none}.xc:hover{color:var(--fg)}
+.cw{position:relative;display:flex;flex:1;min-width:0}.cw>input{flex:1;min-width:0;padding-right:26px!important}
+.cx{position:absolute;right:6px;top:50%;transform:translateY(-50%);color:var(--dim);cursor:pointer;font-size:16px;line-height:1;display:none;padding:0 4px;user-select:none}.cx:hover{color:var(--fg)}
 .pt{font-size:12px;font-weight:600;white-space:nowrap}
+#sform .cw{min-width:120px}.sside .cw{flex:1}#right>.ph{position:relative;padding-right:34px}#right>.ph>.xc{position:absolute;right:8px;top:9px}
+.syncb{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--dim);white-space:nowrap;cursor:pointer;flex:none}.syncb input{margin:0;accent-color:var(--acc)}.syncb:has(input:checked){color:var(--acc)}
 #left{background:none}#left>.xh{display:flex;align-items:center;gap:8px;padding:3px 4px 7px 6px}#left>.xh .sp{flex:1}
 #dashb{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:12px;padding:0 4px 4px 2px;container-type:inline-size}
 #mpane{background:var(--panel);border:1px solid var(--line);border-radius:10px}#mpane.col{background:none;border:0}
@@ -171,7 +176,8 @@ pre.code.tall{max-height:none}
 .kind.k-class,.badge.k-class{background:#1b2a44;color:#7cc0ff}.kind.k-interface,.badge.k-interface,.kind.k-trait,.badge.k-trait{background:#2a1f44;color:#c9a8ff}
 .kind.k-enum,.badge.k-enum{background:#3a2d10;color:#f0c050}.kind.k-struct,.badge.k-struct,.kind.k-union,.badge.k-union,.kind.k-record,.badge.k-record{background:#13332e;color:#5fd4c0}
 .kind.k-function,.badge.k-function,.kind.k-method,.badge.k-method{background:#14301f;color:#6fdc9e}.kind.k-field,.badge.k-field,.kind.k-variable,.badge.k-variable,.kind.k-constant,.badge.k-constant,.kind.k-property,.badge.k-property{background:#2d2a18;color:#e0cc6e}
-.kind.k-namespace,.badge.k-namespace,.kind.k-module,.badge.k-module{background:#262033;color:#c3a8f0}
+.kind.k-file{background:#232a33;color:#b8c6d8}.kind.k-namespace,.badge.k-namespace,.kind.k-module,.badge.k-module{background:#262033;color:#c3a8f0}
+.badge.bn{font-style:italic;background:none;border:1px dashed #3d4658}.badge.k-test{background:#262033;color:#c3a8f0}.tn .badge+.badge{margin-left:-2px}
 .k{color:#c792ea}.s{color:#c3e88d}.c{color:#5f6b7a;font-style:italic}.n{color:#f78c6c}.pp{color:#89ddff}
 /* symbols */
 #s-symbols{height:min(300px,32vh);flex:none}#s-symbols.idle{height:auto}
@@ -206,7 +212,8 @@ ul.tree{list-style:none;margin:0;padding-left:16px}ul.tree.root{padding-left:0}
 .empty{padding:20px;color:var(--dim);text-align:center}
 .spin{display:inline-block;width:12px;height:12px;border:2px solid var(--t0);border-top-color:var(--acc);border-radius:50%;animation:sp .7s linear infinite;vertical-align:-2px}
 @keyframes sp{to{transform:rotate(360deg)}}
-.cpath{padding:6px 12px;font-size:11px;color:var(--dim);border-bottom:1px solid var(--line);display:flex;gap:8px}.cpath:empty{display:none}
+.cpath{padding:6px 12px;font-size:11px;color:var(--dim);border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:center}.cpath .ced{color:var(--acc);cursor:pointer}.cpath .ced:hover{text-decoration:underline}
+#sedit .nce{background:var(--panel2)}.pb[hidden]{display:none!important}.cpath:empty{display:none}
 </style></head><body>
 <div id="banner"></div>
 <div id="page">
@@ -230,7 +237,7 @@ ul.tree{list-style:none;margin:0;padding-left:16px}ul.tree.root{padding-left:0}
  <div class="xs" data-i="0" title="drag to resize · double-click to reset"></div>
 
  <section id="right" class="pane xp" data-pane="sym">
-  <div class="ph"><b class="pt">Symbol explorer</b><span class="navb"><a onclick="history.back()" title="back (Alt+←, mouse back)">‹</a><a onclick="history.forward()" title="forward (Alt+→)">›</a></span><div class="seg" id="vtab"><a data-v="hits">Active search</a><a data-v="sym">Symbol</a></div><a id="mlink" href="views" title="show this symbol / file in the Model explorer (UML / SysML diagrams; ctrl-click: on its own page)" style="font-size:12px;color:var(--acc);white-space:nowrap">Model explorer</a><span id="vtitle" class="mono"></span><button class="xc" data-col="sym" title="collapse the Symbol explorer (its strip expands it again)">–</button></div>
+  <div class="ph"><b class="pt">Symbol explorer</b><span class="navb"><a onclick="history.back()" title="back (Alt+←, mouse back)">‹</a><a onclick="history.forward()" title="forward (Alt+→)">›</a></span><div class="seg" id="vtab"><a data-v="hits">Active search</a><a data-v="sym">Symbol</a></div><a id="mlink" href="views" title="show this symbol / file in the Model explorer (UML / SysML diagrams; ctrl-click: on its own page)" style="font-size:12px;color:var(--acc);white-space:nowrap">Model explorer</a><span id="vtitle" class="mono"></span><label class="syncb" title="Sync views: symbol / file selections show their default diagram in the Model explorer, diagram selections reveal their code here, and Back / Forward restore both panes together. Off: each explorer navigates on its own."><input type="checkbox" id="csync">Sync views</label><button class="xc" data-col="sym" title="collapse the Symbol explorer (its strip expands it again)">–</button></div>
   <div class="vb pb" id="vhits" style="padding:0"><div class="empty">Ask something, then pick a file.</div></div>
   <div class="vb" id="vsym" hidden>
    <form class="ph" id="sform" onsubmit="event.preventDefault();findSym($('#sq').value)">
@@ -377,25 +384,17 @@ async function applyHash(){nav=true;try{const p=new URLSearchParams(location.has
   if(!q){if(ans||$('#q').value)home(true)}
   else if(!ans||ans._key!==q+'\n'+qp+'\n'+kk){$('#q').value=q;$('#qpath').value=qp;$('#qk').value=kk;await doSearch()}
   const f=+(p.get('f')||0);if(ans&&ans.files&&ans.files[f]&&fsel!==f)openFile(f);
-  const s=p.get('s')||'';if(s&&(!cur||cur.req!==s))await openSym(s,p.get('p')||'');
-  const v=p.get('v');if(v&&v!==view)setView(v)}finally{nav=false}}
+  if(syncOn&&p.has('m')){restoringM=true;mrestore(p.get('m'))}        /* sync views: one history for both panes */
+  const s=p.get('s')||'',sf=p.get('sf')||'';if(s&&(!cur||cur.req!==s))await openSym(s,p.get('p')||'');else if(!s&&sf&&(cur||$('#cpath').textContent.indexOf(sf)<0))showFile(sf);
+  const v=p.get('v');if(v&&v!==view)setView(v);
+  if(syncOn)$('#sq').value=cur?cur.sym:''}finally{nav=false;restoringM=false}}     /* sync views: the field shows the selection */
 window.addEventListener('popstate',applyHash);
 
-/* ---------- code rendering with light highlighting ---------- */
-const KW=new Set(('if else for while do switch case default break continue return goto try catch throw finally new delete class struct enum union namespace using typedef template typename public private protected virtual override final static const constexpr inline extern volatile mutable explicit friend operator sizeof this nullptr true false void bool char int float double long short unsigned signed auto decltype '+
- 'local function end then elseif nil and or not in repeat until self def import from as pass lambda None True False with yield async await var let interface abstract sealed readonly get set ref out base is foreach internal string object').split(' '));
-function hl(line,lang){const cm=lang==='lua'?'--':lang==='py'?'#':'//';let out='',i=0;
- const re=/("(?:[^"\\]|\\.)*"?|'(?:[^'\\]|\\.)*'?)|(\b\d[\w.]*\b)|([A-Za-z_]\w*)|(#\s*\w+)/g;let m;
- const ci=(()=>{let q=null;for(let j=0;j<line.length;j++){const ch=line[j];if(q){if(ch==='\\'){j++;continue}if(ch===q)q=null}else if(ch==='"'||ch==="'")q=ch;else if(line.startsWith(cm,j))return j}return -1})();
- const code=ci>=0?line.slice(0,ci):line;
- while((m=re.exec(code))){out+=esc(code.slice(i,m.index));const s=m[0];
-  out+=m[1]?`<span class="s">${esc(s)}</span>`:m[2]?`<span class="n">${esc(s)}</span>`:m[3]?(KW.has(s)?`<span class="k">${s}</span>`:esc(s)):(lang!=='py'?`<span class="pp">${esc(s)}</span>`:esc(s));i=m.index+s.length}
- out+=esc(code.slice(i));if(ci>=0)out+=`<span class="c">${esc(line.slice(ci))}</span>`;return out}
-const langOf=p=>/\.lua$/i.test(p)?'lua':/\.py$/i.test(p)?'py':'c';
-function codeHtml(text,start,path,mark){const lang=langOf(path);
- const many=mark instanceof Set;return String(text).replace(/\r/g,'').split('\n').map((l,i)=>{const no=start+i,on=many?mark.has(no):no===mark;return `<span class="l${on?' hl':''}"${!many&&on?' id="mk"':''}><span class="ln">${no}</span>${hl(l,lang)}</span>`}).join('')}
-function numbered(code){const rows=String(code).replace(/\r/g,'').split('\n');const m=/^(\d+): /.exec(rows[0]||'');const start=m?+m[1]:1;
- return {start,text:rows.map(r=>r.replace(/^\d+: /,'')).join('\n')}}
+/* ---------- code: the shared code view (codeview.py) with symbol links, and its editor ---------- */
+/*__CODEVIEW__*/
+NC.api=async(u,b)=>{const r=await fetch(u,{method:'POST',headers:{...H,'Content-Type':'application/json'},body:JSON.stringify({...b,...(multi&&sel?{repo:sel}:{})})});return r.json()};
+NC.onPick=(l)=>{if(l.sym)openSym(l.sym,l.path||'');else if(l.file){target('sym');showFile(l.file,1)}};
+const numbered=NC.numbered;
 
 /* ---------- search: ask -> how it was read + what came back, then files; a file opens in the right viewer ---------- */
 let ans=null,fsel=-1,view='hits';
@@ -476,7 +475,7 @@ $('#answer').addEventListener('click',e=>{
  const f=e.target.closest('[data-f]');if(f){target('sym');openFile(+f.dataset.f)}});
 
 async function openFile(i,ref){const d=ans;fsel=i;setHash({f:i||''});document.querySelectorAll('#answer .frow').forEach(x=>x.classList.toggle('on',+x.dataset.f===i));
- const f=d.files[i];setView('hits');follow({p:f.p});
+ const f=d.files[i];setView('hits');if(syncOn)$('#sq').value='';follow({p:f.p});
  $('#vhits').innerHTML=f.hs.map(h=>{const [a,b]=span(h.at);
   const facts=[['signature',h.sig&&`<span class="sig">${esc(h.sig)}</span>`],['doc',h.doc&&esc(h.doc)],['calls',h.calls&&esc(h.calls)],['callers',h.callers&&esc(h.callers)],
    ['bases',h.bases&&esc(h.bases)],['members',h.members&&esc(h.members)+(h.derived?` · ${h.derived} derived`:'')],['also at',h.also_at&&esc(h.also_at.join(', '))]].filter(x=>x[1]);
@@ -490,7 +489,7 @@ async function openFile(i,ref){const d=ans;fsel=i;setHash({f:i||''});document.qu
  try{const x=await T('expand',{refs:f.hs.map(h=>h.ref).join(','),what:'code'});if(ans!==d||fsel!==i)return;
   for(const it of x.items||[]){const el=$(`#vhits pre[data-ref="${it.ref}"]`);if(!el)continue;
    if(it.error||!it.code){el.innerHTML=`<span class="err" style="padding:0 12px">${esc(it.error||'no code')}</span>`;continue}
-   const c=numbered(it.code);el.innerHTML=codeHtml(c.text,c.start,f.p,peeks);
+   const c=numbered(it.code);NC.fill(el,c.text,c.start,f.p,peeks);
    const m=/start=(\d+), end=(\d+)/.exec(it.more||'');
    if(m)el.insertAdjacentHTML('afterend',`<div class="more" data-p="${esc(f.p)}" data-a="${m[1]}" data-b="${m[2]}">show the remaining ${+m[2]-+m[1]+1} lines</div>`)}}
  catch(e){$('#vhits').insertAdjacentHTML('afterbegin',`<div class="err" style="padding:6px 12px">${esc(e.message)}</div>`)}}
@@ -498,17 +497,17 @@ $('#vhits').addEventListener('click',async e=>{const s=e.target.closest('.sym[da
  const hc=e.target.closest('.hit>.hh>.tw');if(hc){hc.closest('.hit').classList.toggle('cl');return}
  const m=e.target.closest('.more');if(!m)return;m.innerHTML='<span class="spin"></span>';
  const d=await T('read_code',{path:m.dataset.p,start:+m.dataset.a,end:+m.dataset.b});const c=numbered(d.code);
- m.previousElementSibling.insertAdjacentHTML('beforeend',codeHtml(c.text,c.start,d.path));m.remove()});
+ const more=document.createElement('span');m.previousElementSibling.appendChild(more);NC.fill(more,c.text,c.start,d.path);m.remove()});
 
 /* ---------- symbol explorer ---------- */
 let tmode=localStorage.getItem('nncq.tmode')||'callers',cur=null,nodes=[],selNode=null;
-const reDef=/^(\S+) \[(\w+)\] (.+):(\d+)-(\d+)\s*\n?\s*(.*)$/s,reCaller=/^(\S+)\s{2,}(.+):(\d+)$/,
+const reDef=/^(\S+) \[(\w+)\] (.+):(\d+)-(\d+)\s*\n?\s*(.*)$/s,reCaller=/^(\S+)\s{2,}(.+?):(\d+)(?:\s+(.*))?$/,
  reCall=/^L(\d+) (\S+)(?: x(\d+))? (?:-> (.*)|\((.*)\))$/,reOut=/^(\s*)(\d+)-(\d+) (\S+) (\S+)\s+\|\s?(.*)$/;
 function short(sym){const p=String(sym).split(/::|\./);const l=p.pop();return (p.length?`<span class="q">${esc(p.slice(-1)[0])}::</span>`:'')+`<b>${esc(l)}</b>`}
 function mk(o){o.id=nodes.length;nodes.push(o);return o}
 function tnode(nd){const car=nd.leaf?'':nd.open?'▾':'▸';const lab=nd.label||short(nd.sym);
  return `<li><div class="tn ${selNode===nd.id?'cur':''}" data-id="${nd.id}"><span class="car" data-t="${nd.id}">${nd.loading?'<span class="spin"></span>':car}</span><span class="nm" title="${esc(nd.sym||'')}">${lab}</span>
-  ${nd.badge?`<span class="badge ${nd.bw?'w':'k-'+esc(nd.badge)}">${esc(nd.badge)}</span>`:''}${nd.sym&&nd.path&&!nd.noroot?`<span class="rr" data-r="${nd.id}" title="explore this symbol">◎</span>`:''}<span class="f" title="${esc(nd.path||'')}">${nd.path?'&lrm;'+esc(nd.path)+(nd.line?':'+nd.line:''):''}</span></div>
+  ${nd.badge?`<span class="badge ${nd.bw?'w':'k-'+esc(nd.badge)}">${esc(nd.badge)}</span>`:''}${nd.extra||''}${nd.sym&&nd.path&&!nd.noroot?`<span class="rr" data-r="${nd.id}" title="explore this symbol">◎</span>`:''}<span class="f" title="${esc(nd.path||'')}">${nd.path?'&lrm;'+esc(nd.path)+(nd.line?':'+nd.line:''):''}</span></div>
   ${nd.open&&nd.kids?`<ul class="tree">${nd.kids.map(tnode).join('')||'<li class="dim" style="padding:2px 22px">none</li>'}</ul>`:''}</li>`}
 function drawTree(){const roots=nodes.filter(x=>x.root);$('#tree').innerHTML=roots.length?`<ul class="tree root">${roots.map(tnode).join('')}</ul>`:'<div class="empty">Find a symbol, or click one in search hits.</div>'}
 function ancestors(nd){const s=new Set();for(let p=nd;p;p=p.parent!=null?nodes[p.parent]:null)s.add(p.sym);return s}
@@ -517,39 +516,56 @@ async function expand(nd){if(nd.leaf)return;if(nd.kids){nd.open=!nd.open;drawTre
  try{nd.kids=await nd.load(nd)}catch(e){nd.kids=[mk({label:`<span class="err">${esc(e.message)}</span>`,leaf:true})]}
  nd.kids.forEach(c=>c.parent=nd.id);const anc=ancestors(nd);nd.kids.forEach(c=>{if(c.sym&&anc.has(c.sym)&&!c.leaf){c.leaf=true;c.badge='recursion';c.bw=true}});
  nd.loading=false;nd.open=true;drawTree()}
+/* the API's structured rows (callers_list / calls_list / definitions_list); the text forms are for agents */
+const sfx=c=>(c.times>1?`<span class="badge">×${c.times}</span>`:'')+(c.test?'<span class="badge k-test">test</span>':'')
+ +(c.by_name?'<span class="badge bn" title="matched by name only: may be another function with this name">by name</span>':c.match&&!['unique name','by name'].includes(c.match)?`<span class="badge">${esc(c.match)}</span>`:'');
 const loadCallers=async nd=>{const d=await T('called_by',{name:nd.sym,path:nd.dpath||'',limit:80});
- const out=(d.callers||[]).map(s=>{const m=reCaller.exec(s);return m?mk({sym:m[1],path:m[2],line:+m[3],dpath:m[2],load:loadCallers}):mk({label:esc(s),leaf:true})});
+ const out=d.callers_list?d.callers_list.map(c=>mk({sym:c.sym,path:c.path,line:c.line,dpath:c.path,extra:sfx(c),leaf:/^\(/.test(c.sym),noroot:/^\(/.test(c.sym),load:loadCallers}))
+  :(d.callers||[]).map(s=>{const m=reCaller.exec(s);return m?mk({sym:m[1],path:m[2],line:+m[3],dpath:m[2],extra:m[4]?`<span class="badge">${esc(m[4])}</span>`:'',load:loadCallers}):mk({label:esc(s),leaf:true})});
  if(d.call_sites_total&&d.shown&&d.call_sites_total>d.shown)out.push(mk({label:`<span class="dim">… ${d.call_sites_total-d.shown} more call sites</span>`,leaf:true}));return out};
 const loadCallees=async nd=>{const d=await T('calls',{name:nd.sym,path:nd.dpath||''});const site=(d.defined_at||[])[0]||nd.dpath||'';const sp=site.replace(/:\d+(-\d+)?$/,'');
+ const minor=(d.calls||[]).filter(s=>/^\+ \d+ /.test(s)).map(s=>mk({label:`<span class="dim">${esc(s)}</span>`,leaf:true}));
+ if(d.calls_list)return d.calls_list.map(c=>c.external?mk({label:`<span class="dim">${esc(c.name)}</span>`,leaf:true,badge:'external',path:sp,line:c.line,site:true})
+   :!c.sym?mk({sym:c.name,label:`<b>${esc(c.name)}</b>`,badge:c.candidates+' candidates',bw:true,path:sp,line:c.line,site:true,noroot:true,load:loadCands})
+   :mk({sym:c.sym,path:c.path,line:c.def_line,dpath:c.path,extra:(c.times>1?`<span class="badge">×${c.times}</span>`:'')+(c.note?`<span class="badge bn">${esc(c.note)}</span>`:''),callLine:c.line,callPath:sp,load:loadCallees})).concat(minor);
  return (d.calls||[]).map(s=>{const m=reCall.exec(s);if(!m)return mk({label:esc(s),leaf:true});const [,ln,name,times,to,ext]=m;
   if(ext)return mk({label:`<span class="dim">${esc(name)}</span>`,leaf:true,badge:'external',path:sp,line:+ln,site:true});
   const amb=/^(\d+) definitions \(ambiguous\)/.exec(to||'');
   if(amb)return mk({sym:name,label:`<b>${esc(name)}</b>`,badge:amb[1]+' candidates',bw:true,path:sp,line:+ln,site:true,noroot:true,load:loadCands});
-  const t=/^(\S+) (.+):(\d+)$/.exec(to||'');
+  const t=/^(\S+) (.+?):(\d+)(?:\s{2,}.*)?$/.exec(to||'');
   return t?mk({sym:t[1],path:t[2],line:+t[3],dpath:t[2],badge:times?'×'+times:'',callLine:+ln,callPath:sp,load:loadCallees}):mk({label:esc(s),leaf:true})})};
+const defsOf=f=>f.definitions_list||(f.definitions||[]).map(s=>reDef.exec(s)).filter(Boolean).map(m=>({sym:m[1],kind:m[2],path:m[3],start:+m[4],end:+m[5]}));
 const loadCands=async nd=>{const d=await T('find_symbol',{name:nd.sym});
- return (d.definitions||[]).map(s=>{const m=reDef.exec(s);return m?mk({sym:m[1],path:m[3],line:+m[4],dpath:m[3],badge:m[2],load:loadCallees}):mk({label:esc(s),leaf:true})})};
+ return defsOf(d).map(x=>mk({sym:x.sym,path:x.path,line:x.start,dpath:x.path,badge:x.kind,load:loadCallees}))};
 async function outlineTree(path){const d=await T('file_outline',{path});const roots=[],stack=[];
  for(const s of d.symbols||[]){const m=reOut.exec(s);if(!m)continue;const dep=m[1].length/2;
   const nd=mk({sym:m[5],path:d.path,line:+m[2],end:+m[3],dpath:d.path,badge:m[4],kids:[],open:true,leaf:false});
   while(stack.length>dep)stack.pop();(stack.length?stack[stack.length-1].kids:roots).push(nd);if(stack.length)nd.parent=stack[stack.length-1].id;stack.push(nd)}
  for(const x of nodes)if(x.kids&&!x.kids.length&&x.badge){x.leaf=true;delete x.kids}
  return roots}
-async function typeTree(sym){const d=await T('type_hierarchy',{name:sym});const out=[];
- for(const b of d.bases||[])b.split(' -> ').slice(1).forEach((c,i)=>out.push(mk({sym:c,label:`<span class="dim">${i?'↑':'base'}</span> ${short(c)}`,leaf:true})));
- const lines=String(d.derived_tree||'').split('\n').filter(Boolean),stack=[],roots=[];
- for(const l of lines){const dep=(l.match(/^\s*/)[0].length)/2;const nm=l.trim().replace(/^[└├│─\s]+/,'');
-  const nd=mk({sym:nm,kids:[],open:true});while(stack.length>dep)stack.pop();(stack.length?stack[stack.length-1].kids:roots).push(nd);stack.push(nd)}
- for(const x of nodes)if(x.kids&&!x.kids.length){x.leaf=true}
- if(roots[0])roots[0].label=`${short(roots[0].sym)} <span class="dim">derived types: ${n(d.derived_total)}${d.truncated?' (truncated)':''}</span>`;
- return [...out,...roots]}
+const TYPEK=/^(class|struct|interface|enum|union|record|trait|type|typedef|protocol)$/;
+/* bases above the root (top-most first), the root, then the derived tree from the API's structured list */
+async function typeTree(sym,from){const d=await T('type_hierarchy',{name:sym});
+ if(d.is_type===false&&!(d.derived||[]).length)return [mk({label:`<span class="dim">${from?`${esc(from.sym)} is a ${esc(from.kind||'symbol')}; its owner ${esc(sym)}`:esc(sym)} is not a type</span>`,leaf:true})];
+ const out=[];if(from)out.push(mk({label:`<span class="dim">type tree of ${short(sym)}, the owner of ${short(from.sym)}</span>`,leaf:true}));
+ for(const b of d.bases||[]){if(/^\(/.test(b))continue;b.split(' -> ').slice(1).reverse().forEach((c,i)=>out.push(mk({sym:c,label:`<span class="dim">${i?'↑':'base'}</span> ${short(c)}`,leaf:true,resolve:true})))}
+ const here=!from&&cur&&cur.sym===d.type;
+ const root=mk({sym:d.type,path:d.path||(here?cur.path:''),line:d.line||(here?cur.line:0),dpath:d.path||(here?cur.path:''),kids:[],open:true,noroot:true});
+ root.label=`${out.length>(from?1:0)?'<span class="dim">↑</span> ':''}${short(d.type)} <span class="dim">derived types: ${n(d.derived_total)}${d.truncated?' (truncated)':''}</span>`;
+ const stack=[root],made=[root];
+ for(const x of d.derived||[]){const nd=mk({sym:x.type,path:x.path,line:x.line,dpath:x.path,kids:[],open:true});made.push(nd);
+  while(stack.length>Math.max(1,x.depth))stack.pop();const par=stack[stack.length-1];par.kids.push(nd);nd.parent=par.id;stack.push(nd)}
+ for(const x of made)if(!x.kids.length){x.leaf=true;delete x.kids}
+ return [...out,root]}
 async function buildTree(){nodes=[];selNode=null;if(!cur){drawTree();return}
  $('#tree').innerHTML='<div class="empty"><span class="spin"></span></div>';
  try{if(tmode==='callers'||tmode==='callees'){const r=mk({root:true,sym:cur.sym,path:cur.path,line:cur.line,dpath:cur.path,noroot:true,load:tmode==='callers'?loadCallers:loadCallees});
    r.label=`${short(cur.sym)} <span class="dim">${tmode==='callers'?'is called by':'calls'}</span>`;drawTree();await expand(r)}
   else if(tmode==='outline'){(await outlineTree(cur.path)).forEach(r=>r.root=true);const hit=nodes.find(x=>x.sym===cur.sym);if(hit)selNode=hit.id;drawTree();
    const el=$('#tree .tn.cur');if(el)el.scrollIntoView({block:'nearest'})}
-  else{(await typeTree(cur.sym)).forEach(r=>r.root=true);drawTree()}}
+  else{const isT=TYPEK.test(cur.kind||'');
+   if(!isT&&!cur.parent){$('#tree').innerHTML=`<div class="empty">${esc(cur.sym)} is a ${esc(cur.kind||'symbol')}, not a type</div>`;return}
+   (await typeTree(isT?cur.sym:cur.parent,isT?null:cur)).forEach(r=>r.root=true);drawTree()}}
  catch(e){$('#tree').innerHTML=`<div class="empty err">${esc(e.message)}</div>`}}
 function segs(){document.querySelectorAll('#tmode a').forEach(a=>a.classList.toggle('on',a.dataset.m===tmode))}
 $('#tmode').addEventListener('click',e=>{const a=e.target.closest('[data-m]');if(!a)return;tmode=a.dataset.m;localStorage.setItem('nncq.tmode',tmode);segs();buildTree()});
@@ -557,34 +573,43 @@ $('#tree').addEventListener('click',async e=>{const r=e.target.closest('[data-r]
  const t=e.target.closest('[data-t]');const row=e.target.closest('.tn');if(!row)return;const nd=nodes[+row.dataset.id];
  if(t&&!nd.leaf){expand(nd);return}
  selNode=nd.id;drawTree();
+ if(nd.resolve&&!nd.path){try{const x=defsOf(await T('find_symbol',{name:nd.sym,kind:'type'}))[0];if(x){Object.assign(nd,{path:x.path,line:x.start,end:x.end,dpath:x.path});drawTree();show(x.path,x.start,x.end)}}catch(err){}return}
  if(nd.callPath&&tmode==='callees')show(nd.callPath,nd.callLine);else if(nd.path)show(nd.path,nd.line,nd.end);
  else if(nd.sym&&tmode==='types')openSym(nd.sym)});
 $('#tree').addEventListener('dblclick',e=>{const row=e.target.closest('.tn');if(!row)return;const nd=nodes[+row.dataset.id];if(nd.sym&&!nd.noroot)openSym(nd.sym,nd.dpath||nd.path)});
-async function show(path,line,end){setView('sym');$('#cpath').innerHTML=`<span class="mono">${esc(path)}</span><span>${line?':'+line:''}</span>`;$('#sview').innerHTML='<span class="spin"></span>';
+async function show(path,line,end){setView('sym');closeEdit();$('#cpath').innerHTML=`<span class="mono">${esc(path)}</span><span>${line?':'+line:''}</span><span style="flex:1"></span><a class="ced" data-path="${esc(path)}" data-line="${line||1}" title="edit this file here (Ctrl+S saves, Esc cancels)">Edit</a>`;$('#sview').innerHTML='<span class="spin"></span>';
  try{const a=Math.max(1,(line||1)-15),b=end&&end-line<300?end+8:(line||1)+60;const d=await T('read_code',{path,start:a,end:b});const c=numbered(d.code);
-  $('#sview').innerHTML=codeHtml(c.text,c.start,d.path,line);const mkr=$('#mk'),box=$('#sview').parentElement;
-  if(mkr)box.scrollTop=mkr.offsetTop-box.clientHeight/2}
+  const box=$('#sview').parentElement,center=()=>{const mkr=$('#sview #mk');if(mkr)box.scrollTop=mkr.offsetTop-box.clientHeight/2};
+  const done=NC.fill($('#sview'),c.text,c.start,d.path,line);center();const top=box.scrollTop;await done;if(box.scrollTop===top)center()}   /* again once links and layout settle */
  catch(e){$('#sview').innerHTML=`<span class="err">${esc(e.message)}</span>`}}
-function chips(list,label){if(!list||!list.length)return'';return `<div class="chips"><span class="dim" style="font-size:11px;padding:2px 0">${label}</span>${list.slice(0,12).map(s=>{const m=reCaller.exec(s)||reCall.exec(s);
+/* edit mode for the symbol explorer's code: the shared editor in place of the view */
+function closeEdit(){const e=$('#sedit');if(e){e.remove();$('#sview').parentElement.hidden=false}}
+$('#cpath').addEventListener('click',e=>{const a=e.target.closest('.ced');if(!a)return;e.preventDefault();closeEdit();const pb=$('#sview').parentElement;pb.hidden=true;
+ const box=document.createElement('div');box.id='sedit';box.style.cssText='flex:1;min-height:0;display:flex;flex-direction:column';pb.after(box);const path=a.dataset.path,line=+a.dataset.line;
+ NC.editor(box,{repo:multi&&sel?sel:'',path,line,onClose:()=>{closeEdit();TC.clear();show(path,line)},onSaved:()=>TC.clear()})});
+function chips(list,label){if(!list||!list.length)return'';return `<div class="chips"><span class="dim" style="font-size:11px;padding:2px 0">${label}</span>${list.slice(0,12).map(s=>{
+ if(typeof s==='object')return `<span class="chip" data-s="${esc(s.sym)}" data-p="${esc(s.path||'')}" title="${esc(s.sym)} · ${esc(s.path||'')}:${s.def_line||s.line||''}">${short(s.sym)}${s.times>1?` <span class="dim">×${s.times}</span>`:''}${s.test?' <span class="dim">test</span>':''}${s.by_name?' <i class="dim">by name</i>':''}</span>`;
+ const m=reCaller.exec(s)||reCall.exec(s);
  const sym=m?(reCaller.test(s)?m[1]:((/^(\S+) /.exec(m[4]||'')||[])[1]||m[2])):s.split(' ')[0];return `<span class="chip" data-s="${esc(sym)}" title="${esc(s)}">${short(sym)}</span>`}).join('')}${list.length>12?`<span class="dim" style="font-size:11px">+${list.length-12}</span>`:''}</div>`}
 $('#scard').addEventListener('click',e=>{const c=e.target.closest('[data-s]');if(c)openSym(c.dataset.s,c.dataset.p||'')});
 function findSym(q){q=(q||'').trim();if(q)openSym(q)}
-async function openSym(name,path,again){if(!nav)target('sym');$('#sq').value=name;setHash({s:name,p:path||''},!again);setView('sym');
+/* quiet: a selection synced from the Model explorer (no pane swap, no history entry of its own, no follow back) */
+async function openSym(name,path,again,quiet){if(!nav&&!quiet)target('sym');$('#sq').value=name;setHash({s:name,p:path||'',sf:''},!again&&!quiet);setView('sym');
  $('#scard').innerHTML='<span class="spin"></span>';
  try{let d;try{d=await T('symbol_context',{name,path:path||''})}catch(e){d={error:e.message}}
-  if(d.error||!d.defined_at){const f=await T('find_symbol',{name});const defs=(f.definitions||[]).map(s=>reDef.exec(s)).filter(Boolean);
-   if(defs.length===1)return openSym(defs[0][1],defs[0][3],true);
+  if(d.error||!d.defined_at){const f=await T('find_symbol',{name});const defs=defsOf(f).map(x=>[null,x.sym,x.kind,x.path,x.start]);
+   if(defs.length===1)return openSym(defs[0][1],defs[0][3],true,quiet);
    $('#scard').innerHTML=`<div class="t">${esc(name)}</div><div class="dim">${defs.length?defs.length+' definitions: pick one':'not found'+(d.error?': '+esc(d.error):'')}</div>
     <div class="chips">${defs.map(m=>`<span class="chip" data-s="${esc(m[1])}" data-p="${esc(m[3])}" title="${esc(m[3])}:${m[4]}"><b>${esc(m[1])}</b> <span class="dim">${esc(m[2])} · ${esc(base(m[3]))}</span></span>`).join('')}</div>`;return}
   const at=String(d.defined_at[0]),m=/^(.+):(\d+)(?:-(\d+))?$/.exec(at),p=m?m[1]:at,a=m?+m[2]:1,b=m&&m[3]?+m[3]:a;
-  cur={sym:d.symbol||name,req:name,path:p,line:a,end:b,kind:d.kind};$('#s-symbols').classList.remove('idle');setView('sym');
-  if(!nav)srecentAdd(cur.sym,p);else srecent();follow({s:cur.sym,p});
+  cur={sym:d.symbol||name,req:name,path:p,line:a,end:b,kind:d.kind,parent:d.parent||''};if(syncOn)$('#sq').value=cur.sym;$('#s-symbols').classList.remove('idle');setView('sym');
+  if(!nav&&!quiet)srecentAdd(cur.sym,p);else srecent();if(!quiet)follow({s:cur.sym,p});
   const facts=[d.call_sites_total&&`<span class="chip"><b>${esc(d.call_sites_total)}</b></span>`,d.mentioned_in_files!=null&&`<span class="chip">mentioned in <b>${n(d.mentioned_in_files)}</b> files</span>`,
    d.defined_at.length>1&&`<span class="chip">${d.defined_at.length} definitions</span>`].filter(Boolean).join('');
   $('#scard').innerHTML=`<div class="t">${short(cur.sym)} <span class="kind k-${esc(d.kind||'')}">${esc(d.kind||'')}</span></div>
    ${d.parent?`<div class="dim" style="font-size:11px">in <span class="chip" data-s="${esc(d.parent)}">${esc(d.parent)}</span></div>`:''}
    ${d.signature?`<div class="sig">${esc(d.signature)}</div>`:''}<div class="chips">${facts}</div>
-   ${chips(d.bases,'bases')}${chips(d.derived,'derived')}${chips(d.callers,'callers')}${chips((d.calls||[]).filter(s=>!/ambiguous|not in index/.test(s)),'calls')}`;
+   ${chips(d.bases,'bases')}${chips(d.derived,'derived')}${chips(d.callers_list||d.callers,'callers')}${chips(d.calls_list?d.calls_list.filter(c=>c.sym):(d.calls||[]).filter(s=>!/ambiguous|not in index/.test(s)),'calls')}`;
   show(p,a,b);buildTree()}
  catch(e){$('#scard').innerHTML=`<span class="err">${esc(e.message)}</span>`}}
 
@@ -618,16 +643,35 @@ const mpinned=()=>localStorage.getItem('nncq.mpin')==='1';
 function dhash(t){const p=new URLSearchParams();if(t&&t.s)p.set('s',t.s);if(t&&t.p)p.set('p',t.p);if(multi&&sel)p.set('repo',sel);const q=p.toString();return '#/uml/default'+(q?'?'+q:'')}
 function mnav(h,push){if(!frReady){frPend=h;return}const w=fr.contentWindow;if(w.location.hash===h)return;
  if(push)w.location.hash=h;else w.location.replace(w.location.pathname+w.location.search+h)}
-fr.addEventListener('load',()=>{frReady=true;if(frPend){const h=frPend;frPend=null;mnav(h)}});
+fr.addEventListener('load',()=>{frReady=true;syncUi();if(frPend){const h=frPend;frPend=null;mnav(h)}});
 function curTarget(){return view==='sym'&&cur?{s:cur.sym,p:cur.path}:view==='hits'&&ans&&ans.files&&fsel>=0?{p:ans.files[fsel].p}:null}
-function follow(t){lastT=t;$('#mlink').href='views'+dhash(curTarget()||t);if(skipFollow||noFollow||mpinned())return;
+function follow(t){lastT=t;$('#mlink').href='views'+dhash(curTarget()||t);if(skipFollow||noFollow||restoringM||mpinned())return;
  if(PS.c.model){missed=true;return}missed=false;mnav(dhash(t))}
 function catchUp(){if(missed&&lastT&&!mpinned()){missed=false;mnav(dhash(lastT))}}
 $('#mlink').addEventListener('click',e=>{if(e.ctrlKey||e.metaKey||e.shiftKey||e.button)return;e.preventDefault();
  target('model',true);missed=false;mnav(dhash(curTarget()),true)});
 /* called by the embedded Model explorer (same origin) */
-window.nncqHost={openSym(q,p){target('sym');noFollow=true;Promise.resolve(openSym(q,p||'')).finally(()=>{noFollow=false})},
- collapse(p){setCol(p,true)},modelHash(h){setHash({m:h&&h!=='#'?h.replace(/^#/,''):''})}};
+let restoringM=false;
+/* Sync views: one shared setting (this header, the Model explorer's header, localStorage, the URL) */
+let syncOn=(()=>{const h=new URLSearchParams(location.hash.slice(1));return h.has('sync')?h.get('sync')==='1':localStorage.getItem('nncq.sync')==='1'})();
+function syncUi(){$('#csync').checked=syncOn;try{const c=fr.contentDocument&&fr.contentDocument.querySelector('#csync');if(c)c.checked=syncOn}catch(e){}}
+function setSync(v){if(v===syncOn)return syncUi();syncOn=v;localStorage.setItem('nncq.sync',v?'1':'0');syncUi();
+ if(v){const t=curTarget();const m=t&&!mpinned()?dhash(t).slice(1):'';setHash({sync:'1',...(m?{m}:{})},true);if(m)mrestore(m)}   /* one entry */
+ else setHash({sync:''})}
+$('#csync').addEventListener('change',e=>setSync(e.target.checked));
+function mrestore(m){const h='#'+(m||'/uml/default');if(frReady){const w=fr.contentWindow;if(w.location.hash!==h)w.location.replace(w.location.pathname+w.location.search+h)}else frPend=h}
+function showFile(path,line){cur=null;nodes=[];drawTree();$('#s-symbols').classList.add('idle');$('#sq').value='';
+ $('#scard').innerHTML=`<div class="t">${esc(base(path))} <span class="kind k-file">file</span></div><div class="dim mono" style="font-size:11px">${esc(path)}</div>`;show(path,line||1);vtitle(path)}
+/* a code target for a Model explorer selection: {q, path, line} -> the symbol / file in the Symbol explorer, quietly */
+function syncCode(t){if(t.q)return openSym(t.q,t.path||'',true,true);if(t.path){setHash({s:'',p:'',sf:t.path});showFile(t.path,t.line)}}
+window.nncqHost={syncOn:()=>syncOn,setSync,openSym(q,p){target('sym');noFollow=true;Promise.resolve(openSym(q,p||'')).finally(()=>{noFollow=false})},
+ collapse(p){setCol(p,true)},modelHash(h){setHash({m:h&&h!=='#'?h.replace(/^#/,''):''})},
+ /* the Model explorer navigates (list, chips, links): one history entry here, the frame itself is only replaced */
+ modelNav(h){setHash({m:h.replace(/^#/,'')},true);mrestore(h.replace(/^#/,''))},
+ /* a node picked in a diagram: one entry holding both the model selection and the symbol / file it maps to */
+ modelPick(t){setHash({m:t.h.replace(/^#/,''),...(t.q?{s:t.q,p:t.path||'',sf:''}:t.path?{s:'',p:'',sf:t.path}:{})},true);
+  if(t.h)mrestore(t.h.replace(/^#/,''));if(t.q||t.path)syncCode(t)},
+ syncCode(t){syncCode(t)}};
 function srecent(){const r=JSON.parse(localStorage.getItem('nncq.srecent')||'[]');
  $('#srecent').innerHTML=r.map(x=>`<a data-s="${esc(x.s)}" data-p="${esc(x.p||'')}" class="${cur&&cur.sym===x.s?'cur':''}" title="${esc(x.s)}${x.p?' · '+esc(x.p):''}">${esc(String(x.s).split(/::|\./).slice(-2).join('::'))}</a>`).join('')}
 function srecentAdd(s,p){const r=[{s,p},...JSON.parse(localStorage.getItem('nncq.srecent')||'[]').filter(x=>x.s!==s)].slice(0,10);
@@ -639,10 +683,20 @@ function debugPanel(){const d=document.createElement('div');d.id='dbg';document.
     list:q('#list .vi').length,err:[...q('#out .err')].map(x=>x.textContent).join(' | '),errs:w.__errs||[],embed:w.document.body.classList.contains('embed')}}catch(e){f={x:String(e)}}
   d.textContent='DBG '+JSON.stringify({errs:window.__errs,c:PS.c,w:PS.w,view,sym:cur&&cur.sym,hash:location.hash,frame:f})},300)}
 
+/* every filter / search input: an inline × while it has text; click or Esc clears, re-applies, refocuses */
+const CLR=[];
+function clearable(inp,apply){const w=document.createElement('span');w.className='cw';inp.replaceWith(w);w.appendChild(inp);
+ const x=document.createElement('a');x.className='cx';x.textContent='×';x.title='clear (Esc)';w.appendChild(x);
+ const upd=()=>{x.style.display=inp.value?'block':'none'};CLR.push(upd);inp.addEventListener('input',upd);
+ const clr=()=>{inp.value='';upd();if(apply)apply();inp.focus()};x.addEventListener('click',e=>{e.preventDefault();clr()});
+ inp.addEventListener('keydown',e=>{if(e.key==='Escape'&&inp.value){e.preventDefault();e.stopPropagation();clr()}});upd()}
+setInterval(()=>CLR.forEach(f=>f()),400);            /* values set by code (history, links) */
+clearable($('#qpath'),()=>{if($('#q').value.trim())doSearch()});clearable($('#sq'));
+
 /* ---------- start ---------- */
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll()});
 document.addEventListener('keydown',e=>{if(e.key==='/'&&!/INPUT|SELECT/.test(document.activeElement.tagName)){e.preventDefault();setCol('dash',false);$('#q').focus()}});
-document.addEventListener('click',e=>{const s=e.target.closest('summary');if(s&&!e.target.closest('.tw'))e.preventDefault()},true);new MutationObserver(()=>rzApply($('#answer'))).observe($('#answer'),{childList:true});rzApply();segs();recent();srecent();layout();
+document.addEventListener('click',e=>{const s=e.target.closest('summary');if(s&&!e.target.closest('.tw'))e.preventDefault()},true);new MutationObserver(()=>rzApply($('#answer'))).observe($('#answer'),{childList:true});rzApply();segs();recent();srecent();layout();syncUi();if(syncOn&&!new URLSearchParams(location.hash.slice(1)).has('sync'))history.replaceState(null,'','#'+(()=>{const h=new URLSearchParams(location.hash.slice(1));h.set('sync','1');return h})());
 {const h0=new URLSearchParams(location.hash.slice(1)),m0=(h0.get('m')||'').replace(/^#/,''),s0=h0.get('s')||'';
  const nt=(performance.getEntriesByType('navigation')[0]||{}).type;
  if(nt!=='reload'&&nt!=='back_forward'){if(m0&&!s0)target('model',true);else if(s0&&!m0)target('sym',true)}

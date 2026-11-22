@@ -109,19 +109,24 @@ def _diff(old: dict, new: dict) -> dict:
     return {k: v for k, v in out.items() if v}
 
 
+GEN_VERSION = 2             # bump when generators change their output: stored auto views of older ones regenerate
+
+
 def auto(st: Store, kind: str, subject: str = "", **opts) -> dict:
     """Generate an auto view, or return the stored one when nothing it depends on changed."""
     key = auto_key(kind, subject, **opts)
     r = _row(st, key)
-    if r and not r["dirty"]:
+    if r and not r["dirty"] and json.loads(r["spec"] or "{}").get("gen") == GEN_VERSION:
         return r
     model, deps, scopes = V.generate(st, kind, subject, **opts)
     refs = [(p, P.norm_ref(q) if not q.startswith("@") else "file:" + p, "") for p, q in deps]
+    spec = {"kind": kind, "subject": subject, "opts": opts, "gen": GEN_VERSION}
     if r and r["hash"] == _hash(model):
         st.db.execute("DELETE FROM view_dirty WHERE view_id=?", (r["id"],))
+        st.db.execute("UPDATE views SET spec=? WHERE id=?", (json.dumps(spec), r["id"]))
         return _row(st, key)
     report = {"regenerated": time.strftime("%Y-%m-%d %H:%M:%S"), **_diff(json.loads(r["model"]), model)} if r else None
-    _save(st, key, kind, model["title"], "auto", _group_of(st, model), {"kind": kind, "subject": subject, "opts": opts},
+    _save(st, key, kind, model["title"], "auto", _group_of(st, model), spec,
           model, refs, scopes, 0, report)
     return _row(st, key)
 
@@ -353,6 +358,11 @@ def markdown(st: Store, r: dict, model: dict) -> str:
         repo, base = "", "http://127.0.0.1:8765/views"
     vrev = r["hash"] or _hash(model)
     rows, links = [], {}
+
+    def sub_link(kind: str, q: str, label: str, loc: dict | None) -> str:
+        url = f"{base}#/uml/{kind}/{quote('sym:' + q, safe='')}?{urlencode({'view': r['key'], 'v': vrev, 'repo': repo})}"
+        where = f" `{loc['path']}:{loc.get('line', 1)}`" if loc and loc.get("path") else ""
+        return f"[{label.replace('[', '(').replace(']', ')')}]({url}){where}"
     for n in model.get("nodes", []):
         try:
             el = node_element(n)
@@ -366,8 +376,18 @@ def markdown(st: Store, r: dict, model: dict) -> str:
             loc = (n.get("ref") or {})
             at = f" `{loc['path']}:{loc.get('line', 1)}`" if loc.get("path") else ""
             rows.append(f"- [{label}]({url}) {n.get('type', '')}{at}" + (" (stale)" if n.get("stale") else ""))
+            ms = [m for m in (n.get("members") or []) if (m.get("ref") or {}).get("q")]     # members, under their type
+            rows += [f"  - {sub_link('method' if m.get('kind') == 'method' else 'member', m['ref']['q'], m['name'] + ('()' if m.get('kind') == 'method' else ''), m.get('impl') or m['ref'])}"
+                     for m in ms[:15]] + ([f"  - … {len(ms) - 15} more"] if len(ms) > 15 else [])
         except Exception:
             rows.append(f"- {n.get('label') or n.get('id')}")
+    calls = {}
+    for m in model.get("messages", []):                     # sequence: every called method
+        t = m.get("target") or {}
+        if t.get("q") and t["q"] not in calls:
+            calls[t["q"]] = sub_link("method", t["q"], t["q"], t)
+    if calls:
+        rows += ["", "Calls:", ""] + [f"- {x}" for x in calls.values()]
     try:
         mm = render_mermaid.render(model, links)
     except Exception:
@@ -469,6 +489,8 @@ def default_targets(st: Store, subject: str = "", path: str = "") -> list[tuple[
                 out.append(("class", d.qualname, {}))
             elif d.kind in V.FUNCS:
                 out.append(("sequence", d.qualname, {}))
+                if d.parent and any(x.kind in V.TYPE_KINDS for x in graph.find_defs(st, d.parent)):
+                    out.append(("class", d.parent, {}))       # a method that calls nothing: its class
             elif d.parent and any(x.kind in V.TYPE_KINDS for x in graph.find_defs(st, d.parent)):
                 out.append(("class", d.parent, {}))
             p = d.path
@@ -495,7 +517,8 @@ def default_view(st: Store, subject: str = "", path: str = "", fmt: str = "json"
         except (ValueError, KeyError) as e:
             tried.append(f"{kind} {subj or opts or 'workspace'}: {e}")
             continue
-        if not json.loads(r["model"]).get("nodes"):
+        m = json.loads(r["model"])
+        if not m.get("nodes") or (kind == "sequence" and len(m.get("messages") or []) <= 1):
             tried.append(f"{kind} {subj or opts or 'workspace'}: empty")
             continue
         return {**get(st, r["key"], fmt), "default_for": {"subject": subject, "path": path, "kind": kind}}

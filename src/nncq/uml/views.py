@@ -162,7 +162,7 @@ def _merge_members(ctx: Ctx, rows: list[Sym]) -> list[dict]:
         e = out.get(key)
         decl = "decl" in m.modset
         if e is None:
-            e = out[key] = {"id": slug(m.qualname) + ("" if m.kind not in FUNCS else "_" + hashlib.sha1(
+            e = out[key] = {"id": slug(m.qualname.replace("~", "dtor_")) + ("" if m.kind not in FUNCS else "_" + hashlib.sha1(
                 params.encode()).hexdigest()[:4]), "name": m.name, "kind": "method" if m.kind in FUNCS else m.kind,
                 "vis": VIS.get(m.visibility or "", ""), "type": m.rtype or "", "params": params,
                 "mods": sorted(m.modset - {"decl"}), "tparams": m.tparams or "", "decl": m.signature or "",

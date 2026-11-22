@@ -147,6 +147,9 @@ async def _run(fn, *a, **k):
         arg += "  (cached)"
     out = answers.public(out)
     if not _from_web.get():
+        if isinstance(out, dict):              # structured rows are for the dashboard; agents read the text form
+            out = {k_: v for k_, v in out.items() if not k_.endswith("_list")
+                   and not (tool == "type_hierarchy" and k_ == "derived")}
         out = answers.fit(out, tool)
     ms = round((time.time() - t) * 1000)
     err = isinstance(out, dict) and "error" in out

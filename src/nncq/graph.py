@@ -218,9 +218,22 @@ def callers(store: Store, target: Def | None, name: str, limit: int, ambiguous: 
     return out[:limit], total, files
 
 
-def callees(store: Store, quals: list[str], limit: int, langs: list[str] | None = None) -> list[str]:
+def caller_rows(cs: list[dict]) -> list[dict]:
+    """callers() rows as structured entries for UIs: {sym, path, line, times, match, by_name, test}."""
+    out = []
+    for c in cs:
+        path, _, line = c["at"].rpartition(":")
+        out.append({"sym": c["caller"], "path": path, "line": int(line) if line.isdigit() else 0, "times": c["calls"],
+                    "match": c["match"], "by_name": c["match"] == "by name", "test": bool(c["test"])})
+    return out
+
+
+def callees(store: Store, quals: list[str], limit: int, langs: list[str] | None = None,
+            rows_out: list | None = None) -> list[str]:
     """Calls made by `quals`, resolved in the caller's language family; a shared name defined in the caller's
-    own class resolves to that one. Macros and plumbing (called from > UTILITY_CALLS places) are one line."""
+    own class resolves to that one. Macros and plumbing (called from > UTILITY_CALLS places) are one line.
+    rows_out: also collect structured rows {line, name, times, sym, path, def_line, note, candidates, external}."""
+    rows_out = [] if rows_out is None else rows_out
     if not quals:
         return []
     ph = ",".join("?" * len(quals))
@@ -242,15 +255,22 @@ def callees(store: Store, quals: list[str], limit: int, langs: list[str] | None 
                 own_call(store, int(f), int(ln), dst, _parent_short(mine[0].qualname)) is not False
                 for f, ln in (x.split(":") for x in sites.split(",")[:8])):
             mine = []       # every call is on another object: m_pool->endFrame() is not our endFrame
+        row = {"line": line, "name": dst, "times": n}
         if len(groups) == 1:
             d = next(iter(groups.values()))
             out.append(f"L{line} {dst}{tag} -> {d.qualname} {d.loc()}")
+            row.update(sym=d.qualname, path=d.path, def_line=d.start)
         elif mine:
             out.append(f"L{line} {dst}{tag} -> {mine[0].qualname} {mine[0].loc()}  (same class; {len(groups)} defs)")
+            row.update(sym=mine[0].qualname, path=mine[0].path, def_line=mine[0].start, note="same class",
+                       candidates=len(groups))
         elif groups:
             out.append(f"L{line} {dst}{tag} -> {len(groups)} definitions (ambiguous)")
+            row.update(candidates=len(groups))
         else:
             out.append(f"L{line} {dst}{tag} (not in index: library / macro / generated)")
+            row["external"] = True
+        rows_out.append(row)
     if minor:
         out.append(f"+ {len(minor)} macros/plumbing, not resolved: {', '.join(minor[:40])}"
                    + (" ..." if len(minor) > 40 else ""))
@@ -368,10 +388,13 @@ def symbol_context(store: Store, name: str, path: str = "", limit: int = 12) -> 
             out["callers"] = [f"{c['caller']}  {c['at']}" + (f" x{c['calls']}" if c["calls"] > 1 else "")
                               + ("" if c["match"] in ("unique name", "by name") and not ambiguous
                                  else f"  [{c['match']}]") + ("  (test)" if c["test"] else "") for c in cs]
+            out["callers_list"] = caller_rows(cs)
             out["call_sites_total"] = f"{total} calls in {files} files"
-        ce = callees(store, quals, limit * 3, lang_family(store, p.file_id))
+        rows: list = []
+        ce = callees(store, quals, limit * 3, lang_family(store, p.file_id), rows)
         if ce:
             out["calls"] = ce
+            out["calls_list"] = rows
         if p.parent:
             fam = {short(x) for x in derived_closure(store, p.parent, 6)}
             for chain in base_chains(store, [p.parent], 8):
@@ -401,8 +424,9 @@ def calls(store: Store, name: str, path: str = "", limit: int = 200) -> dict:
     defs, others = _pick_func(store, name, path)
     if not defs:
         return _not_found(store, name)
-    rows = callees(store, sorted({d.qualname for d in defs}), limit, lang_family(store, defs[0].file_id))
-    out = {"function": defs[0].qualname, "defined_at": [d.loc() for d in defs[:4]], "calls": rows,
+    struct: list = []
+    rows = callees(store, sorted({d.qualname for d in defs}), limit, lang_family(store, defs[0].file_id), struct)
+    out = {"function": defs[0].qualname, "defined_at": [d.loc() for d in defs[:4]], "calls": rows, "calls_list": struct,
            "count": len(rows), "note": "static, name-based; calls through pointers/delegates/virtual "
                                        "dispatch show the name called, not the runtime target"}
     if others:
@@ -424,7 +448,7 @@ def called_by(store: Store, name: str, path: str = "", limit: int = 200, caller_
                        + ("" if c["match"] == "unique name" else f"  [{c['match']}]")
                        + ("  (test)" if c["test"] else "")
                        for c in rows],
-           "shown": len(rows), "call_sites_total": total, "files_total": files}
+           "callers_list": caller_rows(rows), "shown": len(rows), "call_sites_total": total, "files_total": files}
     if others or ndefs > 1:
         out["note"] = (f"{max(ndefs, len(others) + 1)} functions share the name {short(name)!r}; rows are ranked "
                        "[same class] > [mentions <class>] > [by name]. Lower ranks may call a different one.")
@@ -743,9 +767,10 @@ def impact(store: Store, name: str, depth: int = 3, group_depth: int = 3, limit:
 
 
 def type_hierarchy(store: Store, name: str, depth: int = 6, limit: int = 60) -> dict:
-    quals = _type_quals(store, name) or [name]
+    typed = _type_quals(store, name)
+    quals = typed or [name]
     up = [" -> ".join([quals[0]] + c) for c in base_chains(store, quals, depth)]
-    lines, budget = [quals[0]], [limit]
+    lines, budget, derived = [quals[0]], [limit], []
 
     def down(n: str, d: int, ind: str, seen: set):
         for src, path, line in sorted(derived_of(store, n), key=lambda r: r[0]):
@@ -753,12 +778,15 @@ def type_hierarchy(store: Store, name: str, depth: int = 6, limit: int = 60) -> 
                 return
             budget[0] -= 1
             lines.append(f"{ind}{src}  {path}:{line}")
+            derived.append({"type": src, "path": path, "line": line, "depth": d + 1})
             s = short(src)
             if s not in seen and d + 1 < depth:
                 down(s, d + 1, ind + "  ", seen | {s})
 
     down(short(quals[0]), 0, "  ", {short(quals[0])})
-    return {"type": quals[0], "bases": up or ["(no bases)"], "derived_tree": "\n".join(lines),
+    at = next((x for x in find_defs(store, quals[0], kinds={"type"}) if is_type(x.kind)), None) if typed else None
+    return {"type": quals[0], "is_type": bool(typed), **({"path": at.path, "line": at.start} if at else {}),
+            "bases": up or ["(no bases)"], "derived_tree": "\n".join(lines), "derived": derived,
             "derived_total": len(derived_closure(store, quals[0])), "truncated": budget[0] <= 0}
 
 
