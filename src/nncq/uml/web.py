@@ -210,6 +210,8 @@ body.embed header{padding:6px 10px;gap:8px}body.embed header b{font-size:13px}
 #bpin{filter:grayscale(1);opacity:.45;padding:1px 6px}#bpin.on{filter:none;opacity:1;border-color:var(--acc);background:#1d2a44}
 .hb{padding:1px 8px;color:var(--dim)}.syncb{align-items:center;gap:4px;font-size:11px;color:var(--dim);white-space:nowrap;cursor:pointer}.syncb input{margin:0 4px 0 0;padding:0;accent-color:var(--acc);vertical-align:-2px}.syncb:has(input:checked){color:var(--acc)}.hb:hover{color:var(--fg)}
 .spin{display:inline-block;width:11px;height:11px;border:2px solid #262b36;border-top-color:var(--acc);border-radius:50%;animation:sp .7s linear infinite;vertical-align:-2px}@keyframes sp{to{transform:rotate(360deg)}}
+.cw{position:relative;display:flex;flex:1;min-width:0}.cw>input{flex:1;min-width:0;padding-right:26px!important}
+.cx{position:absolute;right:6px;top:50%;transform:translateY(-50%);color:var(--dim);cursor:pointer;font-size:16px;line-height:1;display:none;padding:0 4px;user-select:none}.cx:hover{color:var(--fg)}
 .hint{margin-top:8px;font-size:11px;color:var(--dim)}.hint .mono{font-size:11px;color:#9fb3cc}
 #mmbox{position:relative;height:170px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;overflow:hidden;cursor:grab}
 #mmbox svg{position:absolute;left:0;top:0;pointer-events:none;max-width:none}#mmv{position:absolute;border:1.5px solid var(--acc);background:#5aa9ff1f;border-radius:2px;pointer-events:none}
@@ -294,6 +296,15 @@ async function list(){let d;try{d=await T('uml_views',{group_by:$('#gb').value})
  for(const [g,vs] of Object.entries(d.groups||{})){const xs=vs.filter(v=>!f||(v.title+v.key).toLowerCase().includes(f));if(!xs.length)continue;
   h+=`<div class="grp">${esc(g)} · ${xs.length}</div>`+xs.map(v=>`<div class="vi ${cur&&cur.key===v.key?'on':''}" data-k="${esc(v.key)}" title="${esc(v.key)}">${kindBadge(v)}${originBadge(v)}<span class="t">${esc(v.title)}</span>${v.stale?`<span class="b w" title="${esc(typeof v.stale==='string'?v.stale:'stale: see Report')}">stale</span>`:''}</div>`).join('')}
  $('#list').innerHTML=h||'<div class="dim" style="padding:12px">No stored diagrams yet: pick a symbol or file (its default diagram is made on demand), or let an agent compose one (uml_upsert).</div>'}
+/* every filter / search input: an inline × while it has text; click or Esc clears, re-applies, refocuses */
+const CLR=[];
+function clearable(inp,apply){const w=document.createElement('span');w.className='cw';inp.replaceWith(w);w.appendChild(inp);
+ const x=document.createElement('a');x.className='cx';x.textContent='×';x.title='clear (Esc)';w.appendChild(x);
+ const upd=()=>{x.style.display=inp.value?'block':'none'};CLR.push(upd);inp.addEventListener('input',upd);
+ const clr=()=>{inp.value='';upd();if(apply)apply();inp.focus()};x.addEventListener('click',e=>{e.preventDefault();clr()});
+ inp.addEventListener('keydown',e=>{if(e.key==='Escape'&&inp.value){e.preventDefault();e.stopPropagation();clr()}});upd()}
+setInterval(()=>CLR.forEach(f=>f()),400);            /* values set by code (history, links) */
+clearable($('#filter'),list);
 $('#filter').oninput=list;$('#gb').onchange=list;
 $('#list').onclick=e=>{const v=e.target.closest('[data-k]');if(v)go(v.dataset.k)};
 

@@ -67,7 +67,10 @@ svg{display:block}
 .xs{flex:0 0 8px;cursor:col-resize;position:relative}.xs:hover:after,.xs.on:after{content:'';position:absolute;left:3px;top:0;bottom:0;width:2px;background:var(--acc);border-radius:1px}
 .xs.off{cursor:default;pointer-events:none}body.drag{cursor:col-resize;user-select:none}body.drag iframe{pointer-events:none}
 .xc{padding:0 7px;line-height:18px;color:var(--dim);flex:none}.xc:hover{color:var(--fg)}
+.cw{position:relative;display:flex;flex:1;min-width:0}.cw>input{flex:1;min-width:0;padding-right:26px!important}
+.cx{position:absolute;right:6px;top:50%;transform:translateY(-50%);color:var(--dim);cursor:pointer;font-size:16px;line-height:1;display:none;padding:0 4px;user-select:none}.cx:hover{color:var(--fg)}
 .pt{font-size:12px;font-weight:600;white-space:nowrap}
+#sform .cw{min-width:120px}.sside .cw{flex:1}#right>.ph{position:relative;padding-right:34px}#right>.ph>.xc{position:absolute;right:8px;top:9px}
 .syncb{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--dim);white-space:nowrap;cursor:pointer;flex:none}.syncb input{margin:0;accent-color:var(--acc)}.syncb:has(input:checked){color:var(--acc)}
 #left{background:none}#left>.xh{display:flex;align-items:center;gap:8px;padding:3px 4px 7px 6px}#left>.xh .sp{flex:1}
 #dashb{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:12px;padding:0 4px 4px 2px;container-type:inline-size}
@@ -660,6 +663,16 @@ function debugPanel(){const d=document.createElement('div');d.id='dbg';document.
    f={hash:w.location.hash,title:(w.document.querySelector('#vt')||{}).textContent,svg:q('#out svg').length,nodes:q('#out [data-n]').length,
     list:q('#list .vi').length,err:[...q('#out .err')].map(x=>x.textContent).join(' | '),errs:w.__errs||[],embed:w.document.body.classList.contains('embed')}}catch(e){f={x:String(e)}}
   d.textContent='DBG '+JSON.stringify({errs:window.__errs,c:PS.c,w:PS.w,view,sym:cur&&cur.sym,hash:location.hash,frame:f})},300)}
+
+/* every filter / search input: an inline × while it has text; click or Esc clears, re-applies, refocuses */
+const CLR=[];
+function clearable(inp,apply){const w=document.createElement('span');w.className='cw';inp.replaceWith(w);w.appendChild(inp);
+ const x=document.createElement('a');x.className='cx';x.textContent='×';x.title='clear (Esc)';w.appendChild(x);
+ const upd=()=>{x.style.display=inp.value?'block':'none'};CLR.push(upd);inp.addEventListener('input',upd);
+ const clr=()=>{inp.value='';upd();if(apply)apply();inp.focus()};x.addEventListener('click',e=>{e.preventDefault();clr()});
+ inp.addEventListener('keydown',e=>{if(e.key==='Escape'&&inp.value){e.preventDefault();e.stopPropagation();clr()}});upd()}
+setInterval(()=>CLR.forEach(f=>f()),400);            /* values set by code (history, links) */
+clearable($('#qpath'),()=>{if($('#q').value.trim())doSearch()});clearable($('#sq'));
 
 /* ---------- start ---------- */
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll()});
