@@ -88,7 +88,7 @@ nncq gets a useful graph **without compiling anything**, using [tree-sitter](htt
    - *definitions*: class, struct, enum, function, method, namespace, with qualified name (`net::HttpClient::scheduleRetry`), parent, line span and signature
    - *calls*: from the enclosing definition to the callee's name (`scheduleRetry → startTimer`)
    - *bases*: `class Bar : public Foo` gives `Bar inherits Foo` (C++, C#, Python, Java, TS/JS, Kotlin, Swift, PHP, Ruby, and brace-block DSLs declared in a profile)
-   - *includes*: `#include "Engine/Core/Foo.h"` gives `file includes foo.h`
+   - *includes*: `#include "core/net/Foo.h"` gives `file includes foo.h`
 3. **Join by name in SQLite.** "Callers of X" is an indexed lookup on the callee name. "Derived from X" is the same on base names. Call trees, call paths and impact analysis are breadth-first walks over those joins.
 4. **Chunk on the same tree.** Search chunks are cut at the same definition boundaries, so every search hit is already a graph node. That's why search and navigation compose.
 
@@ -181,9 +181,9 @@ Embedding keeps the GPU close to fully busy. It is built to stay out of your way
   Search uses whatever tier each chunk has reached. Recently changed files go first.
 - **Pause and resume.** `nncq pause` makes the worker finish its current batch and **exit**, so VRAM is fully released (it runs as its own process). `nncq resume` picks up where it stopped. Progress is saved per batch, so Ctrl+C, a reboot or a crash loses at most one batch.
 - **On demand.** `NNCQ_EMBED_TIER=0` disables background embedding. You can also run `nncq work` only when you choose.
-- **Polite mode.** `NNCQ_BG_WHEN=idle` embeds only after `NNCQ_IDLE_MINUTES` without keyboard or mouse input. `NNCQ_GPU_MIN_FREE_MB` skips starting while the GPU is busy, e.g. a game or the editor. While embedding, the GPU is released for `NNCQ_GPU_BREAK_MS` (100 ms) every `NNCQ_GPU_BREAK_EVERY_S` (5 s), so Snipping Tool, the desktop and other CUDA apps are not starved.
+- **Polite mode.** `NNCQ_BG_WHEN=idle` embeds only after `NNCQ_IDLE_MINUTES` without keyboard or mouse input. `NNCQ_GPU_MIN_FREE_MB` skips starting while the GPU is busy, e.g. a game or a 3D editor. While embedding, the GPU is released for `NNCQ_GPU_BREAK_MS` (100 ms) every `NNCQ_GPU_BREAK_EVERY_S` (5 s), so Snipping Tool, the desktop and other CUDA apps are not starved.
 - **Queries stay light, and come first.** A query is one short embedding plus reranking 40 chunks, about 1 s. While a search uses the GPU, the worker holds its next batch (batches are small, about 1 s), so searches stay fast during embedding. Without this, server and worker fighting over VRAM made reranking take 20–50 s.
-- **VRAM is left for others.** Each nncq process is capped at total VRAM minus `NNCQ_GPU_RESERVE_MB` (1 GB). While the card has less than that free, for example because a game or the editor grew, GPU batches are split in halves instead of crowding the other app out. Running out of memory also halves the batch and retries; it never fails the job.
+- **VRAM is left for others.** Each nncq process is capped at total VRAM minus `NNCQ_GPU_RESERVE_MB` (1 GB). While the card has less than that free, for example because a game or a 3D editor grew, GPU batches are split in halves instead of crowding the other app out. Running out of memory also halves the batch and retries; it never fails the job.
 
 ---
 
