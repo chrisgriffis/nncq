@@ -332,7 +332,7 @@ def test_profile_links_its_workspace_and_drives_dsl_ignore_and_data_rules(prof, 
         assert d["match"] == "exact" and "door.idl" in d["definitions"][0]
         uses = json.dumps(datarefs.data_for_code(st, "Door", 10))
         assert "a.scene" in uses and "b.scene" in uses
-        assert "a.scene" in json.dumps(datarefs.asset_info(st, "b.scene", 10))
+        assert "a.scene" in json.dumps(datarefs.data_file(st, "b.scene", 10))
     finally:
         st.close()
 
