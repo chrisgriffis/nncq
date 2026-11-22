@@ -440,7 +440,7 @@ def view(st: Store, kind: str = "", subject: str = "", key: str = "", fmt: str =
         return {"error": f"format: one of {', '.join(FORMATS)}"}
     if key:
         return get(st, key, fmt)
-    if kind == "default":
+    if kind == "default" or not kind:
         return default_view(st, subject, opts.get("path", "") or opts.get("under", ""), fmt)
     if kind not in V.KINDS:
         return {"error": f"kind: one of {', '.join(V.KINDS)}, default (or pass key= for a stored view / composition)"}

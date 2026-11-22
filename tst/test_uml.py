@@ -251,6 +251,31 @@ def test_agent_views_compositions_list_and_markdown(repo):
         st.close()
 
 
+def test_cpp_file_default_view_is_regenerated_after_header_change(repo):
+    st = _st(repo)
+    try:
+        d = catalog.view(st, path="lib/src/Conn.cpp", fmt="json")                 # no kind: the default diagram
+        assert d["kind"] == "class" and d["key"] == "class:*|path=lib/src/Conn.cpp"
+        assert "Conn" in {n["label"] for n in d["model"]["nodes"]} and d["default_for"]["kind"] == "class"
+        rev = d["rev"]
+    finally:
+        st.close()
+    hpp = repo.root / "lib/include/Conn.hpp"
+    hpp.write_text(CONN_HPP.replace("void send();", "void send(); void flush();"), encoding="utf-8")
+    indexer.update_paths(repo, ["lib/include/Conn.hpp"], log=lambda m: None)
+    st = _st(repo)
+    try:
+        dirty = {k for (k,) in st.q("SELECT v.key FROM view_dirty d JOIN views v ON v.id=d.view_id")}
+        assert "class:*|path=lib/src/Conn.cpp" in dirty
+        d = catalog.view(st, path="lib/src/Conn.cpp", fmt="json")
+        conn = next(n for n in d["model"]["nodes"] if n["label"] == "Conn")
+        assert "flush" in {m["name"] for m in conn["members"]} and d["rev"] != rev
+        assert "class:*|path=lib/src/Conn.cpp" not in {k for (k,) in st.q(
+            "SELECT v.key FROM view_dirty d JOIN views v ON v.id=d.view_id")}
+    finally:
+        st.close()
+
+
 def test_staleness_reaches_only_affected_views(repo):
     st = _st(repo)
     try:

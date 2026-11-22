@@ -205,15 +205,19 @@ def _edge(ctx: Ctx, a: str, b: str, kind: str, label: str = "", path: str = "", 
 
 
 def _file_types(ctx: Ctx, path: str, cap: int) -> list[Sym]:
-    """Types declared in a file; for a source file without any, the types whose members it defines."""
+    """Types declared in a file plus the types whose members it defines (Foo::bar in a .cpp -> Foo)."""
     ctx.deps.add((path, "@file"))
     out = ctx.q(f"WHERE f.path=? AND s.kind IN ({','.join('?' * len(TYPE_KINDS))}) ORDER BY s.start_line LIMIT ?",
                 (path, *TYPE_KINDS, cap))
-    if not out:
-        for (parent,) in ctx.st.q("SELECT DISTINCT s.parent FROM symbols s JOIN files f ON f.id=s.file_id "
-                                  "WHERE f.path=? AND s.parent!='' LIMIT 60", (path,)):
-            out += [d for d in ctx.find(parent, kinds={"type"}) if d.kind in TYPE_KINDS][:1]
-    return out
+    have = {t.qualname for t in out}
+    for (parent,) in ctx.st.q("SELECT s.parent FROM symbols s JOIN files f ON f.id=s.file_id WHERE f.path=? "
+                              "AND s.parent!='' GROUP BY s.parent ORDER BY MIN(s.start_line) LIMIT 60", (path,)):
+        if parent in have:
+            continue
+        hit = [d for d in ctx.find(parent, kinds={"type"}) if d.kind in TYPE_KINDS][:1]
+        out += [t for t in hit if t.qualname not in have]
+        have |= {t.qualname for t in hit}
+    return out[:cap]
 
 
 def _focus_types(ctx: Ctx, subject: str, under: str, cap: int, path: str = "") -> list[Sym]:

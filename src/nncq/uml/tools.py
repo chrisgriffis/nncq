@@ -40,8 +40,9 @@ def register(mcp, run, with_, job, owned) -> None:
         """A diagram. Generated from the index: kind = class | object | component | package | deployment | sequence,
         subject = type / component / entry function name, under = folder filter, depth = relation hops (class,
         sequence: call depth; package: folder depth), path = a file (class: the types declared in it; component:
-        the components it defines or belongs to). kind=default: the best diagram for a subject and / or path
-        (type -> class, function -> sequence, file -> its types or component, folder -> packages, none -> overview).
+        the components it defines or belongs to). No kind (or kind=default): the best diagram for a subject and / or
+        path (type -> class, function -> sequence, file -> the classes it declares or defines members of, else its
+        component; folder -> packages; nothing -> overview), generated on demand, stale ones regenerated.
         Stored: key = a view key or composition:<id>.
         format: ascii (chat) | markdown (```mermaid + element links) | mermaid | json (model with source spans).
         Stale diagrams carry report.staleness (changed / missing / moved members)."""
