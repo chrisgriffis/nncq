@@ -4,9 +4,11 @@
 
 **Ask questions, don't search the code.** nncq is a local RAG backend for AI coding agents. Over MCP, an agent asks in plain words and gets an intelligent answer across the whole codebase, not a pile of search hits: which few places matter, why, and how they call each other.
 
+**Plug it into your agent and it navigates like the engineer who wrote the engine.** Who calls this, what does it call, how does execution get here from the frame loop, what breaks if I change it: each is one tool call that answers in milliseconds, across millions of lines, with no build, no `compile_commands.json` and no IDE index. The agent stops grepping and guessing and starts tracing.
+
+- **Call trees both ways, instantly.** `called_by` and `calls` with every call site at `file:line`, `call_tree` N levels deep, `call_trace` as debugger-style stacks back to entry points, `impact` for the blast radius, and type hierarchies up and down. Ambiguous names are flagged, not hidden.
 - **AST-driven, so it's efficient.** tree-sitter cuts code at function and class boundaries. Every hit is a whole unit with its path, symbol and parent, and only what matters reaches the agent's context.
-- **Call trees both ways, instantly.** Calls and called-by, call traces, blast radius and type hierarchy, without building anything.
-- **Hybrid retrieval.** BM25 keywords, Nemotron embeddings and a cross-encoder reranker, plus a engine code↔data cross-reference.
+- **Hybrid retrieval.** BM25 keywords, Nemotron embeddings and a cross-encoder reranker, plus a engine code<->data cross-reference. No GPU? The lite profile keeps the graph and the cross-reference.
 - **Not a hosted service, just a repo and a run.** Nothing leaves the machine. The MCP process also starts a local web page for the interactive side, but only when you open it.
 
 > **Status: phase 1 working.** Indexing (tree-sitter + engine DSLs, `.xdata` cross-reference), the GPU embedding worker, hybrid search, the graph views, the MCP server (24 tools) and the CLI are in and tested on a 4,200-file slice of the sample workspace. Not yet: Linux `init.sh`, editor plugins.
