@@ -19,6 +19,7 @@ Answers are small, cached and deterministic. Make many narrow calls quietly, the
 - Exact name: `find_symbol`, `symbol_context`. Exact string or regex: `grep_code`. Everything else starts with `ask`.
 - Structure without code: `expand(refs, what=context|callers|callees|outline)`, `file_context`.
 - engine: `data_for_code`, `code_for_data`, `asset_info`.
+- Diagrams: `uml_view(kind, subject)` (ascii in chat, markdown for files). Composing views / compositions: `uml_protocol`.
 - `more(cursor)` only if the trimmed part matters.
 
 ## Graph caveats

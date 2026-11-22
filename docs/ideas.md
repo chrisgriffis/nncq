@@ -35,6 +35,23 @@ workspace = CL B" and catch-up could be phrased as "delta A..B" (`p4 files //<cl
 instead of a full stat sweep. Useful mainly when the stat sweep becomes slow or when sharing an index
 across machines synced to the same CL.
 
+## Round-trip UML (diagram edits -> source changes)
+
+Not built. The UML model is kept lossless enough for it (`nncq/uml`):
+- every element and relationship has a stable id (`sym:<qualname>[@path]`, `comp:`, `port:`, ...; member ids
+  derived from qualname + parameter hash) and a source span: file, start/end line and column (`symbols.start_col`
+  / `end_col`, `edges.col`), plus the absolute path;
+- raw declaration text per element (`decl`: the member / type declaration as written) and the parsed parts
+  (visibility, mods, rtype, params, tparams);
+- `MODEL_VERSION` in every model, `FACTS_VERSION` for the parse; views keep the spec (what was asked / authored)
+  apart from the materialized model.
+
+Extension point: a `uml/apply.py` that diffs an edited view model against the stored one and turns each change into
+a span edit (rename member -> replace name token at its span, add field -> insert after the last field
+declaration of that visibility, change multiplicity -> rewrite the declared type), shown as a patch for the user
+to apply through the dashboard editor (vcs.py: p4 edit / git stage). Spans go stale exactly when the staleness
+report says so, which is the guard against editing moved code.
+
 ## Background graph jobs (pinned, phase 2)
 
 Rule: the indexing crawl records cheap per-file facts while it is already reading each file. Graph views
