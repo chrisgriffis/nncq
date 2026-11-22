@@ -4,7 +4,7 @@
 
 **Ask questions, don't search the code.**
 
-nncq is not another search tool. Search gives you lines that match a string. nncq gives your coding agent the structure of the codebase: whole functions and classes, who calls what, how execution gets from A to B, what breaks if X changes, and, for engine, which data uses which code. It answers in plain words, across millions of lines, with no build, no IDE index and nothing leaving your machine.
+nncq is not another search tool. Search gives you lines that match a string. nncq gives your coding agent the structure of the codebase: whole functions and classes, who calls what, how execution gets from A to B, what breaks if X changes, and, with a [codebase profile](#codebase-profiles), which data files use which code. It answers in plain words, across millions of lines, with no build, no IDE index and nothing leaving your machine.
 
 ### Two ways to use it
 
@@ -14,15 +14,15 @@ nncq is not another search tool. Search gives you lines that match a string. nnc
 - `called_by` / `calls` / `call_tree`: callers and callees with `file:line`, N levels deep
 - `call_trace`: debugger-style stacks showing how execution reaches a function
 - `impact`: the blast radius before you change a signature
-- `data_for_code` / `code_for_data`: engine code <-> `.xdata` assets in milliseconds
+- `data_for_code` / `code_for_data`: code <-> data files (assets, configs, ...) in milliseconds, when the codebase profile declares data rules
 
 Every answer is sized for the agent's context (a few KB), so it can ask many questions and still have room to think. You ask the agent; the agent investigates and hands you one digest.
 
 **2. A web view for you (optional).** The same index in your browser at `http://127.0.0.1:8765/`: ask box, answer maps, a symbol explorer with call trees both ways, and index/GPU status. It starts only when you open it.
 
-Runs on any machine in the lite profile (keyword search + graph, no GPU), or with an NVIDIA GPU for meaning-based search and reranking.
+Runs on any machine in lite mode (keyword search + graph, no GPU), or with an NVIDIA GPU for meaning-based search and reranking.
 
-> **Status: phase 1 working.** Indexing (tree-sitter + engine DSLs, `.xdata` cross-reference), the GPU embedding worker, hybrid search, the graph views, the MCP server (24 tools) and the CLI are in and tested on a 4,200-file slice of the sample workspace. Not yet: Linux `init.sh`, editor plugins.
+> **Status: phase 1 working.** Indexing (tree-sitter + profile-declared DSLs, data cross-reference), the GPU embedding worker, hybrid search, the graph views, the UML model, codebase profiles, the MCP server and the CLI are in and tested on a 4,200-file slice of a large C++ workspace. Not yet: Linux `init.sh`, editor plugins.
 
 ## Contents
 
@@ -38,7 +38,7 @@ Runs on any machine in the lite profile (keyword search + graph, no GPU), or wit
 | | &nbsp;&nbsp;[Pausing frees the GPU](#pausing-frees-the-gpu-completely) | |
 | | &nbsp;&nbsp;[The web page](#the-web-page-one-screen-status--ask--symbols) | |
 
-Also: [Profiles: full and lite](#profiles-full-and-lite) | [Agent setup](#agent-setup-nncq-agents) | [Why not just Copilot + Visual Assist?](docs/why-nncq.md)
+Also: [Modes: full and lite](#modes-full-and-lite) | [Codebase profiles](#codebase-profiles) | [Agent setup](#agent-setup-nncq-agents) | [Why not just Copilot + Visual Assist?](docs/why-nncq.md)
 
 ---
 
@@ -56,26 +56,28 @@ Also: [Profiles: full and lite](#profiles-full-and-lite) | [Agent setup](#agent-
 | `find_references` | callers, subclasses, and text mentions of a name |
 | `symbol_context`, `calls`, `called_by`, `call_tree`, `call_trace`, `impact`, `type_hierarchy`, `file_context`, `hotspots` | the symbol graph views, [see below](#graph-tools) |
 | `read_code` | an exact line range from disk |
-| `data_for_code` | engine: which data types / assets use this code type |
-| `code_for_data` | engine: which code defines or implements the types this asset uses |
-| `asset_info`, `top_assets` | engine: what an asset contains, which assets are referenced most |
+| `data_for_code` | data: which data types / data files use this code type |
+| `code_for_data` | data: which code defines or implements the types this data file uses |
+| `data_file`, `hot_data` | data: what a data file instantiates and references and what references it; which data files are referenced most |
 | `index_status`, `update_index` | freshness, embedding progress, delta re-index |
 | `uml_view`, `uml_views`, `uml_find`, `uml_upsert`, `uml_delete`, `uml_protocol`, `uml_build` | UML / SysML diagrams and compositions, [see below](#uml-and-sysml-views) |
+
+The four data tools are registered only when a workspace's profile declares `[[xref]]` rules ([Codebase profiles](#codebase-profiles)).
 
 ### Search and the AST work together
 
 Search results are not just matching text. Every chunk is cut at a function or class boundary and carries its **path, line range, symbol, kind and parent**. Every symbol is also a node in the graph, so an agent can chain tools without reading whole files:
 
-1. `search_code("how are emitter graphs spawned")` returns `EmitterGraphEntity::onCreate` in `EmitterGraphEntity.cpp:120-188`, kind `method`, parent `EmitterGraphEntity`.
-2. `call_tree("onCreate", in)` shows who triggers it. `file_outline` shows the rest of the class.
-3. `data_for_code("EmitterGraphEntity")` returns `Effect.EmitterGraphEntityData`, used by 3,400 `.xdata` assets, with the top ones listed.
-4. `asset_info("EBP_TOY_Stopper_Damaged")` → which types it instantiates and what references it. `code_for_data` leads back to the `.ddf` and C++.
+1. `search_code("how are requests retried after a timeout")` returns `HttpClient::scheduleRetry` in `HttpClient.cpp:120-188`, kind `method`, parent `HttpClient`.
+2. `call_tree("scheduleRetry", in)` shows who triggers it. `file_outline` shows the rest of the class.
+3. With a profile whose xref rules cover service config files: `data_for_code("RetryPolicy")` returns the data type `net.RetryPolicyData`, used by 340 config files, with the top ones listed.
+4. `data_file("payments.service.xml")` → which types it instantiates and what references it. `code_for_data` leads back to the IDL and C++.
 
 Each step returns a few hundred tokens of structured answer instead of thousands of tokens of raw file text.
 
 ### The symbol graph: "how does it know that without a build?"
 
-Usually, to get "who calls this", "what derives from this" or "who includes this header" you need an IDE that has **built** the project: clangd with `compile_commands.json`, IntelliSense with the right configuration, or a SCIP indexer that runs the compiler front-end. For engine that means generated code, millions of lines, and hours of indexing.
+Usually, to get "who calls this", "what derives from this" or "who includes this header" you need an IDE that has **built** the project: clangd with `compile_commands.json`, IntelliSense with the right configuration, or a SCIP indexer that runs the compiler front-end. For a large C++ codebase that means generated code, millions of lines, and hours of indexing.
 
 nncq gets a useful graph **without compiling anything**, using [tree-sitter](https://tree-sitter.github.io/):
 
@@ -83,14 +85,14 @@ nncq gets a useful graph **without compiling anything**, using [tree-sitter](htt
 
 1. **Parse every file on its own.** tree-sitter is an incremental, error-tolerant parser, the same one editors use for syntax highlighting. It turns each file into a concrete syntax tree in milliseconds. It needs no headers, macros, include paths or compiler flags. Broken or half-written code still parses, with the bad region marked. For C, C++, HLSL and C#, the parser sees one branch of each `#if`/`#elif`/`#else` (the first, or the `#else` of `#if 0`), as ctags does: two alternative function headers in `#if` branches would otherwise turn a whole file into one error node. Definitions and calls in the other branches are picked up from a second parse and attached to the enclosing definition.
 2. **Walk the tree once and record facts:**
-   - *definitions*: class, struct, enum, function, method, namespace, with qualified name (`app::EmitterGraphEntity::onCreate`), parent, line span and signature
-   - *calls*: from the enclosing definition to the callee's name (`onCreate → spawnEmitter`)
-   - *bases*: `class Bar : public Foo` gives `Bar inherits Foo` (C++, C#, Python, Java, TS/JS, Kotlin, Swift, PHP, Ruby, and engine DDF)
+   - *definitions*: class, struct, enum, function, method, namespace, with qualified name (`net::HttpClient::scheduleRetry`), parent, line span and signature
+   - *calls*: from the enclosing definition to the callee's name (`scheduleRetry → startTimer`)
+   - *bases*: `class Bar : public Foo` gives `Bar inherits Foo` (C++, C#, Python, Java, TS/JS, Kotlin, Swift, PHP, Ruby, and brace-block DSLs declared in a profile)
    - *includes*: `#include "Engine/Core/Foo.h"` gives `file includes foo.h`
 3. **Join by name in SQLite.** "Callers of X" is an indexed lookup on the callee name. "Derived from X" is the same on base names. Call trees, call paths and impact analysis are breadth-first walks over those joins.
 4. **Chunk on the same tree.** Search chunks are cut at the same definition boundaries, so every search hit is already a graph node. That's why search and navigation compose.
 
-The parsers are a few MB each, cached in `cache/tools/tree-sitter`. Parsing runs at about 500 files/s per CPU core, so a full engine tree takes minutes, and a delta after `p4 sync` takes seconds.
+The parsers are a few MB each, cached in `cache/tools/tree-sitter`. Parsing runs at about 500 files/s per CPU core, so a large tree takes minutes, and a delta after `p4 sync` takes seconds.
 
 **The trade-off is honest:** links are by *name*, not resolved type. A call to `update()` matches every definition named `update`. nncq says when a name is ambiguous and ranks callers that are in the same class, or whose code mentions the class, first. Qualified names and paths narrow it down. For the questions you ask while reading code ("roughly who uses this", "how are A and B related", "what breaks if I change this"), name-level precision is usually enough. It is available on every language and branch the moment the files are on disk.
 
@@ -98,8 +100,8 @@ The parsers are a few MB each, cached in `cache/tools/tree-sitter`. Parsing runs
 
 | Tool | What you get |
 |---|---|
-| `symbol_context` | One-call card for a symbol. For a type: definition(s), bases and base chains, derived types, members, engine data types that use it. For a function: callers (ranked), callees (resolved to definitions when unique), overrides up and down the hierarchy. Plus how many files mention it and whether the name is ambiguous |
-| `calls` | Flat "Calls From" list: everything a function calls, in source order, each resolved to its definition when the name is unique (exact spelling, same language family) or defined in the caller's own class (`same class; N defs`). A call counts as the class's own when it is plain, through `this`, or through a receiver named after the class (`gameRenderer->`); `m_pool->endFrame()` stays ambiguous. Macros and plumbing are folded into one closing line |
+| `symbol_context` | One-call card for a symbol. For a type: definition(s), bases and base chains, derived types, members, data types that use it (profiles with data rules). For a function: callers (ranked), callees (resolved to definitions when unique), overrides up and down the hierarchy. Plus how many files mention it and whether the name is ambiguous |
+| `calls` | Flat "Calls From" list: everything a function calls, in source order, each resolved to its definition when the name is unique (exact spelling, same language family) or defined in the caller's own class (`same class; N defs`). A call counts as the class's own when it is plain, through `this`, or through a receiver named after the class (`httpClient->`); `m_pool->release()` stays ambiguous. Macros and plumbing are folded into one closing line |
 | `called_by` | Flat "Calls To" list: every caller with file:line. When several functions share the name, rows are ranked same class > code mentions the class > name only, and callers whose own class defines the same name are dropped (they call their own). `caller_path` keeps callers in matching files |
 | `call_tree` | Callers (`in`) or callees (`out`) as an indented tree, N levels deep, cycle-safe. Callers are ranked like `called_by` at every level. Callees skip macros and plumbing (names called from more than 1,500 places, counted in the note), and names with several definitions are listed but not expanded |
 | `call_trace` | "How does execution get here?" as debugger-style pseudo stacks (innermost frame first, file:line per frame), walked back to entry points (functions nothing calls). Given two functions, it shows how they relate: A reaches B, B reaches A, or a nearest common caller of both. Routes whose links stay inside the callee's class or go through unique names are listed first. A link that matched by name alone is tagged `[calls X: N defs]`. A trail that goes cold (a function only called by same-named functions of other classes, typical for jobs, callbacks and virtuals) ends with a note saying so |
@@ -130,7 +132,7 @@ A grep skill is good when you know the exact string. It falls short when you don
 - **Ranking.** Grep returns every match in file order. In a 1M-file workspace that is hundreds of hits, and the agent pays tokens to read them. Here a cross-encoder reranks the top 40 and the agent sees the best 10.
 - **Units of meaning.** Grep returns a line. Here a hit is the whole enclosing function, labelled with its class.
 - **Structure.** Grep can't tell you which method a call is in, what a class derives from, or what a file defines. The graph answers that from one index lookup.
-- **Data↔code.** Finding which of 392k `.xdata` files use a type costs a 35-second ripgrep pass each time. The cross-reference answers it in milliseconds.
+- **Data↔code.** Finding which of 390k data files use a type costs a ripgrep pass of tens of seconds each time. The cross-reference built from the profile's `[[xref]]` rules answers it in milliseconds.
 - **Precomputed.** Parsing and embedding happen once, plus small deltas. Queries are index lookups, not tree walks.
 
 `grep_code` is still included, because for an exact string grep is the right tool.
@@ -156,12 +158,12 @@ A grep skill is good when you know the exact string. It falls short when you don
   | `.venv` | 4.6 GB | 4.1 GB of it is CUDA torch |
   | `cache/models` | 9.2 GB | two Nemotron models as published (weights 2.3 GB each) |
   | `cache/tools` | 2.7 GB | pip cache and tree-sitter parsers. The pip cache can be deleted |
-  | index | varies | engine data cross-reference: 420 MB for 390k `.xdata`. Vectors: 2 KB per chunk (1024-dim fp16), about 2 GB per million chunks |
+  | index | varies | Data cross-reference: about 1 KB per data file (420 MB for 390k files). Vectors: 2 KB per chunk (1024-dim fp16), about 2 GB per million chunks |
 
 - **RAM:** the server keeps vectors in memory (2 KB per chunk). Models load on first query and unload after `NNCQ_MODEL_IDLE_SECONDS`.
-- **Time (measured on the sample workspace, RTX 5080):**
+- **Time (measured on a large C++ workspace, RTX 5080):**
   - T0 parsing: about 300 files/s with the process pool (4,199 files, 42k chunks in 12–15 s, including a full re-parse).
-  - Full `.xdata` cross-reference: 75–84 s for 388k files. Start-up catch-up (stat every `.xdata`, rescan changed): about 25 s.
+  - Full data cross-reference: 75–84 s for 388k data files. Start-up catch-up (stat every data file, rescan changed): about 25 s.
   - Embedding: cards (T1) about 200–290 chunks/s, full chunks (T2) about 35–40 chunks/s. 42k chunks: about 3 min of cards (search is semantic from then on), then about 20 min of full vectors.
   - Queries: hybrid + rerank about 1 s (query embedding 20 ms, reranking 40 candidates about 0.9 s). The first query after start loads both models (about 10 s). Graph views: 0–220 ms on 43k symbols and 260k edges.
 
@@ -194,14 +196,14 @@ Embedding keeps the GPU close to fully busy. It is built to stay out of your way
 | **SQLite (FTS5)** | One file per workspace holds chunks, BM25 index, vectors, symbols, edges and the data cross-reference. No database server, safe concurrent reads (WAL), part of Python. |
 | **numpy** | Brute-force cosine over in-memory vectors. Exact and fast enough for a few million chunks, with nothing extra to tune. |
 | **tree-sitter + language pack** | Fast, error-tolerant parsers for 20+ languages. They provide AST chunk boundaries, symbols and call edges without compiling anything. |
-| **ripgrep** | Lists 1M+ files in seconds and honours `.p4ignore`/`.gitignore`. Also streams the `.xdata` scan and backs `grep_code`. Installed into the venv from pip. |
+| **ripgrep** | Lists 1M+ files in seconds and honours `.p4ignore`/`.gitignore`. Also streams the data-file scan and backs `grep_code`. Installed into the venv from pip. |
 | **watchdog** | File-change events for automatic delta re-indexing. |
 | **mcp + uvicorn** | The standard MCP server (streamable HTTP and stdio), usable from Copilot CLI, VS Code, Claude Code and others. |
 
 **Not used, and why:**
 - **Milvus, Qdrant, Docker:** an extra always-on service. SQLite plus numpy covers this scale.
 - **Ollama:** it does not serve the Nemotron models, and it would be another service.
-- **LSP/SCIP indexers (clangd, Serena):** they need per-language servers and full builds. For engine C++ that means a working `compile_commands.json` for millions of lines. tree-sitter gives a **name-based** graph without building. The trade-off is that calls are matched by name, not by resolved type. See Limitations.
+- **LSP/SCIP indexers (clangd, Serena):** they need per-language servers and full builds. For a large C++ codebase that means a working `compile_commands.json` for millions of lines. tree-sitter gives a **name-based** graph without building. The trade-off is that calls are matched by name, not by resolved type. See Limitations.
 
 ---
 
@@ -212,8 +214,8 @@ Embedding keeps the GPU close to fully busy. It is built to stay out of your way
 - **Chunking** (`chunker.py`):
   - Definitions become chunks. A class too big for one chunk is split into a header chunk plus one chunk per member.
   - Code between definitions becomes gap chunks. Very long functions are split into overlapping line windows.
-  - engine `.ddf/.adf/.ser/.hubl` use a brace-block chunker. `.ddf` types are qualified by their `module` (`Entity.LayerData`), which is exactly how `.xdata` names them.
-- **FTS:** identifiers are also indexed as sub-words, so `spawn` matches `SpawnEntityData` and `spawn_entity`. The symbol column is weighted above the body.
+  - Definition languages a profile declares (`[[dsl]]`: IDL, schema or service files) use a brace-block chunker. Types are qualified by their `module` line (`net.RetryPolicyData`), so they match the names data files use.
+- **FTS:** identifiers are also indexed as sub-words, so `retry` matches `RetryPolicyData` and `retry_count`. The symbol column is weighted above the body.
 - **Search:**
   - BM25 top 100 and dense top 100 are merged by reciprocal-rank fusion.
   - The top 40 go through the cross-encoder.
@@ -222,17 +224,17 @@ Embedding keeps the GPU close to fully busy. It is built to stay out of your way
   - Symbols cover each definition: qualified name, kind, parent, lines and signature.
   - Edges are `call` (enclosing symbol → callee name) and `inherits` (type → base).
   - Call hierarchy walks edges by name.
-- **engine data** (`datarefs.py`):
-  - `.xdata` files are *not* chunked or embedded. One ripgrep pass records the instance types per file and the asset→asset references.
-  - Code↔data joins go through type names. `entity Foo` in DDF corresponds to data type `FooData`, and DDF `: Base` edges add subclasses.
-  - Asset lookups use reversed-path keys, so any path suffix resolves.
+- **Data files** (`datarefs.py`, from a profile's `[[xref]]` rules):
+  - Data files are *not* chunked or embedded. One ripgrep pass per rule records the instance types per file (`instance` regex) and the file→file references (`reference` regex).
+  - Code↔data joins go through type names. With `type_suffix = "Data"`, data type `FooData` belongs to code type `Foo`, and DSL `: Base` edges add subclasses.
+  - Data-file lookups use reversed-path keys, so any path suffix resolves.
 - **Deltas: a sync never forces a rebuild.** Cost follows what changed, not the workspace size:
   - `nncq update` compares on-disk stats with the index. A file is re-parsed only when its SHA-1 changed, so a `p4 sync` that only touches mtimes is cheap.
   - `nncq sync [p4 args]` runs `p4 sync` and re-indexes exactly the files it reports, however many there are.
   - The server's watcher handles edits as you save.
   - The graph is stored per file and resolved by name at query time. A changed header does not re-process the files that include it, and calls between unchanged files stay correct.
   - Chunks whose text did not change keep their vectors, so editing one function in a 3,000-line file re-embeds one chunk. Only that edit loses semantic search until the background worker catches up; keyword and graph search see it immediately.
-  - `.xdata` changes update the data cross-reference incrementally, in small transactions (about 700 files/s), so it stays queryable throughout.
+  - Data-file changes update the data cross-reference incrementally, in small transactions (about 700 files/s), so it stays queryable throughout.
   - `nncq index --fresh` rebuilds everything from scratch. It is never needed for correctness; run it overnight if you want a clean slate.
 - **Graceful degradation:** tools never block on indexing. When something is stale, a response carries `index_state`: what is degraded, where (folders), since when, what still works, and whether the returned results fall in that area. Cases: a sync in progress or interrupted, changed code not embedded yet, and the semantic index still building. Healthy responses carry nothing extra.
 - **Storage layout:**
@@ -265,7 +267,7 @@ An agent does not need ten code blocks. It needs to know **which few places matt
   - whether meaning search was used, and how much of the code has vectors yet.
 
   This makes a bad match explainable: "`seat`: 0.00% of code" says the codebase uses another word.
-- **The code's own words.** Identifiers that recur across the top candidates, such as `ServerVehicleSpawnEntity` for "spawn player into vehicle", are what to ask with next.
+- **The code's own words.** Identifiers that recur across the top candidates, such as `ConnectionPool` for "reuse open sockets between requests", are what to ask with next.
 - **What came back (portfolio).**
   - Areas (folders) and kinds (function, class, doc).
   - Which channel found the hits: keyword, meaning, or both.
@@ -353,23 +355,43 @@ The page has a visible **❚❚ pause** button for when you need the card yourse
 git clone <this repo> no-net-code-query; cd no-net-code-query
 .\init.ps1                       # full: venv, CUDA torch, models, interactive .env, agent setup
 .\init.ps1 -Lite                 # lite: no torch, no models, no GPU (see below)
-.venv\Scripts\nncq index C:/work\my-workspace --dirs src/Code   # T0 + data xref
+.venv\Scripts\nncq index C:/work\my-workspace --dirs src,tools  # T0 (+ data xref if the profile has rules)
 ```
 
 Then start your agent (Copilot CLI, Claude Code or Visual Studio). It launches nncq over stdio itself. `nncq start` runs a standalone HTTP server instead, for several clients at once.
 
-### Profiles: full and lite
+### Modes: full and lite
 
-| | full (default) | lite (`-Lite`, `NNCQ_PROFILE=lite`) |
+| | full (default) | lite (`-Lite`, `NNCQ_MODE=lite`) |
 |---|---|---|
 | Install | ~14 GB (CUDA torch, two 1B models) | ~150 MB |
 | Hardware | NVIDIA GPU (8 GB+) | any machine |
 | Indexing | T0 parse, then GPU embedding (~20 min per 40k chunks) | T0 parse only (minutes) |
 | Search | keywords + meaning + reranker | keywords (sub-word identifiers, stems) |
-| Graph, `.xdata` cross-reference, `ask` / `expand`, all graph tools | yes | yes, identical |
+| Graph, data cross-reference, `ask` / `expand`, all graph tools | yes | yes, identical |
 | Match strength in `ask` | strong / fair / weak | `unrated`: verify top hits |
 
-Lite is the coworker default: the graph tools and the data cross-reference, which need no GPU, carry most of the value for structural questions. What lite loses is "find code that does X" when the question shares no words with the code; the agent compensates partly by re-asking with the `code_vocabulary` that `ask` returns. Upgrading is in place: run `.\init.ps1` without `-Lite` (installs the `gpu` extra and models, sets `NNCQ_PROFILE=full`), and the worker embeds the existing index. Nothing is re-parsed.
+Lite is the coworker default: the graph tools and the data cross-reference, which need no GPU, carry most of the value for structural questions. What lite loses is "find code that does X" when the question shares no words with the code; the agent compensates partly by re-asking with the `code_vocabulary` that `ask` returns. Upgrading is in place: run `.\init.ps1` without `-Lite` (installs the `gpu` extra and models, sets `NNCQ_MODE=full`), and the worker embeds the existing index. Nothing is re-parsed.
+
+### Codebase profiles
+
+nncq's code knows no particular codebase. Everything specific to one lives in a profile, `profiles/<name>/profile.toml`: one profile, one workspace, one index. `profiles/*` is git-ignored except the documented [template](profiles/_template/profile.toml), so a profile can name private repos, paths and file formats while this repo stays shareable. A profile declares:
+
+- **Where the workspace is** on this machine: candidate roots, marker files that must exist, optionally a substring of the git remote. The first candidate that passes wins; `NNCQ_WORKSPACE_<NAME>` overrides. The workspace must be outside the nncq folder.
+- **What to index:** code folders, extra ignores, extra file extensions and non-code formats.
+- **Definition languages** (`[[dsl]]`): brace-block IDL / schema / service files, chunked at declarations, with `name : Base` inheritance.
+- **Data cross-reference** (`[[xref]]`): a glob for data files plus regexes with named groups, `instance` (`type`: a code type the file instantiates) and `reference` (`ref`: another data file), with `type_suffix` and `label`. Only then do the data tools exist (`data_for_code`, `code_for_data`, `data_file`, `hot_data`; CLI `nncq data uses|code|file|top`).
+- **MCP notes:** vocabulary and conventions, appended to the server instructions agents see.
+
+```powershell
+nncq profile list                       # profiles, and the workspace each found on this machine
+nncq profile new myapp D:\src\myapp     # wizard (nncq init runs it too: pick or create a profile)
+nncq profile show myapp
+nncq profile export myapp               # one compressed archive\myapp-<time>.nncqprofile
+nncq profile import archive\myapp-<time>.nncqprofile [--as name] [--force]
+```
+
+`archive/` is tracked but its contents are git-ignored: export there, copy the file to another machine, import, and the profile finds its workspace again through its linking rules. An LLM agent running `nncq init`, or asked to write a profile from the template, can fill in the DSL and xref rules from a plain description of the codebase.
 
 ### Agent setup: `nncq agents`
 
@@ -410,7 +432,9 @@ Day to day: `nncq sync` (p4 sync plus delta), `nncq status`, `nncq pause` / `nnc
 | `NNCQ_CACHE_MINUTES` | `15` | identical tool calls are answered from memory this long, until the index changes (0 = off) |
 | `NNCQ_EXTRA_EXTENSIONS` | | e.g. `.foo,.bar=cpp` |
 | `NNCQ_IGNORE` | | extra ignore globs (on top of `.p4ignore`) |
-| `NNCQ_DATA` | `true` | maintain the `.xdata` cross-reference |
+| `NNCQ_MODE` | `full` | `lite`: keyword + graph only, no torch, models or GPU |
+| `NNCQ_WORKSPACE_<NAME>` | | workspace root for profile `<name>` on this machine (overrides the profile's candidates) |
+| `NNCQ_DATA` | `true` | maintain the data cross-reference (profiles with `[[xref]]` rules) |
 | `NNCQ_UML` | `true` | build the UML / SysML model at index time (else on demand: `nncq uml init`) |
 | `NNCQ_HOST` / `NNCQ_PORT` / `NNCQ_TOKEN` | `127.0.0.1` / `8765` / | token required for non-loopback |
 | `NNCQ_WATCH` | `true` | re-index on file save |
@@ -427,13 +451,13 @@ Every option, with comments: `.env.example`.
 ## Limitations
 
 - **The graph is name-based, not type-resolved.** See [the trade-off](#the-symbol-graph-how-does-it-know-that-without-a-build). LSP-precise references would need a buildable project. Possible later via SCIP for languages where that is cheap (C#, Python, TS).
-- **Data↔code goes through type names**, not runtime paths. Which asset a running game actually loads is out of scope; see `docs/ideas.md`.
-- **One machine per person, by design.** There is no shared or LAN server. Each person indexes their own synced workspace, so the index always matches the changelist they have, and code never leaves their machine. Coworkers without a GPU use the lite profile.
+- **Data↔code goes through type names**, not runtime paths. Which data a running program actually loads is out of scope; see `docs/ideas.md`.
+- **One machine per person, by design.** There is no shared or LAN server. Each person indexes their own synced workspace, so the index always matches the changelist they have, and code never leaves their machine. Coworkers without a GPU use lite mode.
 
 ## Roadmap
 
 - **Phase 1 (MVP):** indexer, embedding worker, hybrid search, graph tools, MCP server, CLI, `init`.
 - **Phase 2:** changelist stamping and CL-range deltas (`docs/ideas.md`), Linux `init.sh`.
 - **Editor plugins** (they call the same local server):
-  - **Visual Studio:** symbol card, call tree, impact and type hierarchy for the symbol under the caret. A semantic search panel. "What data uses this" for engine types.
-  - **editor:** from a selected asset or type, show the code that defines and implements it (`code_for_data`), and jump from code to the assets that use it.
+  - **Visual Studio:** symbol card, call tree, impact and type hierarchy for the symbol under the caret. A semantic search panel. "What data uses this" for types covered by profile data rules.
+  - **Data / asset editors** (those with a plugin API): from a selected data file or type, show the code that defines and implements it (`code_for_data`), and jump from code to the data files that use it.
