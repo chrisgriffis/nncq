@@ -384,7 +384,8 @@ async function applyHash(){nav=true;try{const p=new URLSearchParams(location.has
   const f=+(p.get('f')||0);if(ans&&ans.files&&ans.files[f]&&fsel!==f)openFile(f);
   if(syncOn&&p.has('m')){restoringM=true;mrestore(p.get('m'))}        /* sync views: one history for both panes */
   const s=p.get('s')||'',sf=p.get('sf')||'';if(s&&(!cur||cur.req!==s))await openSym(s,p.get('p')||'');else if(!s&&sf&&(cur||$('#cpath').textContent.indexOf(sf)<0))showFile(sf);
-  const v=p.get('v');if(v&&v!==view)setView(v)}finally{nav=false;restoringM=false}}
+  const v=p.get('v');if(v&&v!==view)setView(v);
+  if(syncOn)$('#sq').value=cur?cur.sym:''}finally{nav=false;restoringM=false}}     /* sync views: the field shows the selection */
 window.addEventListener('popstate',applyHash);
 
 /* ---------- code rendering with light highlighting ---------- */
@@ -482,7 +483,7 @@ $('#answer').addEventListener('click',e=>{
  const f=e.target.closest('[data-f]');if(f){target('sym');openFile(+f.dataset.f)}});
 
 async function openFile(i,ref){const d=ans;fsel=i;setHash({f:i||''});document.querySelectorAll('#answer .frow').forEach(x=>x.classList.toggle('on',+x.dataset.f===i));
- const f=d.files[i];setView('hits');follow({p:f.p});
+ const f=d.files[i];setView('hits');if(syncOn)$('#sq').value='';follow({p:f.p});
  $('#vhits').innerHTML=f.hs.map(h=>{const [a,b]=span(h.at);
   const facts=[['signature',h.sig&&`<span class="sig">${esc(h.sig)}</span>`],['doc',h.doc&&esc(h.doc)],['calls',h.calls&&esc(h.calls)],['callers',h.callers&&esc(h.callers)],
    ['bases',h.bases&&esc(h.bases)],['members',h.members&&esc(h.members)+(h.derived?` · ${h.derived} derived`:'')],['also at',h.also_at&&esc(h.also_at.join(', '))]].filter(x=>x[1]);
@@ -604,7 +605,7 @@ async function openSym(name,path,again,quiet){if(!nav&&!quiet)target('sym');$('#
    $('#scard').innerHTML=`<div class="t">${esc(name)}</div><div class="dim">${defs.length?defs.length+' definitions: pick one':'not found'+(d.error?': '+esc(d.error):'')}</div>
     <div class="chips">${defs.map(m=>`<span class="chip" data-s="${esc(m[1])}" data-p="${esc(m[3])}" title="${esc(m[3])}:${m[4]}"><b>${esc(m[1])}</b> <span class="dim">${esc(m[2])} · ${esc(base(m[3]))}</span></span>`).join('')}</div>`;return}
   const at=String(d.defined_at[0]),m=/^(.+):(\d+)(?:-(\d+))?$/.exec(at),p=m?m[1]:at,a=m?+m[2]:1,b=m&&m[3]?+m[3]:a;
-  cur={sym:d.symbol||name,req:name,path:p,line:a,end:b,kind:d.kind,parent:d.parent||''};$('#s-symbols').classList.remove('idle');setView('sym');
+  cur={sym:d.symbol||name,req:name,path:p,line:a,end:b,kind:d.kind,parent:d.parent||''};if(syncOn)$('#sq').value=cur.sym;$('#s-symbols').classList.remove('idle');setView('sym');
   if(!nav&&!quiet)srecentAdd(cur.sym,p);else srecent();if(!quiet)follow({s:cur.sym,p});
   const facts=[d.call_sites_total&&`<span class="chip"><b>${esc(d.call_sites_total)}</b></span>`,d.mentioned_in_files!=null&&`<span class="chip">mentioned in <b>${n(d.mentioned_in_files)}</b> files</span>`,
    d.defined_at.length>1&&`<span class="chip">${d.defined_at.length} definitions</span>`].filter(Boolean).join('');

@@ -23,6 +23,8 @@ public:
 };
 class Device : public IDevice {
 public:
+    Device();
+    ~Device();
     static Device& instance();
     bool open(const std::string& host) override;
     void run();
@@ -149,6 +151,7 @@ def test_model_components_and_generated_views(repo):
         kinds = {(e["kind"], n_["label"]) for e in m["edges"] for n_ in m["nodes"] if n_["id"] == e["to"]}
         assert {("realizes", "IDevice"), ("composes", "Conn"), ("aggregates", "Item")} <= kinds
         mem = {x["name"]: x for x in n["Device"]["members"]}
+        assert len({x["id"] for x in n["Device"]["members"]}) == len(n["Device"]["members"])
         assert mem["open"]["vis"] == "+" and mem["open"]["impl"]["path"] == "lib/src/Device.cpp"
         assert n["Device"]["ref"]["abs"].endswith("Device.hpp") and n["Device"]["ref"]["col"] == 0
         assert ("lib/include/Device.hpp", "dev::Device") in deps

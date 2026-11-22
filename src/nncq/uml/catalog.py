@@ -109,19 +109,24 @@ def _diff(old: dict, new: dict) -> dict:
     return {k: v for k, v in out.items() if v}
 
 
+GEN_VERSION = 2             # bump when generators change their output: stored auto views of older ones regenerate
+
+
 def auto(st: Store, kind: str, subject: str = "", **opts) -> dict:
     """Generate an auto view, or return the stored one when nothing it depends on changed."""
     key = auto_key(kind, subject, **opts)
     r = _row(st, key)
-    if r and not r["dirty"]:
+    if r and not r["dirty"] and json.loads(r["spec"] or "{}").get("gen") == GEN_VERSION:
         return r
     model, deps, scopes = V.generate(st, kind, subject, **opts)
     refs = [(p, P.norm_ref(q) if not q.startswith("@") else "file:" + p, "") for p, q in deps]
+    spec = {"kind": kind, "subject": subject, "opts": opts, "gen": GEN_VERSION}
     if r and r["hash"] == _hash(model):
         st.db.execute("DELETE FROM view_dirty WHERE view_id=?", (r["id"],))
+        st.db.execute("UPDATE views SET spec=? WHERE id=?", (json.dumps(spec), r["id"]))
         return _row(st, key)
     report = {"regenerated": time.strftime("%Y-%m-%d %H:%M:%S"), **_diff(json.loads(r["model"]), model)} if r else None
-    _save(st, key, kind, model["title"], "auto", _group_of(st, model), {"kind": kind, "subject": subject, "opts": opts},
+    _save(st, key, kind, model["title"], "auto", _group_of(st, model), spec,
           model, refs, scopes, 0, report)
     return _row(st, key)
 
@@ -484,6 +489,8 @@ def default_targets(st: Store, subject: str = "", path: str = "") -> list[tuple[
                 out.append(("class", d.qualname, {}))
             elif d.kind in V.FUNCS:
                 out.append(("sequence", d.qualname, {}))
+                if d.parent and any(x.kind in V.TYPE_KINDS for x in graph.find_defs(st, d.parent)):
+                    out.append(("class", d.parent, {}))       # a method that calls nothing: its class
             elif d.parent and any(x.kind in V.TYPE_KINDS for x in graph.find_defs(st, d.parent)):
                 out.append(("class", d.parent, {}))
             p = d.path
@@ -510,7 +517,8 @@ def default_view(st: Store, subject: str = "", path: str = "", fmt: str = "json"
         except (ValueError, KeyError) as e:
             tried.append(f"{kind} {subj or opts or 'workspace'}: {e}")
             continue
-        if not json.loads(r["model"]).get("nodes"):
+        m = json.loads(r["model"])
+        if not m.get("nodes") or (kind == "sequence" and len(m.get("messages") or []) <= 1):
             tried.append(f"{kind} {subj or opts or 'workspace'}: empty")
             continue
         return {**get(st, r["key"], fmt), "default_for": {"subject": subject, "path": path, "kind": kind}}

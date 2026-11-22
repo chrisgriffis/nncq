@@ -538,8 +538,11 @@ async function dflt(s,p){const my=++seq;$('#out').innerHTML='<div class="dim" st
  $('#vt').textContent=s||p||'Workspace';$('#vb').innerHTML='';
  try{const d=await T('uml_view',{kind:'default',subject:s||'',path:p||'',format:'json'});if(my!==seq)return;show(d);
   const sn=s&&String(s).split(/::|\./).pop();
-  const n=s&&(d.model.nodes.find(x=>(x.ref||{}).q===s)||d.model.nodes.find(x=>(x.ref||{}).q&&String(x.ref.q).split(/::|\./).pop()===sn&&x.type!=='module'));
-  if(n)pick(n.id);else $('#side').innerHTML=`<div class="dim" style="padding:14px">Default diagram for ${esc(s||p||'the workspace')} (${esc(d.kind)}). Click a node for details.</div>`;
+  /* exact node, then exact member (a constructor shares its class's name), then by last name */
+  const q2=String(s||'').replace(/\./g,'::'),eq=q=>!!q&&(q===s||String(q).replace(/\./g,'::')===q2),last=q=>!!q&&String(q).split(/::|\./).pop()===sn;
+  const memOf=f=>{for(const x of d.model.nodes){const y=(x.members||[]).find(y=>f((y.ref||{}).q));if(y)return [x,y]}return null};
+  const n=s&&d.model.nodes.find(x=>eq((x.ref||{}).q)),mm=s&&!n&&memOf(eq),n2=s&&!n&&!mm&&d.model.nodes.find(x=>x.type!=='module'&&last((x.ref||{}).q)),mm2=s&&!n&&!mm&&!n2&&memOf(last);
+  if(n||n2)pick((n||n2).id);else if(mm||mm2){const [x,y]=mm||mm2;pickMember(x.id,y.id)}else $('#side').innerHTML=`<div class="dim" style="padding:14px">Default diagram for ${esc(s||p||'the workspace')} (${esc(d.kind)}). Click a node for details.</div>`;
   if(!document.querySelector(`#list .vi[data-k="${CSS.escape(d.key)}"]`))list()}
  catch(e){if(my===seq){cur=null;$('#vt').textContent='No diagram';$('#out').innerHTML=`<div class="err" style="padding:20px">${esc(e.message)}</div>`}}}
 async function route(){const h=host();if(h&&h.modelHash)h.modelHash(location.hash);
