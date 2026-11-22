@@ -2,6 +2,8 @@
 answers.py like every other tool; writes (upsert / delete / build) bump the cache."""
 from __future__ import annotations
 
+from mcp.server.fastmcp import Context
+
 from nncq import answers, indexer
 from nncq.uml import catalog, model, protocol
 
@@ -39,7 +41,11 @@ def register(mcp, run, with_, job, owned) -> None:
                        under: str = "", path: str = "", repo: str = "") -> dict:
         """A diagram. Generated from the index: kind = class | object | component | package | deployment | sequence,
         subject = type / component / entry function name, under = folder filter, depth = relation hops (class,
-        sequence: call depth; package: folder depth). Stored: key = a view key or composition:<id>.
+        sequence: call depth; package: folder depth), path = a file (class: the types declared in it; component:
+        the components it defines or belongs to). No kind (or kind=default): the best diagram for a subject and / or
+        path (type -> class, function -> sequence, file -> the classes it declares or defines members of, else its
+        component; folder -> packages; nothing -> overview), generated on demand, stale ones regenerated.
+        Stored: key = a view key or composition:<id>.
         format: ascii (chat) | markdown (```mermaid + element links) | mermaid | json (model with source spans).
         Stale diagrams carry report.staleness (changed / missing / moved members)."""
         opts = {k: v for k, v in (("depth", depth), ("under", under), ("path", path)) if v}
@@ -53,11 +59,14 @@ def register(mcp, run, with_, job, owned) -> None:
         return await run(with_, repo, lambda r, st: catalog.list_views(st, group_by, symbol, kind, origin))
 
     @mcp.tool()
-    async def uml_upsert(spec: dict | str, repo: str = "") -> dict:
+    async def uml_upsert(spec: dict | str, repo: str = "", model: str = "", ctx: Context = None) -> dict:
         """Create or replace a diagram (key) or composition (id) from JSON per uml_protocol. Returns its key,
-        unbound refs and edges the index does not confirm."""
+        unbound refs and edges the index does not confirm. model: pass your model id (e.g. claude-opus-5.5):
+        recorded with the MCP client as the item's provenance."""
+        client = _client(ctx)
+
         def f(r, st):
-            out = catalog.upsert(st, spec)
+            out = catalog.upsert(st, spec, client, model)
             answers.bump()
             return out
         return await run(with_, repo, f)
@@ -85,6 +94,23 @@ def register(mcp, run, with_, job, owned) -> None:
                 return {"error": str(e).strip("'\"")}
             return {"repo": r.name, **job(r, "uml build", lambda log: build(r, log))}
         return await run(f)
+
+
+def _client(ctx) -> str:
+    """The MCP client as name/version: from the session's initialize request, else the HTTP User-Agent (stateless
+    HTTP has no session), else ''."""
+    try:
+        ci = ctx.session.client_params.clientInfo
+        if ci and ci.name:
+            return ci.name + (f"/{ci.version}" if ci.version else "")
+    except Exception:
+        pass
+    try:
+        req = ctx.request_context.request
+        ua = req.headers.get("user-agent", "") if req is not None else ""
+        return ua.split()[0] if ua else ""
+    except Exception:
+        return ""
 
 
 def build(r, log=print) -> dict:

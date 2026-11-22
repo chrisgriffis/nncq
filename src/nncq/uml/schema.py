@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS build_configs(name TEXT, kind TEXT, source TEXT, info
 CREATE TABLE IF NOT EXISTS views(
   id INTEGER PRIMARY KEY, key TEXT UNIQUE NOT NULL, kind TEXT NOT NULL, title TEXT, origin TEXT NOT NULL,
   grp TEXT, spec TEXT, model TEXT, hash TEXT, stale INT NOT NULL DEFAULT 0, report TEXT,
-  created REAL, updated REAL);
+  created REAL, updated REAL, prov TEXT);
 CREATE TABLE IF NOT EXISTS view_refs(view_id INT NOT NULL, path TEXT, ref TEXT, fp TEXT);
 CREATE INDEX IF NOT EXISTS view_refs_path ON view_refs(path);
 CREATE INDEX IF NOT EXISTS view_refs_view ON view_refs(view_id);
@@ -57,6 +57,8 @@ def migrate(db) -> bool:
                 db.execute(f"ALTER TABLE {table} ADD COLUMN {c} {typ}")
                 added = True
     db.executescript(UML_SCHEMA)
+    if "prov" not in {r[1] for r in db.execute("PRAGMA table_info(views)")}:
+        db.execute("ALTER TABLE views ADD COLUMN prov TEXT")      # who made an MCP view: client, model, when
     return added
 
 

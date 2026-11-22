@@ -177,6 +177,49 @@ def test_model_components_and_generated_views(repo):
         st.close()
 
 
+def test_file_scoped_and_default_views(repo):
+    st = _st(repo)
+    try:
+        m, deps, _ = views.class_view(st, path="lib/include/Conn.hpp")
+        assert {x["label"] for x in m["nodes"]} >= {"Conn", "Item", "Logger"} and "Device" not in {
+            x["label"] for x in m["nodes"]} and ("lib/include/Conn.hpp", "@file") in deps
+        m, _, _ = views.class_view(st, path="lib/src/Device.cpp")          # source: the types it implements
+        assert "Device" in {x["label"] for x in m["nodes"]} and m["title"] == "Classes: lib/src/Device.cpp"
+        m, _, _ = views.class_view(st, path="py/svc/service.py")
+        mod = next(x for x in m["nodes"] if x["type"] == "module" and x["label"] == "service")
+        assert any(e["from"] == mod["id"] and e["kind"] == "imports" for e in m["edges"])
+        assert any(e["from"] == mod["id"] and e["kind"] == "contains" for e in m["edges"])
+        assert render_mermaid.render(m).startswith("classDiagram") and render_ascii.render(m)
+        m, _, _ = views.component_view(st, path="lib/CMakeLists.txt")
+        assert {"DevLib", "DevCLI"} <= {x["label"] for x in m["nodes"]}
+        m, _, _ = views.component_view(st, path="lib/app/main.cpp")
+        assert "DevCLI" in {x["label"] for x in m["nodes"]}
+
+        pick = lambda **a: (lambda d: (d["kind"], d["key"]))(catalog.view(st, "default", fmt="json", **a))
+        assert pick(subject="dev::Device") == ("class", "class:dev::Device")
+        assert pick(subject="dev::Device::run")[0] == "sequence"
+        assert pick(path="lib/include/Conn.hpp") == ("composition", "composition:file:lib/include/Conn.hpp")
+        assert pick(path="lib/CMakeLists.txt")[0] == "composition"
+        assert pick(path="py/svc")[0] == "package" and pick()[1] == "component:*"
+
+        f = catalog.view(st, path="lib/app/main.cpp", fmt="json")             # free function + calls, includes, owner
+        g = {x["label"]: x for x in f["model"]["groups"]}
+        assert {"Functions", "Includes / imports", "Component"} <= set(g) and f["origin"] == "auto"
+        labels = {n["label"] for n in f["model"]["nodes"]}
+        assert {"main", "Device.hpp", "DevCLI"} <= labels
+        f = catalog.view(st, path="py/svc/service.py", fmt="json")
+        assert "Service" in {n["label"] for n in f["model"]["nodes"]}
+        assert {"Types", "Includes / imports"} <= {x["label"] for x in f["model"]["groups"]}
+        mm = catalog.view(st, path="lib/include/Device.hpp", fmt="mermaid")["mermaid"]
+        assert mm.startswith("flowchart") and "subgraph" in mm and "«namespace» dev" in mm and "open(" in mm
+        assert "error" in catalog.view(st, path="lib/include/Device.hpp", fmt="ascii")        # like compositions
+        keys = {x["key"] for xs in catalog.list_views(st, "origin")["groups"]["auto"] for x in [xs]}
+        assert "composition:file:lib/include/Device.hpp" in keys and "class:*|path=lib/include/Device.hpp" in keys
+        assert catalog.view(st, "default", "dev::Device", fmt="json")["default_for"]["kind"] == "class"
+    finally:
+        st.close()
+
+
 def test_ascii_is_bounded():
     m = {"kind": "class", "title": "big", "nodes": [{"id": f"n{i}", "label": f"C{i}", "members": []}
                                                    for i in range(50)], "edges": []}
@@ -217,6 +260,49 @@ def test_agent_views_compositions_list_and_markdown(repo):
         assert "devflow" in keys and "class:Conn" not in keys
         assert catalog.list_views(st, "origin")["groups"]["agent"]
         assert any(e["id"] == "comp:DevLib" for e in catalog.find(st, "DevLib")["elements"])
+    finally:
+        st.close()
+
+
+def test_upsert_records_provenance_and_exports_it(repo):
+    st = _st(repo)
+    try:
+        v = {"key": "prov", "kind": "class", "title": "Prov", "nodes": [{"id": "d", "ref": "sym:dev::Device"}]}
+        catalog.upsert(st, v, "copilot-cli/1.2", "x")
+        catalog.upsert(st, {**v, "title": "Prov 2"}, "other-client/3", "y")
+        g = catalog.get(st, "prov", "json")["provenance"]
+        assert g["tag"] == "copilot-cli:x" and "copilot-cli/1.2" in g["detail"] and "last edited by other-client/3" in g["detail"]
+        md = catalog.get(st, "prov", "markdown")["markdown"]
+        assert "%% made via mcp · copilot-cli:x" in md and "_made via mcp · copilot-cli:x_" in md
+        assert catalog.get(st, "prov", "ascii")["diagram"].endswith("-- via mcp · copilot-cli:x")
+        auto = catalog.view(st, "class", "Conn", fmt="markdown")
+        assert "provenance" not in auto and "made via mcp" not in auto["markdown"]
+    finally:
+        st.close()
+
+
+def test_cpp_file_default_view_is_regenerated_after_header_change(repo):
+    st = _st(repo)
+    try:
+        d = catalog.view(st, path="lib/src/Conn.cpp", fmt="json")                 # no kind: the default diagram
+        assert d["kind"] == "composition" and d["key"] == "composition:file:lib/src/Conn.cpp"
+        assert "Conn" in {n["label"] for n in d["model"]["nodes"]} and d["default_for"]["kind"] == "file"
+        assert catalog.get(st, "file:lib/src/Conn.cpp", "json")["rev"] == d["rev"]       # recallable by key
+        rev = d["rev"]
+    finally:
+        st.close()
+    hpp = repo.root / "lib/include/Conn.hpp"
+    hpp.write_text(CONN_HPP.replace("void send();", "void send(); void flush();"), encoding="utf-8")
+    indexer.update_paths(repo, ["lib/include/Conn.hpp"], log=lambda m: None)
+    st = _st(repo)
+    try:
+        dirty = {k for (k,) in st.q("SELECT v.key FROM view_dirty d JOIN views v ON v.id=d.view_id")}
+        assert {"composition:file:lib/src/Conn.cpp", "class:*|path=lib/src/Conn.cpp"} <= dirty   # marked, not rebuilt
+        d = catalog.view(st, path="lib/src/Conn.cpp", fmt="json")
+        conn = next(n for n in d["model"]["nodes"] if n["label"] == "Conn")
+        assert "flush" in {m["name"] for m in conn["members"]} and d["rev"] != rev
+        assert not {"composition:file:lib/src/Conn.cpp", "class:*|path=lib/src/Conn.cpp"} & {k for (k,) in st.q(
+            "SELECT v.key FROM view_dirty d JOIN views v ON v.id=d.view_id")}
     finally:
         st.close()
 

@@ -26,7 +26,8 @@ NODE_TYPES = ("class", "interface", "struct", "enum", "union", "record", "trait"
 EDGE_KINDS = ("inherits", "realizes", "composes", "aggregates", "associates", "depends", "instantiates", "calls",
               "imports", "includes", "connects", "deploys", "contains", "uses", "flows-to", "depends-on",
               "instance_of", "link", "other")
-CONNECTOR_KINDS = ("contains", "uses", "flows-to", "depends-on", "realizes", "connects", "other")
+CONNECTOR_KINDS = ("contains", "uses", "flows-to", "depends-on", "realizes", "connects", "calls", "inherits",
+                   "composes", "aggregates", "associates", "depends", "imports", "other")
 MESSAGE_KINDS = ("call", "reply", "create", "async", "self", "note")
 VIEW_KINDS = V.KINDS
 _ID = re.compile(r"^[A-Za-z0-9][\w.\-]{0,79}$")
@@ -77,7 +78,13 @@ SCHEMA = {
             "members": {"type": "array", "items": {"type": "object", "required": ["id"], "properties": {
                 "id": {"type": "string", "pattern": r"^[A-Za-z_]\w{0,59}$"}, "ref": {"$ref": "#/$defs/ref"},
                 "bespoke": {"$ref": "#/$defs/bespoke"}, "role": {"type": "string"},
+                "members": {"enum": ["auto", "none"], "description": "type member: show its fields / methods"},
                 "expand": {"type": "boolean", "description": "composition / view member: draw inside a frame"}}}},
+            "groups": {"type": "array", "description": "sub-frames inside the composition's frame",
+                       "items": {"type": "object", "required": ["id", "members"], "properties": {
+                           "id": {"type": "string"}, "label": {"type": "string"},
+                           "parent": {"type": "string", "description": "id of an enclosing group (nesting)"},
+                           "members": {"type": "array", "items": {"type": "string"}}}}},
             "connectors": {"type": "array", "items": {"type": "object", "required": ["from", "to", "kind"],
                                                       "properties": {"from": {"type": "string"},
                                                                      "to": {"type": "string"},
@@ -88,13 +95,19 @@ SCHEMA = {
 
 RULES = """Rules:
 - Upsert by key (views) / id (compositions): the same key replaces; never create a near-duplicate. List first.
+- Pass your model id as uml_upsert(model=...): it is recorded with the MCP client as the item's provenance
+  (shown as a mcp-agent badge in the dashboard, a footer in markdown / ascii exports).
 - Reference generated elements by id (sym:/comp:/port:/pkg:/file:/cfg:/composition:). Get ids from
   uml_find, uml_view(format=json) or uml_views(symbol=...). A node or member without ref is bespoke.
 - Bespoke: only what the index cannot provide (concepts, external actors, notes). Label every one.
 - members:"auto" pulls fields/methods from the index; auto_edges:true adds index relations between bound nodes.
 - Composition (semantic grouping) and view (diagram) are separate kinds. Either may reference the other:
   composition member {"id":"d","ref":"view:<key>"}; view node {"id":"x","ref":"composition:<id>","expand":true}.
-  Compositions nest; reference cycles are rejected.
+  Compositions nest; reference cycles are rejected. groups:[{id,label,members,parent}] draws sub-frames.
+- File compositions (key composition:file:<path>, origin auto) are generated on demand for a file: its types
+  (with members) per namespace, free functions + key calls, globals, related types, includes / imports, who
+  includes it, owning component, the file's sub-diagrams. Regenerated when stale; to customize one, upsert a
+  copy under your own id.
 - After upsert check `unbound` (ref did not resolve) and `unverified_edges` (not found in the index: fine for
   intent, wrong for facts). Stale views/compositions carry `staleness`: per member changed|missing|moved;
   repair by re-upserting with corrected refs.
@@ -152,6 +165,11 @@ def validate(obj: dict) -> tuple[str, list[str]]:
                 errs.append(f"members[{i}].ref: must start with one of {', '.join(SCHEMES)}")
         for i, c in enumerate(obj.get("connectors") or []):
             _edge_check(c, i, ids, CONNECTOR_KINDS, "connectors", errs)
+        gids = {g.get("id") for g in obj.get("groups") or [] if isinstance(g, dict)}
+        for i, g in enumerate(obj.get("groups") or []):
+            if not isinstance(g, dict) or not g.get("id") or any(x not in ids for x in g.get("members") or []) \
+                    or (g.get("parent") and g["parent"] not in gids):
+                errs.append(f"groups[{i}]: id + members (member ids), optional parent (a group id)")
         if obj.get("author", "agent") not in ("agent", "user"):
             errs.append("author: agent | user")
         return "composition", errs
@@ -489,13 +507,17 @@ def materialize_composition(st: Store, spec: dict, depth: int = 0, prefix: str =
     exp: dict[str, str] = {}
     for m in spec.get("members") or []:
         n = {"id": prefix + m["id"], "ref": m.get("ref"), **(m.get("bespoke") or {})}
+        if m.get("members") == "auto":
+            n["members"] = "auto"
         if m.get("role"):
             n["note"] = (n.get("note", "") + " role: " + m["role"]).strip()
         if m.get("ref", "").startswith(("composition:", "view:")):
             n["expand"] = m.get("expand", depth < 2 and m["ref"].startswith("composition:"))
         b = resolve(ctx, m["ref"]) if m.get("ref") else None
         node = _node_for(ctx, n, "composition", b, depth, groups, extra, edges, seen)
-        if node.get("type") in V.TYPE_KINDS or node.get("type") == "interface":
+        if m.get("outside"):
+            node["outside"] = True
+        if (node.get("type") in V.TYPE_KINDS or node.get("type") == "interface") and m.get("members") != "auto":
             node["members"] = []
             node["collapsed"] = True
         if node.get("expanded_into"):
@@ -506,6 +528,12 @@ def materialize_composition(st: Store, spec: dict, depth: int = 0, prefix: str =
     for g in groups:
         if g.get("parent") is None:
             g["parent"] = frame
+    have = {n["id"] for n in nodes}
+    sub = [{"id": prefix + "g_" + V.slug(g["id"]), "label": g.get("label") or g["id"],
+            "nodes": [prefix + x for x in g.get("members") or [] if prefix + x in have],
+            "parent": prefix + "g_" + V.slug(g["parent"]) if g.get("parent") else frame}
+           for g in spec.get("groups") or [] if isinstance(g, dict) and g.get("id")]
+    groups += sub
     member_ids = [n["id"] for n in nodes if not any(n["id"] in g["nodes"] for g in groups)]
     groups.insert(0, {"id": frame, "label": f"«composition» {spec.get('name', spec['id'])}", "nodes": member_ids,
                       "element": "composition:" + spec["id"], "parent": None})

@@ -12,17 +12,18 @@ from __future__ import annotations
 
 import hashlib
 import json
+import posixpath
 import time
 from collections import defaultdict
 
-from nncq import graph
+from nncq import graph, langs
 from nncq.store import Store
 from nncq.uml import protocol as P
 from nncq.uml import render_ascii, render_mermaid
 from nncq.uml import views as V
 
 FORMATS = ("ascii", "mermaid", "markdown", "json")
-_COLS = "id, key, kind, title, origin, grp, spec, model, hash, stale, report, created, updated"
+_COLS = "id, key, kind, title, origin, grp, spec, model, hash, stale, report, created, updated, prov"
 
 
 def _hash(model: dict) -> str:
@@ -48,7 +49,8 @@ def _row(st: Store, key: str) -> dict | None:
 
 
 def _save(st: Store, key: str, kind: str, title: str, origin: str, grp: str, spec: dict, model: dict,
-          refs: list[tuple[str, str, str]], scopes: set | list, stale: int = 0, report: dict | None = None) -> int:
+          refs: list[tuple[str, str, str]], scopes: set | list, stale: int = 0, report: dict | None = None,
+          prov: dict | None = None) -> int:
     now = time.time()
     with st.tx() as db:
         old = db.execute("SELECT id, created FROM views WHERE key=?", (key,)).fetchone()
@@ -58,9 +60,12 @@ def _save(st: Store, key: str, kind: str, title: str, origin: str, grp: str, spe
             vid = old[0]
             db.execute("UPDATE views SET kind=?, title=?, origin=?, grp=?, spec=?, model=?, hash=?, stale=?, report=?, "
                        "updated=? WHERE id=?", (*args, vid))
+            if prov is not None:
+                db.execute("UPDATE views SET prov=? WHERE id=?", (json.dumps(prov), vid))
         else:
             vid = db.execute("INSERT INTO views(kind, title, origin, grp, spec, model, hash, stale, report, updated, key,"
-                             " created) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", (*args, key, now)).lastrowid
+                             " created, prov) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                             (*args, key, now, json.dumps(prov) if prov else None)).lastrowid
         for t in ("view_refs", "view_scope", "view_render", "view_dirty"):
             db.execute(f"DELETE FROM {t} WHERE view_id=?", (vid,))
         db.executemany("INSERT INTO view_refs(view_id, path, ref, fp) VALUES(?,?,?,?)",
@@ -140,7 +145,31 @@ def _cycle(st: Store, start: str, refs: list[str]) -> list[str] | None:
     return None
 
 
-def upsert(st: Store, obj: dict | str) -> dict:
+def _who(client: str = "", model: str = "") -> dict:
+    return {"client": client or "unknown", "model": model or "unknown", "at": time.strftime("%Y-%m-%d %H:%M:%S")}
+
+
+def provenance(r: dict) -> dict | None:
+    """Who made a stored view / composition over MCP (none for generated ones): a short tag client:model of its
+    creator and a detail line with versions, times and the last editor."""
+    if r.get("origin") == "auto":
+        return None
+    p = json.loads(r.get("prov") or "null") or {}
+    c, u = p.get("created_by") or {}, p.get("updated_by") or {}
+    name = lambda w: (w.get("client") or "unknown").split("/")[0]
+    tag = f"{name(c)}:{c.get('model') or 'unknown'}" if c else "unknown"
+    made = time.strftime("%Y-%m-%d %H:%M", time.localtime(r.get("created") or 0))
+    detail = (f"made via MCP by {c.get('client', 'unknown')} · model {c.get('model', 'unknown')} · {c.get('at') or made}"
+              if c else f"made via MCP (client and model not recorded) · {made}")
+    if u and (u.get("client"), u.get("model")) != (c.get("client"), c.get("model")):
+        detail += f"\nlast edited by {u.get('client', 'unknown')} · model {u.get('model', 'unknown')} · {u.get('at', '')}"
+    elif u and u.get("at") != c.get("at"):
+        detail += f"\nupdated {u.get('at', '')}"
+    return {"tag": tag, "detail": detail, **({"created_by": c} if c else {}), **({"updated_by": u} if u else {})}
+
+
+def upsert(st: Store, obj: dict | str, client: str = "", llm: str = "") -> dict:
+    """client / llm: provenance of an MCP call (the MCP client's name/version, the model id the agent passed)."""
     if isinstance(obj, str):
         try:
             obj = json.loads(obj)
@@ -167,8 +196,12 @@ def upsert(st: Store, obj: dict | str) -> dict:
     origin = obj.get("author", "agent") if what == "composition" else "agent"
     grp = obj.get("group") or _group_of(st, model)
     title = obj.get("name") if what == "composition" else obj["title"]
+    old = _row(st, key)
+    who = _who(client, llm)
+    created = (json.loads(old["prov"] or "null") or {}).get("created_by") if old else None
+    prov = {"created_by": created or who, "updated_by": who}
     _save(st, key, "composition" if what == "composition" else obj["kind"], title, origin, grp, obj, model,
-          refs, scopes, 0, report)
+          refs, scopes, 0, report, prov)
     out = {"key": key, "element": elem, "kind": what if what == "composition" else obj["kind"],
            "result": "updated" if existed else "created", "nodes": len(model["nodes"]), "edges": len(model["edges"])}
     if unbound:
@@ -194,6 +227,36 @@ def delete(st: Store, key: str) -> dict:
     return {"deleted": r["key"], **({"referenced_by_now_flagged": users} if users else {})}
 
 
+def file_composition(st: Store, path: str) -> dict:
+    """The file's composition (filecomp.py), generated on demand: fresh -> reused; dirty (a file it depends on
+    changed, or a part was regenerated) -> its parts are refreshed first (auto views regenerate when dirty),
+    then it is rebuilt. Its refs point at its parts and the file, so later staleness propagates to it."""
+    from nncq.uml import filecomp
+    path = path.replace("\\", "/").strip("/")
+    k = filecomp.key(path)
+    r = _row(st, k)
+    if r and not r["dirty"]:
+        return r
+
+    def sub(kind: str, subject: str = "", **opts) -> str | None:
+        try:
+            return auto(st, kind, subject, **opts)["key"]
+        except (ValueError, KeyError):
+            return None
+    spec = filecomp.spec(st, path, sub)
+    if not spec["members"]:
+        raise ValueError(f"nothing to show for {path!r}")
+    refs, unbound, scopes = P.bind(st, spec, "composition")
+    refs.append((path, "file:" + path, ""))
+    model = P.materialize_composition(st, spec)
+    if r and r["hash"] == _hash(model):
+        st.db.execute("DELETE FROM view_dirty WHERE view_id=?", (r["id"],))
+        return _row(st, k)
+    report = {"regenerated": time.strftime("%Y-%m-%d %H:%M:%S"), **_diff(json.loads(r["model"]), model)} if r else None
+    _save(st, k, "composition", spec["name"], "auto", "files", spec, model, refs, scopes, 0, report)
+    return _row(st, k)
+
+
 def check(st: Store, r: dict) -> dict:
     """Re-validate a view marked by a file change (see module doc). Returns the fresh row."""
     if not r["dirty"]:
@@ -201,6 +264,8 @@ def check(st: Store, r: dict) -> dict:
     spec = json.loads(r["spec"] or "{}")
     if r["origin"] == "auto":
         try:
+            if r["kind"] == "composition":
+                return file_composition(st, spec["auto_file"])
             return auto(st, spec["kind"], spec.get("subject", ""), **spec.get("opts", {}))
         except ValueError as e:
             report = {"regenerated": time.strftime("%Y-%m-%d %H:%M:%S"), "error": str(e)}
@@ -307,28 +372,39 @@ def markdown(st: Store, r: dict, model: dict) -> str:
         mm = render_mermaid.render(model, links)
     except Exception:
         mm = render_mermaid.render(model)
+    p = provenance(r)
+    if p:
+        mm += f"\n%% made via mcp · {p['tag']}"
     out = [f"<!-- nncq uml export: generator={V.MODEL_VERSION}.{FACTS_VERSION} repo={repo} view={r['key']} "
            f"view_rev={vrev} model_hash={_hash(model)} -->", f"### {model.get('title', r['key'])}", "",
            "```mermaid", mm, "```", ""]
     view_link = f"{base}#/uml/view/{quote(element_of(r), safe='')}?{urlencode({'view': r['key'], 'v': vrev, 'repo': repo})}"
     out += [f"Elements ([open this view]({view_link})):", ""] + rows
+    if p:
+        out += ["", f"_made via mcp · {p['tag']}_"]
     return "\n".join(out) + "\n"
 
 
+RENDER_VERSION = 2          # bump when a renderer's output changes: cached renders of older versions are ignored
+
+
 def render(st: Store, r: dict, fmt: str) -> str:
-    hit = st.q("SELECT text FROM view_render WHERE view_id=? AND fmt=?", (r["id"], fmt))
+    key = f"{fmt}@{RENDER_VERSION}"
+    hit = st.q("SELECT text FROM view_render WHERE view_id=? AND fmt=?", (r["id"], key))
     if hit:
         return hit[0][0]
     model = json.loads(r["model"])
+    p = provenance(r)
     if fmt == "ascii":
-        text = render_ascii.render(model)
+        text = render_ascii.render(model) + (f"\n-- via mcp · {p['tag']}" if p else "")
     elif fmt == "mermaid":
         text = render_mermaid.render(model)
     elif fmt == "markdown":
         text = markdown(st, r, model)
     else:
         return json.dumps(model)
-    st.db.execute("INSERT OR REPLACE INTO view_render(view_id, fmt, text) VALUES(?,?,?)", (r["id"], fmt, text))
+    st.db.execute("DELETE FROM view_render WHERE view_id=? AND fmt LIKE ? AND fmt!=?", (r["id"], fmt + "%", key))
+    st.db.execute("INSERT OR REPLACE INTO view_render(view_id, fmt, text) VALUES(?,?,?)", (r["id"], key, text))
     return text
 
 
@@ -342,6 +418,8 @@ def summary(r: dict) -> dict:
         out["stale"] = True
     if rep:
         out["report"] = rep
+    if (p := provenance(r)) is not None:
+        out["provenance"] = {"tag": p["tag"], "detail": p["detail"]}
     return out
 
 
@@ -373,13 +451,66 @@ def get(st: Store, key: str, fmt: str = "ascii") -> dict:
     return out
 
 
+def _code_under(st: Store, folder: str) -> bool:
+    return any(lang and langs.is_ast_lang(lang) for (lang,) in st.q(
+        "SELECT DISTINCT lang FROM files WHERE path LIKE ?", (folder + "/%" if folder else "%",)))
+
+
+def default_targets(st: Store, subject: str = "", path: str = "") -> list[tuple[str, str, dict]]:
+    """Best-guess diagrams for what a user is looking at, most specific first: a type -> its class view, a function
+    -> a sequence from it, a component -> its component view, any file -> its file composition (filecomp.py; else
+    its component), a folder -> its packages, nothing -> the workspace's components (else deployment, packages)."""
+    p = (path or "").replace("\\", "/").strip("/")
+    out: list[tuple[str, str, dict]] = []
+    if subject:
+        d = next(iter(graph.find_defs(st, subject, p)), None)
+        if d is not None:
+            if d.kind in V.TYPE_KINDS:
+                out.append(("class", d.qualname, {}))
+            elif d.kind in V.FUNCS:
+                out.append(("sequence", d.qualname, {}))
+            elif d.parent and any(x.kind in V.TYPE_KINDS for x in graph.find_defs(st, d.parent)):
+                out.append(("class", d.parent, {}))
+            p = d.path
+        elif st.q("SELECT 1 FROM components WHERE name=? COLLATE NOCASE", (subject,)):
+            out.append(("component", subject, {}))
+    folder = p
+    if p and st.q("SELECT 1 FROM files WHERE path=?", (p,)):
+        out += [("file", "", {"path": p}), ("component", "", {"path": p})]
+        folder = posixpath.dirname(p)
+    if p:
+        while folder and not _code_under(st, folder):
+            folder = posixpath.dirname(folder)
+        if folder:
+            out.append(("package", "", {"under": folder}))
+    return out + [("component", "", {}), ("deployment", "", {}), ("package", "", {})]
+
+
+def default_view(st: Store, subject: str = "", path: str = "", fmt: str = "json") -> dict:
+    """The first default target that yields a non-empty diagram (generated on demand, stored as an auto view)."""
+    tried = []
+    for kind, subj, opts in default_targets(st, subject, path):
+        try:
+            r = file_composition(st, opts["path"]) if kind == "file" else auto(st, kind, subj, **opts)
+        except (ValueError, KeyError) as e:
+            tried.append(f"{kind} {subj or opts or 'workspace'}: {e}")
+            continue
+        if not json.loads(r["model"]).get("nodes"):
+            tried.append(f"{kind} {subj or opts or 'workspace'}: empty")
+            continue
+        return {**get(st, r["key"], fmt), "default_for": {"subject": subject, "path": path, "kind": kind}}
+    return {"error": "no diagram for this target", "tried": tried}
+
+
 def view(st: Store, kind: str = "", subject: str = "", key: str = "", fmt: str = "ascii", **opts) -> dict:
     if fmt not in FORMATS:
         return {"error": f"format: one of {', '.join(FORMATS)}"}
     if key:
         return get(st, key, fmt)
+    if kind == "default" or not kind:
+        return default_view(st, subject, opts.get("path", "") or opts.get("under", ""), fmt)
     if kind not in V.KINDS:
-        return {"error": f"kind: one of {', '.join(V.KINDS)} (or pass key= for a stored view / composition)"}
+        return {"error": f"kind: one of {', '.join(V.KINDS)}, default (or pass key= for a stored view / composition)"}
     r = auto(st, kind, subject, **opts)
     return get(st, r["key"], fmt)
 
