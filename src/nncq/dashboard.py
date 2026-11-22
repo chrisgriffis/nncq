@@ -158,6 +158,8 @@ pre.code.tall{max-height:none}
 #s-symbols{height:min(520px,70vh)}#s-symbols.idle{height:auto}
 #right>.vb{flex:1;min-height:0;display:flex;flex-direction:column}#right>.vb[hidden]{display:none}
 .navb{display:flex}.navb a{padding:0 8px;font-size:18px;line-height:22px;color:var(--dim);cursor:pointer;border-radius:5px}.navb a:hover{color:var(--fg);background:#1b1f29}
+#vtitle a{color:var(--acc);cursor:pointer;text-decoration:none}#vtitle a:hover{text-decoration:underline}
+#pmenu{position:fixed;z-index:50;background:var(--panel,#151821);border:1px solid var(--line,#232733);border-radius:6px;padding:4px 0;font-size:12px;box-shadow:0 6px 20px #0008}#pmenu a{display:block;padding:5px 14px;cursor:pointer;white-space:nowrap}#pmenu a:hover{background:#ffffff14}#pmenu .msg{padding:5px 14px;color:var(--dim,#7d8490)}
 #vtitle{font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left;flex:1;min-width:0}
 .pane{background:var(--panel);border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column;min-height:0;overflow:hidden}
 .pane.l{flex:0 0 40%;min-width:0}.pane.r{flex:1;min-width:0}
@@ -378,7 +380,18 @@ function home(quiet){$('#q').value='';$('#qpath').value='';$('#qx').style.displa
 function setView(v){view=v;setHash({v:v==='hits'?'':v});$('#vhits').hidden=v!=='hits';$('#vsym').hidden=v!=='sym';
  document.querySelectorAll('#vtab a').forEach(a=>a.classList.toggle('on',a.dataset.v===v));
  vtitle(v==='hits'?(ans&&fsel>=0?ans.files[fsel].p:''):(cur?cur.path:''))}
-function vtitle(t){$('#vtitle').innerHTML=t?'&lrm;'+esc(t):''}
+function vtitle(t){$('#vtitle').innerHTML=t?`<a data-file="${esc(t)}" title="open / view in folder / copy path">&lrm;${esc(t)}</a>`:''}
+function fileMenu(path,x,y){let m=$('#pmenu');if(!m){m=document.createElement('div');m.id='pmenu';document.body.appendChild(m)}
+ m.innerHTML='<a data-op="open">Open in editor</a><a data-op="reveal">View in folder</a><a data-op="copy">Copy path</a>';
+ m.style.display='block';m.style.left=Math.min(x,innerWidth-180)+'px';m.style.top=(y+6)+'px';
+ m.onclick=async e=>{const op=(e.target.closest('[data-op]')||{}).dataset?.op;if(!op)return;e.stopPropagation();
+  if(op==='copy'){navigator.clipboard.writeText(path);m.style.display='none';return}
+  try{const r=await fetch('api/uml/local/'+op,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({repo:sel,path})}).then(r=>r.json());
+   if(r.error){m.innerHTML='<div class="msg">'+esc(r.error)+'</div>';return}}catch(err){m.innerHTML='<div class="msg">'+esc(String(err))+'</div>';return}
+  m.style.display='none'}}
+document.addEventListener('click',e=>{const a=e.target.closest('#vtitle [data-file]');const m=$('#pmenu');
+ if(a){e.preventDefault();e.stopPropagation();fileMenu(a.dataset.file,e.clientX,e.clientY);return}
+ if(m&&!e.target.closest('#pmenu'))m.style.display='none'});
 $('#vtab').addEventListener('click',e=>{const a=e.target.closest('[data-v]');if(a)setView(a.dataset.v)});
 
 async function doSearch(){const q=$('#q').value.trim(),qp=$('#qpath').value.trim(),kk=$('#qk').value;if(!q)return home();
