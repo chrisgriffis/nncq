@@ -176,6 +176,7 @@ pre.code.tall{max-height:none}
 .kind.k-enum,.badge.k-enum{background:#3a2d10;color:#f0c050}.kind.k-struct,.badge.k-struct,.kind.k-union,.badge.k-union,.kind.k-record,.badge.k-record{background:#13332e;color:#5fd4c0}
 .kind.k-function,.badge.k-function,.kind.k-method,.badge.k-method{background:#14301f;color:#6fdc9e}.kind.k-field,.badge.k-field,.kind.k-variable,.badge.k-variable,.kind.k-constant,.badge.k-constant,.kind.k-property,.badge.k-property{background:#2d2a18;color:#e0cc6e}
 .kind.k-file{background:#232a33;color:#b8c6d8}.kind.k-namespace,.badge.k-namespace,.kind.k-module,.badge.k-module{background:#262033;color:#c3a8f0}
+.badge.bn{font-style:italic;background:none;border:1px dashed #3d4658}.badge.k-test{background:#262033;color:#c3a8f0}.tn .badge+.badge{margin-left:-2px}
 .k{color:#c792ea}.s{color:#c3e88d}.c{color:#5f6b7a;font-style:italic}.n{color:#f78c6c}.pp{color:#89ddff}
 /* symbols */
 #s-symbols{height:min(300px,32vh);flex:none}#s-symbols.idle{height:auto}
@@ -507,13 +508,13 @@ $('#vhits').addEventListener('click',async e=>{const s=e.target.closest('.sym[da
 
 /* ---------- symbol explorer ---------- */
 let tmode=localStorage.getItem('nncq.tmode')||'callers',cur=null,nodes=[],selNode=null;
-const reDef=/^(\S+) \[(\w+)\] (.+):(\d+)-(\d+)\s*\n?\s*(.*)$/s,reCaller=/^(\S+)\s{2,}(.+):(\d+)$/,
+const reDef=/^(\S+) \[(\w+)\] (.+):(\d+)-(\d+)\s*\n?\s*(.*)$/s,reCaller=/^(\S+)\s{2,}(.+?):(\d+)(?:\s+(.*))?$/,
  reCall=/^L(\d+) (\S+)(?: x(\d+))? (?:-> (.*)|\((.*)\))$/,reOut=/^(\s*)(\d+)-(\d+) (\S+) (\S+)\s+\|\s?(.*)$/;
 function short(sym){const p=String(sym).split(/::|\./);const l=p.pop();return (p.length?`<span class="q">${esc(p.slice(-1)[0])}::</span>`:'')+`<b>${esc(l)}</b>`}
 function mk(o){o.id=nodes.length;nodes.push(o);return o}
 function tnode(nd){const car=nd.leaf?'':nd.open?'▾':'▸';const lab=nd.label||short(nd.sym);
  return `<li><div class="tn ${selNode===nd.id?'cur':''}" data-id="${nd.id}"><span class="car" data-t="${nd.id}">${nd.loading?'<span class="spin"></span>':car}</span><span class="nm" title="${esc(nd.sym||'')}">${lab}</span>
-  ${nd.badge?`<span class="badge ${nd.bw?'w':'k-'+esc(nd.badge)}">${esc(nd.badge)}</span>`:''}${nd.sym&&nd.path&&!nd.noroot?`<span class="rr" data-r="${nd.id}" title="explore this symbol">◎</span>`:''}<span class="f" title="${esc(nd.path||'')}">${nd.path?'&lrm;'+esc(nd.path)+(nd.line?':'+nd.line:''):''}</span></div>
+  ${nd.badge?`<span class="badge ${nd.bw?'w':'k-'+esc(nd.badge)}">${esc(nd.badge)}</span>`:''}${nd.extra||''}${nd.sym&&nd.path&&!nd.noroot?`<span class="rr" data-r="${nd.id}" title="explore this symbol">◎</span>`:''}<span class="f" title="${esc(nd.path||'')}">${nd.path?'&lrm;'+esc(nd.path)+(nd.line?':'+nd.line:''):''}</span></div>
   ${nd.open&&nd.kids?`<ul class="tree">${nd.kids.map(tnode).join('')||'<li class="dim" style="padding:2px 22px">none</li>'}</ul>`:''}</li>`}
 function drawTree(){const roots=nodes.filter(x=>x.root);$('#tree').innerHTML=roots.length?`<ul class="tree root">${roots.map(tnode).join('')}</ul>`:'<div class="empty">Find a symbol, or click one in search hits.</div>'}
 function ancestors(nd){const s=new Set();for(let p=nd;p;p=p.parent!=null?nodes[p.parent]:null)s.add(p.sym);return s}
@@ -522,39 +523,56 @@ async function expand(nd){if(nd.leaf)return;if(nd.kids){nd.open=!nd.open;drawTre
  try{nd.kids=await nd.load(nd)}catch(e){nd.kids=[mk({label:`<span class="err">${esc(e.message)}</span>`,leaf:true})]}
  nd.kids.forEach(c=>c.parent=nd.id);const anc=ancestors(nd);nd.kids.forEach(c=>{if(c.sym&&anc.has(c.sym)&&!c.leaf){c.leaf=true;c.badge='recursion';c.bw=true}});
  nd.loading=false;nd.open=true;drawTree()}
+/* the API's structured rows (callers_list / calls_list / definitions_list); the text forms are for agents */
+const sfx=c=>(c.times>1?`<span class="badge">×${c.times}</span>`:'')+(c.test?'<span class="badge k-test">test</span>':'')
+ +(c.by_name?'<span class="badge bn" title="matched by name only: may be another function with this name">by name</span>':c.match&&!['unique name','by name'].includes(c.match)?`<span class="badge">${esc(c.match)}</span>`:'');
 const loadCallers=async nd=>{const d=await T('called_by',{name:nd.sym,path:nd.dpath||'',limit:80});
- const out=(d.callers||[]).map(s=>{const m=reCaller.exec(s);return m?mk({sym:m[1],path:m[2],line:+m[3],dpath:m[2],load:loadCallers}):mk({label:esc(s),leaf:true})});
+ const out=d.callers_list?d.callers_list.map(c=>mk({sym:c.sym,path:c.path,line:c.line,dpath:c.path,extra:sfx(c),leaf:/^\(/.test(c.sym),noroot:/^\(/.test(c.sym),load:loadCallers}))
+  :(d.callers||[]).map(s=>{const m=reCaller.exec(s);return m?mk({sym:m[1],path:m[2],line:+m[3],dpath:m[2],extra:m[4]?`<span class="badge">${esc(m[4])}</span>`:'',load:loadCallers}):mk({label:esc(s),leaf:true})});
  if(d.call_sites_total&&d.shown&&d.call_sites_total>d.shown)out.push(mk({label:`<span class="dim">… ${d.call_sites_total-d.shown} more call sites</span>`,leaf:true}));return out};
 const loadCallees=async nd=>{const d=await T('calls',{name:nd.sym,path:nd.dpath||''});const site=(d.defined_at||[])[0]||nd.dpath||'';const sp=site.replace(/:\d+(-\d+)?$/,'');
+ const minor=(d.calls||[]).filter(s=>/^\+ \d+ /.test(s)).map(s=>mk({label:`<span class="dim">${esc(s)}</span>`,leaf:true}));
+ if(d.calls_list)return d.calls_list.map(c=>c.external?mk({label:`<span class="dim">${esc(c.name)}</span>`,leaf:true,badge:'external',path:sp,line:c.line,site:true})
+   :!c.sym?mk({sym:c.name,label:`<b>${esc(c.name)}</b>`,badge:c.candidates+' candidates',bw:true,path:sp,line:c.line,site:true,noroot:true,load:loadCands})
+   :mk({sym:c.sym,path:c.path,line:c.def_line,dpath:c.path,extra:(c.times>1?`<span class="badge">×${c.times}</span>`:'')+(c.note?`<span class="badge bn">${esc(c.note)}</span>`:''),callLine:c.line,callPath:sp,load:loadCallees})).concat(minor);
  return (d.calls||[]).map(s=>{const m=reCall.exec(s);if(!m)return mk({label:esc(s),leaf:true});const [,ln,name,times,to,ext]=m;
   if(ext)return mk({label:`<span class="dim">${esc(name)}</span>`,leaf:true,badge:'external',path:sp,line:+ln,site:true});
   const amb=/^(\d+) definitions \(ambiguous\)/.exec(to||'');
   if(amb)return mk({sym:name,label:`<b>${esc(name)}</b>`,badge:amb[1]+' candidates',bw:true,path:sp,line:+ln,site:true,noroot:true,load:loadCands});
-  const t=/^(\S+) (.+):(\d+)$/.exec(to||'');
+  const t=/^(\S+) (.+?):(\d+)(?:\s{2,}.*)?$/.exec(to||'');
   return t?mk({sym:t[1],path:t[2],line:+t[3],dpath:t[2],badge:times?'×'+times:'',callLine:+ln,callPath:sp,load:loadCallees}):mk({label:esc(s),leaf:true})})};
+const defsOf=f=>f.definitions_list||(f.definitions||[]).map(s=>reDef.exec(s)).filter(Boolean).map(m=>({sym:m[1],kind:m[2],path:m[3],start:+m[4],end:+m[5]}));
 const loadCands=async nd=>{const d=await T('find_symbol',{name:nd.sym});
- return (d.definitions||[]).map(s=>{const m=reDef.exec(s);return m?mk({sym:m[1],path:m[3],line:+m[4],dpath:m[3],badge:m[2],load:loadCallees}):mk({label:esc(s),leaf:true})})};
+ return defsOf(d).map(x=>mk({sym:x.sym,path:x.path,line:x.start,dpath:x.path,badge:x.kind,load:loadCallees}))};
 async function outlineTree(path){const d=await T('file_outline',{path});const roots=[],stack=[];
  for(const s of d.symbols||[]){const m=reOut.exec(s);if(!m)continue;const dep=m[1].length/2;
   const nd=mk({sym:m[5],path:d.path,line:+m[2],end:+m[3],dpath:d.path,badge:m[4],kids:[],open:true,leaf:false});
   while(stack.length>dep)stack.pop();(stack.length?stack[stack.length-1].kids:roots).push(nd);if(stack.length)nd.parent=stack[stack.length-1].id;stack.push(nd)}
  for(const x of nodes)if(x.kids&&!x.kids.length&&x.badge){x.leaf=true;delete x.kids}
  return roots}
-async function typeTree(sym){const d=await T('type_hierarchy',{name:sym});const out=[];
- for(const b of d.bases||[])b.split(' -> ').slice(1).forEach((c,i)=>out.push(mk({sym:c,label:`<span class="dim">${i?'↑':'base'}</span> ${short(c)}`,leaf:true})));
- const lines=String(d.derived_tree||'').split('\n').filter(Boolean),stack=[],roots=[];
- for(const l of lines){const dep=(l.match(/^\s*/)[0].length)/2;const nm=l.trim().replace(/^[└├│─\s]+/,'');
-  const nd=mk({sym:nm,kids:[],open:true});while(stack.length>dep)stack.pop();(stack.length?stack[stack.length-1].kids:roots).push(nd);stack.push(nd)}
- for(const x of nodes)if(x.kids&&!x.kids.length){x.leaf=true}
- if(roots[0])roots[0].label=`${short(roots[0].sym)} <span class="dim">derived types: ${n(d.derived_total)}${d.truncated?' (truncated)':''}</span>`;
- return [...out,...roots]}
+const TYPEK=/^(class|struct|interface|enum|union|record|trait|type|typedef|protocol)$/;
+/* bases above the root (top-most first), the root, then the derived tree from the API's structured list */
+async function typeTree(sym,from){const d=await T('type_hierarchy',{name:sym});
+ if(d.is_type===false)return [mk({label:`<span class="dim">${from?`${esc(from.sym)} is a ${esc(from.kind||'symbol')}; its owner ${esc(sym)}`:esc(sym)} is not a type</span>`,leaf:true})];
+ const out=[];if(from)out.push(mk({label:`<span class="dim">type tree of ${short(sym)}, the owner of ${short(from.sym)}</span>`,leaf:true}));
+ for(const b of d.bases||[]){if(/^\(/.test(b))continue;b.split(' -> ').slice(1).reverse().forEach((c,i)=>out.push(mk({sym:c,label:`<span class="dim">${i?'↑':'base'}</span> ${short(c)}`,leaf:true,resolve:true})))}
+ const here=!from&&cur&&cur.sym===d.type;
+ const root=mk({sym:d.type,path:d.path||(here?cur.path:''),line:d.line||(here?cur.line:0),dpath:d.path||(here?cur.path:''),kids:[],open:true,noroot:true});
+ root.label=`${out.length>(from?1:0)?'<span class="dim">↑</span> ':''}${short(d.type)} <span class="dim">derived types: ${n(d.derived_total)}${d.truncated?' (truncated)':''}</span>`;
+ const stack=[root],made=[root];
+ for(const x of d.derived||[]){const nd=mk({sym:x.type,path:x.path,line:x.line,dpath:x.path,kids:[],open:true});made.push(nd);
+  while(stack.length>Math.max(1,x.depth))stack.pop();const par=stack[stack.length-1];par.kids.push(nd);nd.parent=par.id;stack.push(nd)}
+ for(const x of made)if(!x.kids.length){x.leaf=true;delete x.kids}
+ return [...out,root]}
 async function buildTree(){nodes=[];selNode=null;if(!cur){drawTree();return}
  $('#tree').innerHTML='<div class="empty"><span class="spin"></span></div>';
  try{if(tmode==='callers'||tmode==='callees'){const r=mk({root:true,sym:cur.sym,path:cur.path,line:cur.line,dpath:cur.path,noroot:true,load:tmode==='callers'?loadCallers:loadCallees});
    r.label=`${short(cur.sym)} <span class="dim">${tmode==='callers'?'is called by':'calls'}</span>`;drawTree();await expand(r)}
   else if(tmode==='outline'){(await outlineTree(cur.path)).forEach(r=>r.root=true);const hit=nodes.find(x=>x.sym===cur.sym);if(hit)selNode=hit.id;drawTree();
    const el=$('#tree .tn.cur');if(el)el.scrollIntoView({block:'nearest'})}
-  else{(await typeTree(cur.sym)).forEach(r=>r.root=true);drawTree()}}
+  else{const isT=TYPEK.test(cur.kind||'');
+   if(!isT&&!cur.parent){$('#tree').innerHTML=`<div class="empty">${esc(cur.sym)} is a ${esc(cur.kind||'symbol')}, not a type</div>`;return}
+   (await typeTree(isT?cur.sym:cur.parent,isT?null:cur)).forEach(r=>r.root=true);drawTree()}}
  catch(e){$('#tree').innerHTML=`<div class="empty err">${esc(e.message)}</div>`}}
 function segs(){document.querySelectorAll('#tmode a').forEach(a=>a.classList.toggle('on',a.dataset.m===tmode))}
 $('#tmode').addEventListener('click',e=>{const a=e.target.closest('[data-m]');if(!a)return;tmode=a.dataset.m;localStorage.setItem('nncq.tmode',tmode);segs();buildTree()});
@@ -562,6 +580,7 @@ $('#tree').addEventListener('click',async e=>{const r=e.target.closest('[data-r]
  const t=e.target.closest('[data-t]');const row=e.target.closest('.tn');if(!row)return;const nd=nodes[+row.dataset.id];
  if(t&&!nd.leaf){expand(nd);return}
  selNode=nd.id;drawTree();
+ if(nd.resolve&&!nd.path){try{const x=defsOf(await T('find_symbol',{name:nd.sym,kind:'type'}))[0];if(x){Object.assign(nd,{path:x.path,line:x.start,end:x.end,dpath:x.path});drawTree();show(x.path,x.start,x.end)}}catch(err){}return}
  if(nd.callPath&&tmode==='callees')show(nd.callPath,nd.callLine);else if(nd.path)show(nd.path,nd.line,nd.end);
  else if(nd.sym&&tmode==='types')openSym(nd.sym)});
 $('#tree').addEventListener('dblclick',e=>{const row=e.target.closest('.tn');if(!row)return;const nd=nodes[+row.dataset.id];if(nd.sym&&!nd.noroot)openSym(nd.sym,nd.dpath||nd.path)});
@@ -570,7 +589,9 @@ async function show(path,line,end){setView('sym');$('#cpath').innerHTML=`<span c
   $('#sview').innerHTML=codeHtml(c.text,c.start,d.path,line);const mkr=$('#mk'),box=$('#sview').parentElement;
   if(mkr)box.scrollTop=mkr.offsetTop-box.clientHeight/2}
  catch(e){$('#sview').innerHTML=`<span class="err">${esc(e.message)}</span>`}}
-function chips(list,label){if(!list||!list.length)return'';return `<div class="chips"><span class="dim" style="font-size:11px;padding:2px 0">${label}</span>${list.slice(0,12).map(s=>{const m=reCaller.exec(s)||reCall.exec(s);
+function chips(list,label){if(!list||!list.length)return'';return `<div class="chips"><span class="dim" style="font-size:11px;padding:2px 0">${label}</span>${list.slice(0,12).map(s=>{
+ if(typeof s==='object')return `<span class="chip" data-s="${esc(s.sym)}" data-p="${esc(s.path||'')}" title="${esc(s.sym)} · ${esc(s.path||'')}:${s.def_line||s.line||''}">${short(s.sym)}${s.times>1?` <span class="dim">×${s.times}</span>`:''}${s.test?' <span class="dim">test</span>':''}${s.by_name?' <i class="dim">by name</i>':''}</span>`;
+ const m=reCaller.exec(s)||reCall.exec(s);
  const sym=m?(reCaller.test(s)?m[1]:((/^(\S+) /.exec(m[4]||'')||[])[1]||m[2])):s.split(' ')[0];return `<span class="chip" data-s="${esc(sym)}" title="${esc(s)}">${short(sym)}</span>`}).join('')}${list.length>12?`<span class="dim" style="font-size:11px">+${list.length-12}</span>`:''}</div>`}
 $('#scard').addEventListener('click',e=>{const c=e.target.closest('[data-s]');if(c)openSym(c.dataset.s,c.dataset.p||'')});
 function findSym(q){q=(q||'').trim();if(q)openSym(q)}
@@ -578,19 +599,19 @@ function findSym(q){q=(q||'').trim();if(q)openSym(q)}
 async function openSym(name,path,again,quiet){if(!nav&&!quiet)target('sym');$('#sq').value=name;setHash({s:name,p:path||'',sf:''},!again&&!quiet);setView('sym');
  $('#scard').innerHTML='<span class="spin"></span>';
  try{let d;try{d=await T('symbol_context',{name,path:path||''})}catch(e){d={error:e.message}}
-  if(d.error||!d.defined_at){const f=await T('find_symbol',{name});const defs=(f.definitions||[]).map(s=>reDef.exec(s)).filter(Boolean);
+  if(d.error||!d.defined_at){const f=await T('find_symbol',{name});const defs=defsOf(f).map(x=>[null,x.sym,x.kind,x.path,x.start]);
    if(defs.length===1)return openSym(defs[0][1],defs[0][3],true,quiet);
    $('#scard').innerHTML=`<div class="t">${esc(name)}</div><div class="dim">${defs.length?defs.length+' definitions: pick one':'not found'+(d.error?': '+esc(d.error):'')}</div>
     <div class="chips">${defs.map(m=>`<span class="chip" data-s="${esc(m[1])}" data-p="${esc(m[3])}" title="${esc(m[3])}:${m[4]}"><b>${esc(m[1])}</b> <span class="dim">${esc(m[2])} · ${esc(base(m[3]))}</span></span>`).join('')}</div>`;return}
   const at=String(d.defined_at[0]),m=/^(.+):(\d+)(?:-(\d+))?$/.exec(at),p=m?m[1]:at,a=m?+m[2]:1,b=m&&m[3]?+m[3]:a;
-  cur={sym:d.symbol||name,req:name,path:p,line:a,end:b,kind:d.kind};$('#s-symbols').classList.remove('idle');setView('sym');
+  cur={sym:d.symbol||name,req:name,path:p,line:a,end:b,kind:d.kind,parent:d.parent||''};$('#s-symbols').classList.remove('idle');setView('sym');
   if(!nav&&!quiet)srecentAdd(cur.sym,p);else srecent();if(!quiet)follow({s:cur.sym,p});
   const facts=[d.call_sites_total&&`<span class="chip"><b>${esc(d.call_sites_total)}</b></span>`,d.mentioned_in_files!=null&&`<span class="chip">mentioned in <b>${n(d.mentioned_in_files)}</b> files</span>`,
    d.defined_at.length>1&&`<span class="chip">${d.defined_at.length} definitions</span>`].filter(Boolean).join('');
   $('#scard').innerHTML=`<div class="t">${short(cur.sym)} <span class="kind k-${esc(d.kind||'')}">${esc(d.kind||'')}</span></div>
    ${d.parent?`<div class="dim" style="font-size:11px">in <span class="chip" data-s="${esc(d.parent)}">${esc(d.parent)}</span></div>`:''}
    ${d.signature?`<div class="sig">${esc(d.signature)}</div>`:''}<div class="chips">${facts}</div>
-   ${chips(d.bases,'bases')}${chips(d.derived,'derived')}${chips(d.callers,'callers')}${chips((d.calls||[]).filter(s=>!/ambiguous|not in index/.test(s)),'calls')}`;
+   ${chips(d.bases,'bases')}${chips(d.derived,'derived')}${chips(d.callers_list||d.callers,'callers')}${chips(d.calls_list?d.calls_list.filter(c=>c.sym):(d.calls||[]).filter(s=>!/ambiguous|not in index/.test(s)),'calls')}`;
   show(p,a,b);buildTree()}
  catch(e){$('#scard').innerHTML=`<span class="err">${esc(e.message)}</span>`}}
 

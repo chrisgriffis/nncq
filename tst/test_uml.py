@@ -220,6 +220,19 @@ def test_file_scoped_and_default_views(repo):
         st.close()
 
 
+def test_type_hierarchy_has_structured_derived_list(repo):
+    from nncq import graph
+    st = _st(repo)
+    try:
+        h = graph.type_hierarchy(st, "IDevice")
+        assert h["is_type"] and h["path"] == "lib/include/Device.hpp"
+        assert [(x["type"], x["path"], x["depth"]) for x in h["derived"]] == [("dev::Device", "lib/include/Device.hpp", 1)]
+        assert h["derived"][0]["line"] > 0 and "dev::Device  lib/include/Device.hpp:" in h["derived_tree"]
+        assert not graph.type_hierarchy(st, "dev::Device::run")["is_type"]
+    finally:
+        st.close()
+
+
 def test_ascii_is_bounded():
     m = {"kind": "class", "title": "big", "nodes": [{"id": f"n{i}", "label": f"C{i}", "members": []}
                                                    for i in range(50)], "edges": []}
