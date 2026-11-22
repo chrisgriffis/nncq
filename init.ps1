@@ -10,8 +10,8 @@
 
   Afterwards:  .venv\Scripts\nncq index      then add the MCP config it prints (.venv\Scripts\nncq mcp-config).
 
-.PARAMETER Lite        Lite profile: no torch, no models, no GPU (~150 MB instead of ~14 GB). Keyword search, the
-                      symbol graph and the .xdata cross-reference only. Re-run without -Lite later to upgrade in place.
+.PARAMETER Lite        Lite mode: no torch, no models, no GPU (~150 MB instead of ~14 GB). Keyword search, the
+                      symbol graph and the data cross-reference only. Re-run without -Lite later to upgrade in place.
 .PARAMETER Cpu         Install CPU-only torch (no NVIDIA GPU; indexing will be very slow).
 .PARAMETER Agents      Set up these agents without asking: copilot,claude,vs (MCP server + nncq-user skill).
 .PARAMETER Python      Base interpreter for the venv (3.11-3.13). Default: py -3.12, else python on PATH.
@@ -60,7 +60,7 @@ if (-not (Test-Path $Py)) {
 
 & $Py -m pip install --upgrade pip --quiet
 if ($Lite) {
-  Write-Host "== lite profile: skipping torch and models"
+  Write-Host "== lite mode: skipping torch and models"
   $Extras = ".[dev]"
 } else {
   Write-Host "== installing torch ($(if ($Cpu) {'cpu'} else {'cuda 12.8'}))"

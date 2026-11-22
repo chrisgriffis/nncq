@@ -49,7 +49,7 @@ class Dsl:
 @dataclass(frozen=True)
 class Xref:
     name: str
-    glob: str                       # data files, e.g. *.xdata
+    glob: str                       # data files, e.g. *.xml
     instance: str = ""              # regex with (?P<type>...): a type the file instantiates
     reference: str = ""             # regex with (?P<ref>...): a path/key the file references (no extension)
     label: str = "data file"

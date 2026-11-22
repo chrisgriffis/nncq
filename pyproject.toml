@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "No-net code query: fully local hybrid code search + symbol graph over MCP, using NVIDIA Nemotron embed/rerank."
 requires-python = ">=3.11,<3.14"
 # torch is installed by setup.ps1 from the CUDA wheel index (pip can't pick the CUDA build from here).
-# Core = the lite profile: keyword search, symbol graph, .xdata cross-reference. No torch, no models, no GPU.
+# Core = lite mode: keyword search, symbol graph, data cross-reference. No torch, no models, no GPU.
 dependencies = [
   "numpy>=2.0",
   "mcp==1.30.0",

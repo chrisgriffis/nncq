@@ -96,7 +96,7 @@ def _work(job):
 
 
 def folders(paths, depth: int = 4, k: int = 6) -> list[str]:
-    """'src/Code/Engine/Entity (812)' style summary of where a set of paths lives."""
+    """'src/net/http (812)' style summary of where a set of paths lives."""
     c = Counter("/".join(p.split("/")[:depth]) for p in paths)
     out = [f"{f} ({n})" for f, n in c.most_common(k)]
     if len(c) > k:
@@ -243,17 +243,17 @@ def update_paths(repo: Repo, paths: list[str], store: Store | None = None, log=p
         code_ign = walk.Ignorer(repo.root, walk.code_ignore(s.ignore, repo.profile), repo.dirs)
         rels = sorted({p.replace("\\", "/") for p in paths})
         xr = repo.xrefs if s.data else []
-        xdata = [p for p in rels if any(x.matches(p) for x in xr) and not ign.ignored(p)]
+        data = [p for p in rels if any(x.matches(p) for x in xr) and not ign.ignored(p)]
         code = [p for p in rels if lang_of(p, m, repo) and not code_ign.ignored(p)]
         want = set(code)
         known = {p: v for p, v in store.file_stats().items() if p in want}
         stats = walk.stat_many(repo.root, code)
         todo = [(p, lang_of(p, m, repo), st) for p, st in stats.items() if (known.get(p) or (None, None))[:2] != st]
         gone = [p for p in code if p not in stats and p in known]
-        if not (todo or gone or xdata):
+        if not (todo or gone or data):
             return {"changed": 0}
         busy = _other_parser(store)                # a build is running: write the delta, leave its progress marker
-        state = None if busy else _begin(store, source, [x[0] for x in todo] + gone + xdata)
+        state = None if busy else _begin(store, source, [x[0] for x in todo] + gone + data)
         try:
             if gone:
                 with store.tx():
@@ -263,8 +263,8 @@ def update_paths(repo: Repo, paths: list[str], store: Store | None = None, log=p
                          uml_model.enabled(store)) \
                 if todo else {"changed": 0}
             res["removed"] = len(gone)
-            if xdata and s.data:
-                res["data_files"] = datarefs.scan_paths(store, repo.root, xr, xdata, log)
+            if data and s.data:
+                res["data_files"] = datarefs.scan_paths(store, repo.root, xr, data, log)
             if (todo or gone) and uml_model.enabled(store) and uml_model.facts_ready(store):
                 new = any(p not in known for p, _, _ in todo)
                 u = uml_model.refresh(store, repo.root, [x[0] for x in todo] + gone, bool(gone) or new, log)

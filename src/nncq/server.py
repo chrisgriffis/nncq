@@ -405,7 +405,7 @@ def build(stdio: bool = False) -> FastMCP:
 
     @mcp.tool()
     async def type_hierarchy(name: str, repo: str = "") -> dict:
-        """Base chain(s) up and derived-type tree down for a class/struct/DDF type."""
+        """Base chain(s) up and derived-type tree down for a class/struct/interface (or DSL) type."""
         return await _run(_with, repo, lambda r, st: graph.type_hierarchy(st, name))
 
     @mcp.tool()
