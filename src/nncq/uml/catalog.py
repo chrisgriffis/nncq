@@ -23,7 +23,7 @@ from nncq.uml import render_ascii, render_mermaid
 from nncq.uml import views as V
 
 FORMATS = ("ascii", "mermaid", "markdown", "json")
-_COLS = "id, key, kind, title, origin, grp, spec, model, hash, stale, report, created, updated"
+_COLS = "id, key, kind, title, origin, grp, spec, model, hash, stale, report, created, updated, prov"
 
 
 def _hash(model: dict) -> str:
@@ -49,7 +49,8 @@ def _row(st: Store, key: str) -> dict | None:
 
 
 def _save(st: Store, key: str, kind: str, title: str, origin: str, grp: str, spec: dict, model: dict,
-          refs: list[tuple[str, str, str]], scopes: set | list, stale: int = 0, report: dict | None = None) -> int:
+          refs: list[tuple[str, str, str]], scopes: set | list, stale: int = 0, report: dict | None = None,
+          prov: dict | None = None) -> int:
     now = time.time()
     with st.tx() as db:
         old = db.execute("SELECT id, created FROM views WHERE key=?", (key,)).fetchone()
@@ -59,9 +60,12 @@ def _save(st: Store, key: str, kind: str, title: str, origin: str, grp: str, spe
             vid = old[0]
             db.execute("UPDATE views SET kind=?, title=?, origin=?, grp=?, spec=?, model=?, hash=?, stale=?, report=?, "
                        "updated=? WHERE id=?", (*args, vid))
+            if prov is not None:
+                db.execute("UPDATE views SET prov=? WHERE id=?", (json.dumps(prov), vid))
         else:
             vid = db.execute("INSERT INTO views(kind, title, origin, grp, spec, model, hash, stale, report, updated, key,"
-                             " created) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", (*args, key, now)).lastrowid
+                             " created, prov) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                             (*args, key, now, json.dumps(prov) if prov else None)).lastrowid
         for t in ("view_refs", "view_scope", "view_render", "view_dirty"):
             db.execute(f"DELETE FROM {t} WHERE view_id=?", (vid,))
         db.executemany("INSERT INTO view_refs(view_id, path, ref, fp) VALUES(?,?,?,?)",
@@ -141,7 +145,31 @@ def _cycle(st: Store, start: str, refs: list[str]) -> list[str] | None:
     return None
 
 
-def upsert(st: Store, obj: dict | str) -> dict:
+def _who(client: str = "", model: str = "") -> dict:
+    return {"client": client or "unknown", "model": model or "unknown", "at": time.strftime("%Y-%m-%d %H:%M:%S")}
+
+
+def provenance(r: dict) -> dict | None:
+    """Who made a stored view / composition over MCP (none for generated ones): a short tag client:model of its
+    creator and a detail line with versions, times and the last editor."""
+    if r.get("origin") == "auto":
+        return None
+    p = json.loads(r.get("prov") or "null") or {}
+    c, u = p.get("created_by") or {}, p.get("updated_by") or {}
+    name = lambda w: (w.get("client") or "unknown").split("/")[0]
+    tag = f"{name(c)}:{c.get('model') or 'unknown'}" if c else "unknown"
+    made = time.strftime("%Y-%m-%d %H:%M", time.localtime(r.get("created") or 0))
+    detail = (f"made via MCP by {c.get('client', 'unknown')} · model {c.get('model', 'unknown')} · {c.get('at') or made}"
+              if c else f"made via MCP (client and model not recorded) · {made}")
+    if u and (u.get("client"), u.get("model")) != (c.get("client"), c.get("model")):
+        detail += f"\nlast edited by {u.get('client', 'unknown')} · model {u.get('model', 'unknown')} · {u.get('at', '')}"
+    elif u and u.get("at") != c.get("at"):
+        detail += f"\nupdated {u.get('at', '')}"
+    return {"tag": tag, "detail": detail, **({"created_by": c} if c else {}), **({"updated_by": u} if u else {})}
+
+
+def upsert(st: Store, obj: dict | str, client: str = "", llm: str = "") -> dict:
+    """client / llm: provenance of an MCP call (the MCP client's name/version, the model id the agent passed)."""
     if isinstance(obj, str):
         try:
             obj = json.loads(obj)
@@ -168,8 +196,12 @@ def upsert(st: Store, obj: dict | str) -> dict:
     origin = obj.get("author", "agent") if what == "composition" else "agent"
     grp = obj.get("group") or _group_of(st, model)
     title = obj.get("name") if what == "composition" else obj["title"]
+    old = _row(st, key)
+    who = _who(client, llm)
+    created = (json.loads(old["prov"] or "null") or {}).get("created_by") if old else None
+    prov = {"created_by": created or who, "updated_by": who}
     _save(st, key, "composition" if what == "composition" else obj["kind"], title, origin, grp, obj, model,
-          refs, scopes, 0, report)
+          refs, scopes, 0, report, prov)
     out = {"key": key, "element": elem, "kind": what if what == "composition" else obj["kind"],
            "result": "updated" if existed else "created", "nodes": len(model["nodes"]), "edges": len(model["edges"])}
     if unbound:
@@ -340,11 +372,16 @@ def markdown(st: Store, r: dict, model: dict) -> str:
         mm = render_mermaid.render(model, links)
     except Exception:
         mm = render_mermaid.render(model)
+    p = provenance(r)
+    if p:
+        mm += f"\n%% made via mcp · {p['tag']}"
     out = [f"<!-- nncq uml export: generator={V.MODEL_VERSION}.{FACTS_VERSION} repo={repo} view={r['key']} "
            f"view_rev={vrev} model_hash={_hash(model)} -->", f"### {model.get('title', r['key'])}", "",
            "```mermaid", mm, "```", ""]
     view_link = f"{base}#/uml/view/{quote(element_of(r), safe='')}?{urlencode({'view': r['key'], 'v': vrev, 'repo': repo})}"
     out += [f"Elements ([open this view]({view_link})):", ""] + rows
+    if p:
+        out += ["", f"_made via mcp · {p['tag']}_"]
     return "\n".join(out) + "\n"
 
 
@@ -353,8 +390,9 @@ def render(st: Store, r: dict, fmt: str) -> str:
     if hit:
         return hit[0][0]
     model = json.loads(r["model"])
+    p = provenance(r)
     if fmt == "ascii":
-        text = render_ascii.render(model)
+        text = render_ascii.render(model) + (f"\n-- via mcp · {p['tag']}" if p else "")
     elif fmt == "mermaid":
         text = render_mermaid.render(model)
     elif fmt == "markdown":
@@ -375,6 +413,8 @@ def summary(r: dict) -> dict:
         out["stale"] = True
     if rep:
         out["report"] = rep
+    if (p := provenance(r)) is not None:
+        out["provenance"] = {"tag": p["tag"], "detail": p["detail"]}
     return out
 
 

@@ -23,7 +23,7 @@ Authoritative schema, element-id scheme, rules, examples: call `uml_protocol`. T
 - File composition: key `composition:file:<path>` (also `uml_view(key="file:<path>")`), origin auto, made on demand only. Groups: per namespace types (with members) / functions (+ key calls) / globals, related types, includes, included-by, component, the file's sub-diagrams. Rebuilt when stale (parts first); never hand-edit it: to customize, upsert a copy under your own id. ASCII refuses it (use markdown).
 
 ## Author
-`uml_upsert(spec)`. Same `key` (view) / `id` (composition) = replace.
+`uml_upsert(spec, model=<your model id>)`: pass your model id (provenance: MCP client + model, shown on the item). Same `key` (view) / `id` (composition) = replace.
 ```json
 {"id":"device-access","name":"Device access","members":[
   {"id":"lib","ref":"comp:DeviceLib"},{"id":"api","ref":"sym:ns::DeviceApi"},

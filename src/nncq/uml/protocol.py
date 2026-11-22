@@ -95,6 +95,8 @@ SCHEMA = {
 
 RULES = """Rules:
 - Upsert by key (views) / id (compositions): the same key replaces; never create a near-duplicate. List first.
+- Pass your model id as uml_upsert(model=...): it is recorded with the MCP client as the item's provenance
+  (shown as a mcp-agent badge in the dashboard, a footer in markdown / ascii exports).
 - Reference generated elements by id (sym:/comp:/port:/pkg:/file:/cfg:/composition:). Get ids from
   uml_find, uml_view(format=json) or uml_views(symbol=...). A node or member without ref is bespoke.
 - Bespoke: only what the index cannot provide (concepts, external actors, notes). Label every one.

@@ -264,6 +264,23 @@ def test_agent_views_compositions_list_and_markdown(repo):
         st.close()
 
 
+def test_upsert_records_provenance_and_exports_it(repo):
+    st = _st(repo)
+    try:
+        v = {"key": "prov", "kind": "class", "title": "Prov", "nodes": [{"id": "d", "ref": "sym:dev::Device"}]}
+        catalog.upsert(st, v, "copilot-cli/1.2", "x")
+        catalog.upsert(st, {**v, "title": "Prov 2"}, "other-client/3", "y")
+        g = catalog.get(st, "prov", "json")["provenance"]
+        assert g["tag"] == "copilot-cli:x" and "copilot-cli/1.2" in g["detail"] and "last edited by other-client/3" in g["detail"]
+        md = catalog.get(st, "prov", "markdown")["markdown"]
+        assert "%% made via mcp · copilot-cli:x" in md and "_made via mcp · copilot-cli:x_" in md
+        assert catalog.get(st, "prov", "ascii")["diagram"].endswith("-- via mcp · copilot-cli:x")
+        auto = catalog.view(st, "class", "Conn", fmt="markdown")
+        assert "provenance" not in auto and "made via mcp" not in auto["markdown"]
+    finally:
+        st.close()
+
+
 def test_cpp_file_default_view_is_regenerated_after_header_change(repo):
     st = _st(repo)
     try:

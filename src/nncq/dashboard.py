@@ -49,18 +49,32 @@ HTML = r"""<!doctype html>
 <style>
 :root{--bg:#0d0f13;--panel:#151821;--panel2:#0b0d11;--line:#232733;--fg:#d7dae0;--dim:#7d8490;--acc:#5aa9ff;--ok:#4cc38a;
 --warn:#e5a50a;--bad:#ef5b5b;--t0:#262b36;--t1:#3d7bd9;--t2:#4cc38a;font:13px/1.4 ui-sans-serif,Segoe UI,system-ui,sans-serif}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg)}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);height:100vh;display:flex;flex-direction:column;overflow:hidden}
 button,select,input{font:inherit;color:var(--fg)}
 button{background:#1d2230;border:1px solid var(--line);border-radius:6px;padding:4px 10px;cursor:pointer}button:hover{border-color:var(--acc)}
 select{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:4px 6px}
 .dim{color:var(--dim)}.mono{font-family:ui-monospace,Cascadia Mono,Consolas,monospace;font-size:12px}.err{color:var(--bad)}
 #banner{display:none;background:#3a1414;color:#ffb4b4;padding:7px 16px}
 svg{display:block}
-/* one column: the status row sets the width, every other section stretches to the same edges */
-#page{display:grid;grid-template-columns:max-content minmax(520px,1fr);gap:12px;padding:12px 14px;align-items:start}
-#left{display:flex;flex-direction:column;gap:12px;min-width:0}
-#right{position:sticky;top:12px;height:calc(100vh - 24px)}
-@media (max-width:1250px){#page{grid-template-columns:minmax(0,1fr)}#right{position:static;height:80vh}}
+/* three panes: dashboard | Symbol explorer | Model explorer (iframe of /views?embed=1); collapsible, resizable */
+#page{flex:1;min-height:0;display:flex;padding:8px 6px}
+.xp{position:relative;display:flex;flex-direction:column;min-width:240px;min-height:0;overflow:hidden}
+.xp.col{flex:0 0 28px!important;min-width:0;cursor:pointer;background:none!important;border:0!important}
+.xp.col>:not(.strip){position:absolute!important;left:-99999px;top:0;width:900px;height:700px;visibility:hidden}
+.strip{display:none;flex:1;writing-mode:vertical-rl;align-items:center;justify-content:flex-start;gap:8px;padding:10px 0;background:var(--panel);border:1px solid var(--line);
+ border-radius:10px;color:var(--dim);font-size:12px;letter-spacing:.03em;user-select:none}.strip:before{content:'»';font-size:13px}
+.xp.col>.strip{display:flex}.xp.col:hover>.strip{color:var(--fg);border-color:var(--acc)}
+.xs{flex:0 0 8px;cursor:col-resize;position:relative}.xs:hover:after,.xs.on:after{content:'';position:absolute;left:3px;top:0;bottom:0;width:2px;background:var(--acc);border-radius:1px}
+.xs.off{cursor:default;pointer-events:none}body.drag{cursor:col-resize;user-select:none}body.drag iframe{pointer-events:none}
+.xc{padding:0 7px;line-height:18px;color:var(--dim);flex:none}.xc:hover{color:var(--fg)}
+.pt{font-size:12px;font-weight:600;white-space:nowrap}
+#left{background:none}#left>.xh{display:flex;align-items:center;gap:8px;padding:3px 4px 7px 6px}#left>.xh .sp{flex:1}
+#dashb{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:12px;padding:0 4px 4px 2px;container-type:inline-size}
+#mpane{background:var(--panel);border:1px solid var(--line);border-radius:10px}#mpane.col{background:none;border:0}
+#mframe{flex:1;border:0;width:100%;height:100%;background:var(--bg);border-radius:10px}
+#dbg{position:fixed;left:0;bottom:0;max-width:60vw;max-height:30vh;overflow:auto;font:10px monospace;background:#000c;color:#9f9;z-index:99;white-space:pre-wrap}
+@container (max-width:1040px){#status{flex-wrap:wrap}#status .gc{flex:1 1 100%}.sbar{flex-wrap:wrap}.sbar .qwrap{flex:1 1 calc(100% - 76px)}.sside{flex:1 1 100%}}
+@container (max-width:700px){.rb{flex-wrap:wrap}.stages{flex:1 1 200px}.mid{min-width:200px}}
 .fill{width:0;min-width:100%}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 14px}
 /* status */
@@ -155,7 +169,10 @@ pre.code.tall{max-height:none}
 .code .ln{display:inline-block;width:56px;padding-right:12px;text-align:right;color:#475060;user-select:none}
 .k{color:#c792ea}.s{color:#c3e88d}.c{color:#5f6b7a;font-style:italic}.n{color:#f78c6c}.pp{color:#89ddff}
 /* symbols */
-#s-symbols{height:min(520px,70vh)}#s-symbols.idle{height:auto}
+#s-symbols{height:min(300px,32vh);flex:none}#s-symbols.idle{height:auto}
+#vsym>#s-symbols{border:0;border-bottom:1px solid var(--line);border-radius:0;background:none}
+#vsym>.scard{flex:none;max-height:34vh;overflow:auto}#vsym>.cpath{flex:none}#vsym>.pb{min-height:80px}
+#sform .recent{flex-basis:100%;margin-top:0}
 #right>.vb{flex:1;min-height:0;display:flex;flex-direction:column}#right>.vb[hidden]{display:none}
 .navb{display:flex}.navb a{padding:0 8px;font-size:18px;line-height:22px;color:var(--dim);cursor:pointer;border-radius:5px}.navb a:hover{color:var(--fg);background:#1b1f29}
 #vtitle a{color:var(--acc);cursor:pointer;text-decoration:none}#vtitle a:hover{text-decoration:underline}
@@ -188,7 +205,9 @@ ul.tree{list-style:none;margin:0;padding-left:16px}ul.tree.root{padding-left:0}
 </style></head><body>
 <div id="banner"></div>
 <div id="page">
- <div id="left">
+ <section class="xp" id="left" data-pane="dash">
+ <div class="xh"><b class="pt">Dashboard</b><span class="sp"></span><button class="xc" data-col="dash" title="collapse the dashboard (its strip expands it again)">–</button></div>
+ <div id="dashb">
  <div id="status"><div class="card empty"><span class="spin"></span></div></div>
 
  <section class="fill" id="s-search">
@@ -199,25 +218,34 @@ ul.tree{list-style:none;margin:0;padding-left:16px}ul.tree.root{padding-left:0}
   <div class="recent" id="recent"></div><div id="answer"></div>
  </section>
 
- <section class="fill pane idle" id="s-symbols" data-rz="symbols" data-rzmin="160">
-  <form class="ph" onsubmit="event.preventDefault();findSym($('#sq').value)">
-   <input type="text" id="sq" placeholder="Symbol: name or app::Class::method" autocomplete="off"><button>Find</button>
-   <div class="seg" id="tmode"><a data-m="callers">Callers</a><a data-m="callees">Callees</a><a data-m="outline">File outline</a><a data-m="types">Type tree</a></div></form>
-  <div class="pb" id="tree"><div class="empty">Find a symbol, or click one in search hits.</div></div>
- </section>
-
  <section class="fill"><div id="console" data-rz="console" data-rzmin="60"></div></section>
  </div>
+ <div class="strip" title="expand the dashboard">Dashboard</div>
+ </section>
+ <div class="xs" data-i="0" title="drag to resize · double-click to reset"></div>
 
- <div id="right" class="pane">
-  <div class="ph"><span class="navb"><a onclick="history.back()" title="back (Alt+←, mouse back)">‹</a><a onclick="history.forward()" title="forward (Alt+→)">›</a></span><div class="seg" id="vtab"><a data-v="hits">Active search</a><a data-v="sym">Symbol</a></div><a href="views" title="UML / SysML diagrams and compositions" style="font-size:12px;color:var(--acc);white-space:nowrap">Views ↗</a><span id="vtitle" class="mono"></span></div>
+ <section id="right" class="pane xp" data-pane="sym">
+  <div class="ph"><b class="pt">Symbol explorer</b><span class="navb"><a onclick="history.back()" title="back (Alt+←, mouse back)">‹</a><a onclick="history.forward()" title="forward (Alt+→)">›</a></span><div class="seg" id="vtab"><a data-v="hits">Active search</a><a data-v="sym">Symbol</a></div><a id="mlink" href="views" title="show this symbol / file in the Model explorer (UML / SysML diagrams; ctrl-click: on its own page)" style="font-size:12px;color:var(--acc);white-space:nowrap">Model explorer</a><span id="vtitle" class="mono"></span><button class="xc" data-col="sym" title="collapse the Symbol explorer (its strip expands it again)">–</button></div>
   <div class="vb pb" id="vhits" style="padding:0"><div class="empty">Ask something, then pick a file.</div></div>
-  <div class="vb" id="vsym" hidden><div class="scard" id="scard"></div><div class="cpath" id="cpath"></div><div class="pb" style="padding:0"><pre class="code tall" id="sview"><div class="empty">Find a symbol, or click one.</div></pre></div></div>
- </div>
+  <div class="vb" id="vsym" hidden>
+   <form class="ph" id="sform" onsubmit="event.preventDefault();findSym($('#sq').value)">
+    <input type="text" id="sq" placeholder="Symbol: name or ns::Class::method" autocomplete="off"><button>Find</button>
+    <div class="seg" id="tmode"><a data-m="callers">Callers</a><a data-m="callees">Callees</a><a data-m="outline">File outline</a><a data-m="types">Type tree</a></div>
+    <div class="recent" id="srecent"></div></form>
+   <div class="scard" id="scard"></div>
+   <section class="pane idle" id="s-symbols" data-rz="symbols" data-rzmin="80"><div class="pb" id="tree"><div class="empty">Find a symbol, or click one in search hits.</div></div></section>
+   <div class="cpath" id="cpath"></div><div class="pb" style="padding:0"><pre class="code tall" id="sview"></pre></div></div>
+  <div class="strip" title="expand the Symbol explorer">Symbol explorer</div>
+ </section>
+ <div class="xs" data-i="1" title="drag to resize · double-click to reset"></div>
+
+ <section class="xp" id="mpane" data-pane="model"><iframe id="mframe" title="Model explorer"></iframe><div class="strip" title="expand the Model explorer">Model explorer</div></section>
 </div>
 
 <script>
-const tok=new URLSearchParams(location.search).get('token');const H=tok?{Authorization:'Bearer '+tok}:{};
+const QS=new URLSearchParams(location.search);
+if(QS.get('debug')==='1'){const E=window.__errs=[];addEventListener('error',e=>E.push(String(e.message)));addEventListener('unhandledrejection',e=>E.push('rejection: '+String(e.reason&&e.reason.message||e.reason)))}
+const tok=QS.get('token');const H=tok?{Authorization:'Bearer '+tok}:{};
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const n=x=>x==null?'–':Number(x).toLocaleString();
@@ -377,7 +405,7 @@ $('#q').addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();h
 $('#qx').addEventListener('click',home);
 function home(quiet){$('#q').value='';$('#qpath').value='';$('#qx').style.display='none';ans=null;fsel=-1;$('#answer').innerHTML='';setHash({q:'',qp:'',k:'',f:''},true);recent();
  $('#vhits').innerHTML='<div class="empty">Ask something, then pick a file.</div>';if(view==='hits')vtitle('');if(quiet!==true)$('#q').focus()}
-function setView(v){view=v;setHash({v:v==='hits'?'':v});$('#vhits').hidden=v!=='hits';$('#vsym').hidden=v!=='sym';
+function setView(v){view=v;setHash({v:v==='hits'?'':v});$('#mlink').href='views'+dhash(curTarget());$('#vhits').hidden=v!=='hits';$('#vsym').hidden=v!=='sym';
  document.querySelectorAll('#vtab a').forEach(a=>a.classList.toggle('on',a.dataset.v===v));
  vtitle(v==='hits'?(ans&&fsel>=0?ans.files[fsel].p:''):(cur?cur.path:''))}
 function vtitle(t){$('#vtitle').innerHTML=t?`<a data-file="${esc(t)}" title="open / view in folder / copy path">&lrm;${esc(t)}</a>`:''}
@@ -439,11 +467,11 @@ function drawAnswer(){const d=ans,ip=d.interpreted||{},pf=d.portfolio||{},hits=d
 $('#answer').addEventListener('click',e=>{
  const v=e.target.closest('[data-ask]');if(v){$('#q').value=v.dataset.ask;doSearch();return}
  const a=e.target.closest('[data-area]');if(a){$('#qpath').value=a.dataset.area;doSearch();return}
- const r=e.target.closest('[data-ref]');if(r){const i=ans.files.findIndex(f=>f.hs.some(h=>h.ref===r.dataset.ref));if(i>=0)openFile(i,r.dataset.ref);return}
- const f=e.target.closest('[data-f]');if(f)openFile(+f.dataset.f)});
+ const r=e.target.closest('[data-ref]');if(r){const i=ans.files.findIndex(f=>f.hs.some(h=>h.ref===r.dataset.ref));if(i>=0){target('sym');openFile(i,r.dataset.ref)}return}
+ const f=e.target.closest('[data-f]');if(f){target('sym');openFile(+f.dataset.f)}});
 
 async function openFile(i,ref){const d=ans;fsel=i;setHash({f:i||''});document.querySelectorAll('#answer .frow').forEach(x=>x.classList.toggle('on',+x.dataset.f===i));
- const f=d.files[i];setView('hits');
+ const f=d.files[i];setView('hits');follow({p:f.p});
  $('#vhits').innerHTML=f.hs.map(h=>{const [a,b]=span(h.at);
   const facts=[['signature',h.sig&&`<span class="sig">${esc(h.sig)}</span>`],['doc',h.doc&&esc(h.doc)],['calls',h.calls&&esc(h.calls)],['callers',h.callers&&esc(h.callers)],
    ['bases',h.bases&&esc(h.bases)],['members',h.members&&esc(h.members)+(h.derived?` · ${h.derived} derived`:'')],['also at',h.also_at&&esc(h.also_at.join(', '))]].filter(x=>x[1]);
@@ -536,7 +564,7 @@ function chips(list,label){if(!list||!list.length)return'';return `<div class="c
  const sym=m?(reCaller.test(s)?m[1]:((/^(\S+) /.exec(m[4]||'')||[])[1]||m[2])):s.split(' ')[0];return `<span class="chip" data-s="${esc(sym)}" title="${esc(s)}">${short(sym)}</span>`}).join('')}${list.length>12?`<span class="dim" style="font-size:11px">+${list.length-12}</span>`:''}</div>`}
 $('#scard').addEventListener('click',e=>{const c=e.target.closest('[data-s]');if(c)openSym(c.dataset.s,c.dataset.p||'')});
 function findSym(q){q=(q||'').trim();if(q)openSym(q)}
-async function openSym(name,path,again){$('#sq').value=name;setHash({s:name,p:path||''},!again);setView('sym');
+async function openSym(name,path,again){if(!nav)target('sym');$('#sq').value=name;setHash({s:name,p:path||''},!again);setView('sym');
  $('#scard').innerHTML='<span class="spin"></span>';
  try{let d;try{d=await T('symbol_context',{name,path:path||''})}catch(e){d={error:e.message}}
   if(d.error||!d.defined_at){const f=await T('find_symbol',{name});const defs=(f.definitions||[]).map(s=>reDef.exec(s)).filter(Boolean);
@@ -545,6 +573,7 @@ async function openSym(name,path,again){$('#sq').value=name;setHash({s:name,p:pa
     <div class="chips">${defs.map(m=>`<span class="chip" data-s="${esc(m[1])}" data-p="${esc(m[3])}" title="${esc(m[3])}:${m[4]}"><b>${esc(m[1])}</b> <span class="dim">${esc(m[2])} · ${esc(base(m[3]))}</span></span>`).join('')}</div>`;return}
   const at=String(d.defined_at[0]),m=/^(.+):(\d+)(?:-(\d+))?$/.exec(at),p=m?m[1]:at,a=m?+m[2]:1,b=m&&m[3]?+m[3]:a;
   cur={sym:d.symbol||name,req:name,path:p,line:a,end:b,kind:d.kind};$('#s-symbols').classList.remove('idle');setView('sym');
+  if(!nav)srecentAdd(cur.sym,p);else srecent();follow({s:cur.sym,p});
   const facts=[d.call_sites_total&&`<span class="chip"><b>${esc(d.call_sites_total)}</b></span>`,d.mentioned_in_files!=null&&`<span class="chip">mentioned in <b>${n(d.mentioned_in_files)}</b> files</span>`,
    d.defined_at.length>1&&`<span class="chip">${d.defined_at.length} definitions</span>`].filter(Boolean).join('');
   $('#scard').innerHTML=`<div class="t">${short(cur.sym)} <span class="kind">${esc(d.kind||'')}</span></div>
@@ -554,11 +583,69 @@ async function openSym(name,path,again){$('#sq').value=name;setHash({s:name,p:pa
   show(p,a,b);buildTree()}
  catch(e){$('#scard').innerHTML=`<span class="err">${esc(e.message)}</span>`}}
 
+/* ---------- panes: dashboard | Symbol explorer | Model explorer; collapsible to a strip, resizable, persisted ---------- */
+const PANES=['dash','sym','model'],PDEF={dash:36,sym:30,model:34};
+const PS=(()=>{let s={};try{s=JSON.parse(localStorage.getItem('nncq.panes'))||{}}catch(e){}return {w:{...PDEF,...(s.w||{})},c:{dash:false,sym:false,model:false,...(s.c||{})}}})();
+if(QS.has('collapse')){const l=QS.get('collapse').split(',');PANES.forEach(p=>PS.c[p]=l.includes(p))}   /* test hook: ?collapse=sym,model */
+const paneEl=p=>document.querySelector(`.xp[data-pane="${p}"]`);
+function layout(){PANES.forEach(p=>{const el=paneEl(p);el.classList.toggle('col',!!PS.c[p]);el.style.flex=PS.c[p]?'':`${PS.w[p]} 1 0px`});
+ document.querySelectorAll('.xs').forEach(s=>{const i=+s.dataset.i;s.classList.toggle('off',!!PS.c[PANES[i]]||!PANES.slice(i+1).some(p=>!PS.c[p]))});
+ localStorage.setItem('nncq.panes',JSON.stringify(PS))}
+function setCol(p,c){if(!!PS.c[p]===c)return;PS.c[p]=c;layout();if(!c&&p==='model')catchUp()}
+/* an action aimed at an explorer: expanded -> just navigate it; collapsed -> it swaps with the other explorer,
+   or, when both are collapsed, with the dashboard pane */
+function target(t,quiet){if(!PS.c[t])return;const o=t==='sym'?'model':'sym';
+ if(!PS.c[o])PS.c[o]=true;else PS.c.dash=true;PS.c[t]=false;layout();if(t==='model'&&!quiet)catchUp()}
+document.addEventListener('click',e=>{const b=e.target.closest('.xc[data-col]');if(b){setCol(b.dataset.col,true);return}
+ const x=e.target.closest('.xp.col');if(x)setCol(x.dataset.pane,false)});
+document.addEventListener('pointerdown',e=>{const s=e.target.closest('.xs');if(!s||s.classList.contains('off'))return;const i=+s.dataset.i;
+ const L=PANES.slice(0,i+1).reverse().find(p=>!PS.c[p]),R=PANES.slice(i+1).find(p=>!PS.c[p]);if(!L||!R)return;
+ e.preventDefault();const a=paneEl(L).getBoundingClientRect().width,b=paneEl(R).getBoundingClientRect().width,sum=PS.w[L]+PS.w[R],x0=e.clientX,MIN=240;
+ s.setPointerCapture(e.pointerId);s.classList.add('on');document.body.classList.add('drag');
+ const mv=ev=>{const nl=Math.max(MIN,Math.min(a+b-MIN,a+ev.clientX-x0));PS.w[L]=sum*nl/(a+b);PS.w[R]=sum-PS.w[L];layout()};
+ const up=()=>{s.removeEventListener('pointermove',mv);s.removeEventListener('pointerup',up);s.classList.remove('on');document.body.classList.remove('drag')};
+ s.addEventListener('pointermove',mv);s.addEventListener('pointerup',up)});
+document.addEventListener('dblclick',e=>{if(e.target.closest('.xs')){PS.w={...PDEF};layout()}});
+
+/* ---------- the Model explorer: /views?embed=1 in an iframe; follows the Symbol explorer unless pinned ---------- */
+const fr=$('#mframe');let frReady=false,frPend=null,missed=false,lastT=null,skipFollow=false,noFollow=false;
+const mpinned=()=>localStorage.getItem('nncq.mpin')==='1';
+function dhash(t){const p=new URLSearchParams();if(t&&t.s)p.set('s',t.s);if(t&&t.p)p.set('p',t.p);if(multi&&sel)p.set('repo',sel);const q=p.toString();return '#/uml/default'+(q?'?'+q:'')}
+function mnav(h,push){if(!frReady){frPend=h;return}const w=fr.contentWindow;if(w.location.hash===h)return;
+ if(push)w.location.hash=h;else w.location.replace(w.location.pathname+w.location.search+h)}
+fr.addEventListener('load',()=>{frReady=true;if(frPend){const h=frPend;frPend=null;mnav(h)}});
+function curTarget(){return view==='sym'&&cur?{s:cur.sym,p:cur.path}:view==='hits'&&ans&&ans.files&&fsel>=0?{p:ans.files[fsel].p}:null}
+function follow(t){lastT=t;$('#mlink').href='views'+dhash(curTarget()||t);if(skipFollow||noFollow||mpinned())return;
+ if(PS.c.model){missed=true;return}missed=false;mnav(dhash(t))}
+function catchUp(){if(missed&&lastT&&!mpinned()){missed=false;mnav(dhash(lastT))}}
+$('#mlink').addEventListener('click',e=>{if(e.ctrlKey||e.metaKey||e.shiftKey||e.button)return;e.preventDefault();
+ target('model',true);missed=false;mnav(dhash(curTarget()),true)});
+/* called by the embedded Model explorer (same origin) */
+window.nncqHost={openSym(q,p){target('sym');noFollow=true;Promise.resolve(openSym(q,p||'')).finally(()=>{noFollow=false})},
+ collapse(p){setCol(p,true)},modelHash(h){setHash({m:h&&h!=='#'?h.replace(/^#/,''):''})}};
+function srecent(){const r=JSON.parse(localStorage.getItem('nncq.srecent')||'[]');
+ $('#srecent').innerHTML=r.map(x=>`<a data-s="${esc(x.s)}" data-p="${esc(x.p||'')}" class="${cur&&cur.sym===x.s?'cur':''}" title="${esc(x.s)}${x.p?' · '+esc(x.p):''}">${esc(String(x.s).split(/::|\./).slice(-2).join('::'))}</a>`).join('')}
+function srecentAdd(s,p){const r=[{s,p},...JSON.parse(localStorage.getItem('nncq.srecent')||'[]').filter(x=>x.s!==s)].slice(0,10);
+ localStorage.setItem('nncq.srecent',JSON.stringify(r));srecent()}
+$('#srecent').addEventListener('click',e=>{const a=e.target.closest('[data-s]');if(a)openSym(a.dataset.s,a.dataset.p)});
+function debugPanel(){const d=document.createElement('div');d.id='dbg';document.body.appendChild(d);
+ setInterval(()=>{let f={};try{const w=fr.contentWindow,q=s=>w.document.querySelectorAll(s);
+   f={hash:w.location.hash,title:(w.document.querySelector('#vt')||{}).textContent,svg:q('#out svg').length,nodes:q('#out [data-n]').length,
+    list:q('#list .vi').length,err:[...q('#out .err')].map(x=>x.textContent).join(' | '),errs:w.__errs||[],embed:w.document.body.classList.contains('embed')}}catch(e){f={x:String(e)}}
+  d.textContent='DBG '+JSON.stringify({errs:window.__errs,c:PS.c,w:PS.w,view,sym:cur&&cur.sym,hash:location.hash,frame:f})},300)}
+
 /* ---------- start ---------- */
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll()});
-document.addEventListener('keydown',e=>{if(e.key==='/'&&!/INPUT|SELECT/.test(document.activeElement.tagName)){e.preventDefault();$('#q').focus()}});
-document.addEventListener('click',e=>{const s=e.target.closest('summary');if(s&&!e.target.closest('.tw'))e.preventDefault()},true);new MutationObserver(()=>rzApply($('#answer'))).observe($('#answer'),{childList:true});rzApply();segs();recent();setView(new URLSearchParams(location.hash.slice(1)).get('v')||'hits');
-applyHash();
+document.addEventListener('keydown',e=>{if(e.key==='/'&&!/INPUT|SELECT/.test(document.activeElement.tagName)){e.preventDefault();setCol('dash',false);$('#q').focus()}});
+document.addEventListener('click',e=>{const s=e.target.closest('summary');if(s&&!e.target.closest('.tw'))e.preventDefault()},true);new MutationObserver(()=>rzApply($('#answer'))).observe($('#answer'),{childList:true});rzApply();segs();recent();srecent();layout();
+{const h0=new URLSearchParams(location.hash.slice(1)),m0=(h0.get('m')||'').replace(/^#/,''),s0=h0.get('s')||'';
+ const nt=(performance.getEntriesByType('navigation')[0]||{}).type;
+ if(nt!=='reload'&&nt!=='back_forward'){if(m0&&!s0)target('model',true);else if(s0&&!m0)target('sym',true)}
+ skipFollow=!!m0;const h1=m0?'#'+m0:s0&&!mpinned()?dhash({s:s0,p:h0.get('p')||''}):'';frPend=null;
+ fr.src='views?embed=1'+(tok?'&token='+encodeURIComponent(tok):'')+(QS.get('debug')==='1'?'&debug=1':'')+h1}
+if(QS.get('debug')==='1')debugPanel();
+setView(new URLSearchParams(location.hash.slice(1)).get('v')||'hits');
+applyHash().finally(()=>{skipFollow=false});
 poll();
 </script></body></html>
 """
