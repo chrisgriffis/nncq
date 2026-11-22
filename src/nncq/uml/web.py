@@ -189,7 +189,7 @@ main{flex:1;display:grid;grid-template-columns:300px minmax(0,1fr) 360px;min-hei
 .tabs{display:flex;background:var(--panel2);border-radius:7px;padding:2px}.tabs a{padding:2px 9px;border-radius:5px;color:var(--dim);font-size:12px}.tabs a.on{background:#1d2a44;color:var(--fg)}
 #canvas{flex:1;overflow:auto;position:relative;background:var(--panel2)}#canvas svg{max-width:none;display:block;margin:10px}
 #canvas pre{margin:0;padding:12px;font:12px/1.35 ui-monospace,Cascadia Mono,Consolas,monospace;white-space:pre}
-#corner{display:flex;gap:4px;flex-wrap:wrap}.vh button{padding:2px 8px;font-size:12px;white-space:nowrap}
+#corner{display:flex;gap:4px;flex-wrap:wrap}.vh button{padding:2px 8px;font-size:12px;white-space:nowrap}body.embed .vh{gap:5px;padding:6px 8px}body.embed .vh button{padding:1px 6px;font-size:11px}body.embed .tabs a{padding:2px 6px}
 .hl rect,.hl circle,.hl polygon,.hl path.basic{stroke:var(--acc)!important;stroke-width:3px!important}
 #canvas g[data-n]{cursor:pointer}#canvas{cursor:grab}#canvas.panning{cursor:grabbing;user-select:none}#canvas.panning *{pointer-events:none}
 .card{padding:10px 12px;border-bottom:1px solid var(--line)}.card .t{font-size:14px;font-weight:600;word-break:break-all}
@@ -243,7 +243,7 @@ pre .k,.mdv .k{color:#c792ea}pre .s,.mdv .s{color:#c3e88d}pre .c,.mdv .c{color:#
  <div class="col" style="min-width:0">
   <div class="vh"><span class="t" id="vt">No diagram open</span><span id="vb"></span><span class="sp" style="flex:1"></span>
    <div class="tabs" id="tabs"><a data-t="diagram" class="on">Diagram</a><a data-t="ascii">ASCII</a><a data-t="mermaid">Mermaid</a><a data-t="json">JSON</a><a data-t="report">Report</a></div>
-   <span id="corner"><button id="zo" title="zoom out (wheel, key -)">−</button><button id="zi" title="zoom in (wheel, key +)">+</button><button id="zf" title="fit (double-click the background, key 0)">fit</button><button id="z1" title="actual size (key 1)">100%</button><button id="bmd" title="Markdown export: Mermaid + element links">Generate .md</button><button id="bpv" title="preview the exported Markdown as a Markdown viewer renders it">Preview .md</button><button id="bvs" title="write the .md to cache/exports and open it in VS Code (Ctrl+Shift+V previews it; Mermaid needs the 'Markdown Preview Mermaid Support' extension)">Open in VS Code</button></span><button id="bdel" title="delete this stored view / composition">Delete</button></div>
+   <span id="corner"><button id="zo" title="zoom out (wheel, key -)">−</button><button id="zi" title="zoom in (wheel, key +)">+</button><button id="zf" title="fit (double-click the background, key 0)">fit</button><button id="z1" title="actual size (key 1)">100%</button><button id="bmd" title="Markdown export: Mermaid + element links"><span class="noemb">Generate </span>.md</button><button id="bpv" title="preview the exported Markdown as a Markdown viewer renders it">Preview<span class="noemb"> .md</span></button><button id="bvs" title="write the .md to cache/exports and open it in VS Code (Ctrl+Shift+V previews it; Mermaid needs the 'Markdown Preview Mermaid Support' extension)"><span class="noemb">Open in </span>VS Code</button></span><button id="bdel" title="delete this stored view / composition">Delete</button></div>
   <div id="canvas"><div id="out"><div class="dim" style="padding:20px">Pick a diagram or generate one.</div></div></div>
  </div>
  <div class="col"><div class="scroll" id="side"><div class="dim" style="padding:14px">Click a node for details.</div></div></div>

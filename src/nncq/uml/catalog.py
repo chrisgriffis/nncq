@@ -385,8 +385,12 @@ def markdown(st: Store, r: dict, model: dict) -> str:
     return "\n".join(out) + "\n"
 
 
+RENDER_VERSION = 2          # bump when a renderer's output changes: cached renders of older versions are ignored
+
+
 def render(st: Store, r: dict, fmt: str) -> str:
-    hit = st.q("SELECT text FROM view_render WHERE view_id=? AND fmt=?", (r["id"], fmt))
+    key = f"{fmt}@{RENDER_VERSION}"
+    hit = st.q("SELECT text FROM view_render WHERE view_id=? AND fmt=?", (r["id"], key))
     if hit:
         return hit[0][0]
     model = json.loads(r["model"])
@@ -399,7 +403,8 @@ def render(st: Store, r: dict, fmt: str) -> str:
         text = markdown(st, r, model)
     else:
         return json.dumps(model)
-    st.db.execute("INSERT OR REPLACE INTO view_render(view_id, fmt, text) VALUES(?,?,?)", (r["id"], fmt, text))
+    st.db.execute("DELETE FROM view_render WHERE view_id=? AND fmt LIKE ? AND fmt!=?", (r["id"], fmt + "%", key))
+    st.db.execute("INSERT OR REPLACE INTO view_render(view_id, fmt, text) VALUES(?,?,?)", (r["id"], key, text))
     return text
 
 
