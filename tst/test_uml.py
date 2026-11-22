@@ -177,6 +177,36 @@ def test_model_components_and_generated_views(repo):
         st.close()
 
 
+def test_file_scoped_and_default_views(repo):
+    st = _st(repo)
+    try:
+        m, deps, _ = views.class_view(st, path="lib/include/Conn.hpp")
+        assert {x["label"] for x in m["nodes"]} >= {"Conn", "Item", "Logger"} and "Device" not in {
+            x["label"] for x in m["nodes"]} and ("lib/include/Conn.hpp", "@file") in deps
+        m, _, _ = views.class_view(st, path="lib/src/Device.cpp")          # source: the types it implements
+        assert "Device" in {x["label"] for x in m["nodes"]}
+        m, _, _ = views.class_view(st, path="py/svc/service.py")
+        mod = next(x for x in m["nodes"] if x["type"] == "module" and x["label"] == "service")
+        assert any(e["from"] == mod["id"] and e["kind"] == "imports" for e in m["edges"])
+        assert any(e["from"] == mod["id"] and e["kind"] == "contains" for e in m["edges"])
+        assert render_mermaid.render(m).startswith("classDiagram") and render_ascii.render(m)
+        m, _, _ = views.component_view(st, path="lib/CMakeLists.txt")
+        assert {"DevLib", "DevCLI"} <= {x["label"] for x in m["nodes"]}
+        m, _, _ = views.component_view(st, path="lib/app/main.cpp")
+        assert "DevCLI" in {x["label"] for x in m["nodes"]}
+
+        pick = lambda **a: (lambda d: (d["kind"], d["key"]))(catalog.view(st, "default", fmt="json", **a))
+        assert pick(subject="dev::Device") == ("class", "class:dev::Device")
+        assert pick(subject="dev::Device::run")[0] == "sequence"
+        assert pick(path="lib/include/Conn.hpp") == ("class", "class:*|path=lib/include/Conn.hpp")
+        assert pick(path="lib/app/main.cpp") == ("component", "component:*|path=lib/app/main.cpp")
+        assert pick(path="lib/CMakeLists.txt")[0] == "component"
+        assert pick(path="py/svc")[0] == "package" and pick()[1] == "component:*"
+        assert catalog.view(st, "default", "dev::Device", fmt="json")["default_for"]["kind"] == "class"
+    finally:
+        st.close()
+
+
 def test_ascii_is_bounded():
     m = {"kind": "class", "title": "big", "nodes": [{"id": f"n{i}", "label": f"C{i}", "members": []}
                                                    for i in range(50)], "edges": []}

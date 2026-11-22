@@ -39,7 +39,10 @@ def register(mcp, run, with_, job, owned) -> None:
                        under: str = "", path: str = "", repo: str = "") -> dict:
         """A diagram. Generated from the index: kind = class | object | component | package | deployment | sequence,
         subject = type / component / entry function name, under = folder filter, depth = relation hops (class,
-        sequence: call depth; package: folder depth). Stored: key = a view key or composition:<id>.
+        sequence: call depth; package: folder depth), path = a file (class: the types declared in it; component:
+        the components it defines or belongs to). kind=default: the best diagram for a subject and / or path
+        (type -> class, function -> sequence, file -> its types or component, folder -> packages, none -> overview).
+        Stored: key = a view key or composition:<id>.
         format: ascii (chat) | markdown (```mermaid + element links) | mermaid | json (model with source spans).
         Stale diagrams carry report.staleness (changed / missing / moved members)."""
         opts = {k: v for k, v in (("depth", depth), ("under", under), ("path", path)) if v}

@@ -204,12 +204,26 @@ def _edge(ctx: Ctx, a: str, b: str, kind: str, label: str = "", path: str = "", 
     return e
 
 
-def _focus_types(ctx: Ctx, subject: str, under: str, cap: int) -> list[Sym]:
+def _file_types(ctx: Ctx, path: str, cap: int) -> list[Sym]:
+    """Types declared in a file; for a source file without any, the types whose members it defines."""
+    ctx.deps.add((path, "@file"))
+    out = ctx.q(f"WHERE f.path=? AND s.kind IN ({','.join('?' * len(TYPE_KINDS))}) ORDER BY s.start_line LIMIT ?",
+                (path, *TYPE_KINDS, cap))
+    if not out:
+        for (parent,) in ctx.st.q("SELECT DISTINCT s.parent FROM symbols s JOIN files f ON f.id=s.file_id "
+                                  "WHERE f.path=? AND s.parent!='' LIMIT 60", (path,)):
+            out += [d for d in ctx.find(parent, kinds={"type"}) if d.kind in TYPE_KINDS][:1]
+    return out
+
+
+def _focus_types(ctx: Ctx, subject: str, under: str, cap: int, path: str = "") -> list[Sym]:
     out: list[Sym] = []
     for name in [x.strip() for x in subject.split(",") if x.strip()]:
         hit = [d for d in ctx.find(name, kinds={"type"}) if d.kind in TYPE_KINDS]
         if hit:
             out.append(hit[0])
+    if path:
+        out += _file_types(ctx, path, cap)
     if under:
         pre = under.replace("\\", "/").strip("/")
         ctx.scopes.add(pre + "/")
@@ -226,11 +240,13 @@ def _focus_types(ctx: Ctx, subject: str, under: str, cap: int) -> list[Sym]:
 # ------------------------------------------------------------------ class
 
 def class_view(st: Store, subject: str = "", under: str = "", depth: int = 1, members: str = "focus",
-               max_nodes: int = 40) -> tuple[dict, set, set]:
+               max_nodes: int = 40, path: str = "") -> tuple[dict, set, set]:
+    """path: the types declared in that file (a Python module also gets its module, imports and importers)."""
     ctx = Ctx(st)
-    focus = _focus_types(ctx, subject, under, max_nodes)
+    path = path.replace("\\", "/").strip("/")
+    focus = _focus_types(ctx, subject, under, max_nodes, path)
     if not focus:
-        raise ValueError(f"no class/struct/interface/enum matches {subject or under!r}")
+        raise ValueError(f"no class/struct/interface/enum matches {subject or under or path!r}")
     for t in focus:
         ctx.scopes.add(posixpath.dirname(t.path) + "/")
     types: dict[str, Sym] = {t.qualname: t for t in focus}
@@ -304,11 +320,51 @@ def class_view(st: Store, subject: str = "", under: str = "", depth: int = 1, me
         if not any(x["from"] == a and x["to"] == b and x["kind"] in ("depends", "instantiates") and
                    (x["kind"] == k or k == "depends") for x in edges.values()):
             edges.setdefault(e["id"], e)
-    title = f"Classes: {subject or under}"
-    model = {"version": MODEL_VERSION, "kind": "class", "title": title, "subject": subject or under,
-             "layout": {"direction": "TB"}, "nodes": list(nodes.values()), "edges": list(edges.values()),
-             "params": {"depth": depth, "members": members, "under": under}}
+    extra_nodes: list[dict] = []
+    if path:
+        extra_nodes = _module_context(ctx, path, [nodes[t.qualname] for t in focus if t.path == path], edges)
+    title = f"Classes: {subject or under or path}"
+    model = {"version": MODEL_VERSION, "kind": "class", "title": title, "subject": subject or under or path,
+             "layout": {"direction": "TB"}, "nodes": list(nodes.values()) + extra_nodes, "edges": list(edges.values()),
+             "params": {"depth": depth, "members": members, "under": under, **({"path": path} if path else {})}}
     return model, ctx.deps, ctx.scopes
+
+
+def _module_context(ctx: Ctx, path: str, declared: list[dict], edges: dict, cap: int = 8) -> list[dict]:
+    """A Python module as a node (its top-level functions as members) containing its classes, plus the modules it
+    imports and the modules importing it."""
+    row = ctx.st.q("SELECT id, lang FROM files WHERE path=?", (path,))
+    if not row or row[0][1] != "python":
+        return []
+    fid = row[0][0]
+
+    def name(p: str) -> str:
+        stem = posixpath.splitext(posixpath.basename(p))[0]
+        return posixpath.basename(posixpath.dirname(p)) or stem if stem == "__init__" else stem
+
+    def node(p: str, members: list | None = None) -> dict:
+        return {"id": ctx.nid("m:" + p, "mod_" + name(p)), "type": "module", "label": name(p),
+                "ref": ctx.loc(p, 1), "members": members or []}
+    top = ctx.q("WHERE f.path=? AND s.parent='' AND s.kind IN ('function','constant','variable') "
+                "ORDER BY s.start_line LIMIT 40", (path,))
+    me = node(path, _merge_members(ctx, top))
+    out = [me]
+    for n in declared:
+        e = _edge(ctx, me["id"], n["id"], "contains")
+        edges.setdefault(e["id"], e)
+    for sql, outgoing in (("SELECT f.path FROM file_deps d JOIN files f ON f.id=d.dst_id WHERE d.src_id=? "
+                           "ORDER BY d.n DESC, f.path LIMIT ?", True),
+                          ("SELECT f.path FROM file_deps d JOIN files f ON f.id=d.src_id WHERE d.dst_id=? "
+                           "ORDER BY d.n DESC, f.path LIMIT ?", False)):
+        for (p,) in ctx.st.q(sql, (fid, cap)):
+            if p == path:
+                continue
+            o = node(p)
+            if all(x["id"] != o["id"] for x in out):
+                out.append(o)
+            e = _edge(ctx, me["id"], o["id"], "imports") if outgoing else _edge(ctx, o["id"], me["id"], "imports")
+            edges.setdefault(e["id"], e)
+    return out
 
 
 # ------------------------------------------------------------------ object
@@ -388,7 +444,8 @@ def _comp_rows(st: Store, under: str, subject: str) -> list[tuple]:
 
 
 def component_view(st: Store, subject: str = "", under: str = "", externals: bool = False,
-                   max_ports: int = 6) -> tuple[dict, set, set]:
+                   max_ports: int = 6, path: str = "") -> tuple[dict, set, set]:
+    """path: focus on the components a build file defines, else the component owning that file."""
     ctx = Ctx(st)
     if not st.q("SELECT 1 FROM components LIMIT 1"):
         raise ValueError("no components yet: build the UML model first (uml_build / nncq uml init)")
@@ -398,11 +455,21 @@ def component_view(st: Store, subject: str = "", under: str = "", externals: boo
                     "JOIN comp_files cs ON cs.file_id=fd.src_id JOIN comp_files cd ON cd.file_id=fd.dst_id "
                     "JOIN files f ON f.id=fd.dst_id WHERE cs.comp_id!=cd.comp_id GROUP BY cs.comp_id, cd.comp_id, fd.dst_id")
     keep = {r[0] for r in rows}
+    path = path.replace("\\", "/").strip("/")
+    sid: set = set()
     if subject:
         sid = {r[0] for r in rows if r[1].lower() == subject.lower()} or {
             r[0] for r in st.q("SELECT id FROM components WHERE name=? COLLATE NOCASE", (subject,))}
         if not sid:
             raise ValueError(f"no component named {subject!r}")
+    elif path:
+        sid = {r[0] for r in st.q("SELECT id FROM components WHERE source=? AND kind!='external'", (path,))} or {
+            r[0] for r in st.q("SELECT cf.comp_id FROM comp_files cf JOIN files f ON f.id=cf.file_id WHERE f.path=?",
+                               (path,))}
+        if not sid:
+            raise ValueError(f"no component defines or owns {path!r}")
+        ctx.deps.add((path, "@file"))
+    if sid:
         nb = {a for a, b, *_ in dep_rows if b in sid} | {b for a, b, *_ in dep_rows if a in sid}
         nb |= {r[0] for r in st.q("SELECT c2.id FROM comp_deps d JOIN components c2 ON c2.name=d.dst "
                                   f"WHERE d.src_id IN ({','.join(map(str, sid))})")}
@@ -483,9 +550,9 @@ def component_view(st: Store, subject: str = "", under: str = "", externals: boo
                 edges.append(_edge(ctx, nid[cid], nid[other[0]], "connects", f"{lk} {scope}".strip(),
                                    from_port=f"{nid[cid]}_r{other[0]}"))
     model = {"version": MODEL_VERSION, "kind": "component",
-             "title": f"Components: {subject or under or 'workspace'}", "subject": subject or under,
+             "title": f"Components: {subject or path or under or 'workspace'}", "subject": subject or path or under,
              "layout": {"direction": "LR"}, "nodes": nodes, "edges": edges,
-             "params": {"under": under, "externals": externals, "max_ports": max_ports}}
+             "params": {"under": under, "externals": externals, "max_ports": max_ports, **({"path": path} if path else {})}}
     return model, ctx.deps, ctx.scopes
 
 

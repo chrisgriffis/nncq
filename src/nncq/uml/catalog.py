@@ -12,10 +12,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import posixpath
+import re
 import time
 from collections import defaultdict
 
-from nncq import graph
+from nncq import graph, langs
 from nncq.store import Store
 from nncq.uml import protocol as P
 from nncq.uml import render_ascii, render_mermaid
@@ -373,13 +375,75 @@ def get(st: Store, key: str, fmt: str = "ascii") -> dict:
     return out
 
 
+_BUILD_FILE = re.compile(r"(^|/)(cmakelists\.txt|[^/]+\.cmake|cmake(user)?presets\.json|pyproject\.toml|setup\.py|"
+                         r"setup\.cfg|meson\.build|makefile|build(\.bazel)?|[^/]+\.(vcxproj|csproj|sln|gradle|bzl))$", re.I)
+
+
+def _code_under(st: Store, folder: str) -> bool:
+    return any(lang and langs.is_ast_lang(lang) for (lang,) in st.q(
+        "SELECT DISTINCT lang FROM files WHERE path LIKE ?", (folder + "/%" if folder else "%",)))
+
+
+def default_targets(st: Store, subject: str = "", path: str = "") -> list[tuple[str, str, dict]]:
+    """Best-guess diagrams for what a user is looking at, most specific first: a type -> its class view, a function
+    -> a sequence from it, a component -> its component view, a code file -> the types in it (Python: + module
+    imports) or its component, a build file -> the components it defines, a folder -> its packages, nothing -> the
+    workspace's components (else deployment, else packages)."""
+    p = (path or "").replace("\\", "/").strip("/")
+    out: list[tuple[str, str, dict]] = []
+    if subject:
+        d = next(iter(graph.find_defs(st, subject, p)), None)
+        if d is not None:
+            if d.kind in V.TYPE_KINDS:
+                out.append(("class", d.qualname, {}))
+            elif d.kind in V.FUNCS:
+                out.append(("sequence", d.qualname, {}))
+            elif d.parent and any(x.kind in V.TYPE_KINDS for x in graph.find_defs(st, d.parent)):
+                out.append(("class", d.parent, {}))
+            p = d.path
+        elif st.q("SELECT 1 FROM components WHERE name=? COLLATE NOCASE", (subject,)):
+            out.append(("component", subject, {}))
+    folder = p
+    if p and (row := st.q("SELECT lang FROM files WHERE path=?", (p,))):
+        lang = row[0][0] or ""
+        if _BUILD_FILE.search(p):
+            out.append(("component", "", {"path": p}))
+        elif langs.is_ast_lang(lang):
+            out += [("class", "", {"path": p}), ("component", "", {"path": p})]
+        folder = posixpath.dirname(p)
+    if p:
+        while folder and not _code_under(st, folder):
+            folder = posixpath.dirname(folder)
+        if folder:
+            out.append(("package", "", {"under": folder}))
+    return out + [("component", "", {}), ("deployment", "", {}), ("package", "", {})]
+
+
+def default_view(st: Store, subject: str = "", path: str = "", fmt: str = "json") -> dict:
+    """The first default target that yields a non-empty diagram (generated on demand, stored as an auto view)."""
+    tried = []
+    for kind, subj, opts in default_targets(st, subject, path):
+        try:
+            r = auto(st, kind, subj, **opts)
+        except (ValueError, KeyError) as e:
+            tried.append(f"{kind} {subj or opts or 'workspace'}: {e}")
+            continue
+        if not json.loads(r["model"]).get("nodes"):
+            tried.append(f"{kind} {subj or opts or 'workspace'}: empty")
+            continue
+        return {**get(st, r["key"], fmt), "default_for": {"subject": subject, "path": path, "kind": kind}}
+    return {"error": "no diagram for this target", "tried": tried}
+
+
 def view(st: Store, kind: str = "", subject: str = "", key: str = "", fmt: str = "ascii", **opts) -> dict:
     if fmt not in FORMATS:
         return {"error": f"format: one of {', '.join(FORMATS)}"}
     if key:
         return get(st, key, fmt)
+    if kind == "default":
+        return default_view(st, subject, opts.get("path", "") or opts.get("under", ""), fmt)
     if kind not in V.KINDS:
-        return {"error": f"kind: one of {', '.join(V.KINDS)} (or pass key= for a stored view / composition)"}
+        return {"error": f"kind: one of {', '.join(V.KINDS)}, default (or pass key= for a stored view / composition)"}
     r = auto(st, kind, subject, **opts)
     return get(st, r["key"], fmt)
 
