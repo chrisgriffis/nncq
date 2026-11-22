@@ -4,7 +4,6 @@ from __future__ import annotations
 import hashlib
 import os
 import re
-import shutil
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -37,10 +36,7 @@ def rg_exe() -> str:
     for c in (Path(sys.executable).parent / "rg.exe", Path(sys.executable).parent / "rg"):
         if c.exists():
             return str(c)
-    found = shutil.which("rg")
-    if not found:
-        raise RuntimeError("ripgrep not found (pip install ripgrep into the venv)")
-    return found
+    raise RuntimeError(f"ripgrep not found next to {sys.executable} (re-run init.ps1; nncq only uses its own venv)")
 
 
 def _p4ignore_to_gitignore(text: str) -> str:

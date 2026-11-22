@@ -32,11 +32,19 @@ Set-Location $Root
 
 $env:PIP_CACHE_DIR = Join-Path $Root "cache\tools\pip"
 $env:PIP_DISABLE_PIP_VERSION_CHECK = "1"
+$env:PIP_PREFER_BINARY = "1"
 $env:HF_HOME = Join-Path $Root "cache\models\hf"
+# keep build/temp files inside the repo too
+$Tmp = Join-Path $Root "cache\tmp"
+New-Item -ItemType Directory -Force $Tmp | Out-Null
+$env:TMP = $Tmp; $env:TEMP = $Tmp
 
 if (-not $Python) {
   if (Get-Command py -ErrorAction SilentlyContinue) {
-    $Python = (& py -3.12 -c "import sys;print(sys.executable)" 2>$null)
+    foreach ($v in "3.12", "3.13", "3.11") {
+      $Python = (& py "-$v" -c "import sys;print(sys.executable)" 2>$null)
+      if ($Python) { break }
+    }
   }
   if (-not $Python) { $Python = (Get-Command python -ErrorAction Stop).Source }
 }

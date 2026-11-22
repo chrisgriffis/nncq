@@ -4,3 +4,8 @@ cache/
 __pycache__/
 *.egg-info/
 .pytest_cache/
+# per-codebase profiles are private (repo names, paths, custom parsers); only the template is shared
+profiles/*
+!profiles/_template/
+# in-repo git worktrees for parallel work
+.worktrees/
