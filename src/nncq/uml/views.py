@@ -730,8 +730,9 @@ def sequence_view(st: Store, subject: str, path: str = "", depth: int = 3, max_m
                          "target": {"q": callee.qualname, "path": callee.path, "line": callee.start}})
             ctx.deps.add((callee.path, callee.qualname))
             if callee.id and d + 1 < depth and callee.qualname not in stack:
+                before = len(msgs)
                 walk(callee, d + 1)
-                if len(msgs) < max_messages and to != here:
+                if before < len(msgs) < max_messages and to != here:
                     msgs.append({"id": f"m{len(msgs)}", "from": to, "to": here, "label": "", "kind": "reply",
                                  "depth": d + 1})
         stack.pop()

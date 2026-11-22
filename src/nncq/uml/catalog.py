@@ -415,7 +415,8 @@ def find(st: Store, name: str, limit: int = 20) -> dict:
     out = []
     like = f"%{name}%"
     for d in graph.find_defs(st, name)[:limit]:
-        out.append({"id": f"sym:{d.qualname}", "kind": d.kind, "at": f"{d.path}:{d.start}"})
+        if not any(x["id"] == f"sym:{d.qualname}" for x in out):
+            out.append({"id": f"sym:{d.qualname}", "kind": d.kind, "at": f"{d.path}:{d.start}"})
     for n, k, d in st.q("SELECT name, kind, dir FROM components WHERE name LIKE ? LIMIT ?", (like, limit)):
         out.append({"id": f"comp:{n}", "kind": k, "at": d or ""})
     for n, k in st.q("SELECT DISTINCT name, kind FROM build_configs WHERE name LIKE ? LIMIT 10", (like,)):
