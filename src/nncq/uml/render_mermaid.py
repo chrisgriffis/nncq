@@ -130,6 +130,10 @@ def _flow(model: dict) -> list[str]:
         if typ in ("class", "interface", "struct", "enum", "block", "part", "function", "module") and typ not in st:
             st.insert(0, typ)
         head = (f"«{_q(', '.join(st))}»<br/>" if st else "") + _q(n.get("label") or n["id"])
+        ms = [] if n.get("collapsed") else n.get("members") or []
+        if ms:
+            head += "<br/>" + "<br/>".join(_q(_member(m)).replace("#", "﹟") for m in ms[:10]) + \
+                (f"<br/>… +{len(ms) - 10} more" if len(ms) > 10 else "")
         if n.get("stale"):
             head += f"<br/>(stale: {_q(n['stale'])})"
             classes.append(f"  class {i} stale")

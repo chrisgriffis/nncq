@@ -198,10 +198,23 @@ def test_file_scoped_and_default_views(repo):
         pick = lambda **a: (lambda d: (d["kind"], d["key"]))(catalog.view(st, "default", fmt="json", **a))
         assert pick(subject="dev::Device") == ("class", "class:dev::Device")
         assert pick(subject="dev::Device::run")[0] == "sequence"
-        assert pick(path="lib/include/Conn.hpp") == ("class", "class:*|path=lib/include/Conn.hpp")
-        assert pick(path="lib/app/main.cpp") == ("component", "component:*|path=lib/app/main.cpp")
-        assert pick(path="lib/CMakeLists.txt")[0] == "component"
+        assert pick(path="lib/include/Conn.hpp") == ("composition", "composition:file:lib/include/Conn.hpp")
+        assert pick(path="lib/CMakeLists.txt")[0] == "composition"
         assert pick(path="py/svc")[0] == "package" and pick()[1] == "component:*"
+
+        f = catalog.view(st, path="lib/app/main.cpp", fmt="json")             # free function + calls, includes, owner
+        g = {x["label"]: x for x in f["model"]["groups"]}
+        assert {"Functions", "Includes / imports", "Component"} <= set(g) and f["origin"] == "auto"
+        labels = {n["label"] for n in f["model"]["nodes"]}
+        assert {"main", "Device.hpp", "DevCLI"} <= labels
+        f = catalog.view(st, path="py/svc/service.py", fmt="json")
+        assert "Service" in {n["label"] for n in f["model"]["nodes"]}
+        assert {"Types", "Includes / imports"} <= {x["label"] for x in f["model"]["groups"]}
+        mm = catalog.view(st, path="lib/include/Device.hpp", fmt="mermaid")["mermaid"]
+        assert mm.startswith("flowchart") and "subgraph" in mm and "«namespace» dev" in mm and "open(" in mm
+        assert "error" in catalog.view(st, path="lib/include/Device.hpp", fmt="ascii")        # like compositions
+        keys = {x["key"] for xs in catalog.list_views(st, "origin")["groups"]["auto"] for x in [xs]}
+        assert "composition:file:lib/include/Device.hpp" in keys and "class:*|path=lib/include/Device.hpp" in keys
         assert catalog.view(st, "default", "dev::Device", fmt="json")["default_for"]["kind"] == "class"
     finally:
         st.close()
@@ -255,8 +268,9 @@ def test_cpp_file_default_view_is_regenerated_after_header_change(repo):
     st = _st(repo)
     try:
         d = catalog.view(st, path="lib/src/Conn.cpp", fmt="json")                 # no kind: the default diagram
-        assert d["kind"] == "class" and d["key"] == "class:*|path=lib/src/Conn.cpp"
-        assert "Conn" in {n["label"] for n in d["model"]["nodes"]} and d["default_for"]["kind"] == "class"
+        assert d["kind"] == "composition" and d["key"] == "composition:file:lib/src/Conn.cpp"
+        assert "Conn" in {n["label"] for n in d["model"]["nodes"]} and d["default_for"]["kind"] == "file"
+        assert catalog.get(st, "file:lib/src/Conn.cpp", "json")["rev"] == d["rev"]       # recallable by key
         rev = d["rev"]
     finally:
         st.close()
@@ -266,11 +280,11 @@ def test_cpp_file_default_view_is_regenerated_after_header_change(repo):
     st = _st(repo)
     try:
         dirty = {k for (k,) in st.q("SELECT v.key FROM view_dirty d JOIN views v ON v.id=d.view_id")}
-        assert "class:*|path=lib/src/Conn.cpp" in dirty
+        assert {"composition:file:lib/src/Conn.cpp", "class:*|path=lib/src/Conn.cpp"} <= dirty   # marked, not rebuilt
         d = catalog.view(st, path="lib/src/Conn.cpp", fmt="json")
         conn = next(n for n in d["model"]["nodes"] if n["label"] == "Conn")
         assert "flush" in {m["name"] for m in conn["members"]} and d["rev"] != rev
-        assert "class:*|path=lib/src/Conn.cpp" not in {k for (k,) in st.q(
+        assert not {"composition:file:lib/src/Conn.cpp", "class:*|path=lib/src/Conn.cpp"} & {k for (k,) in st.q(
             "SELECT v.key FROM view_dirty d JOIN views v ON v.id=d.view_id")}
     finally:
         st.close()

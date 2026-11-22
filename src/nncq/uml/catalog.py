@@ -13,7 +13,6 @@ from __future__ import annotations
 import hashlib
 import json
 import posixpath
-import re
 import time
 from collections import defaultdict
 
@@ -196,6 +195,36 @@ def delete(st: Store, key: str) -> dict:
     return {"deleted": r["key"], **({"referenced_by_now_flagged": users} if users else {})}
 
 
+def file_composition(st: Store, path: str) -> dict:
+    """The file's composition (filecomp.py), generated on demand: fresh -> reused; dirty (a file it depends on
+    changed, or a part was regenerated) -> its parts are refreshed first (auto views regenerate when dirty),
+    then it is rebuilt. Its refs point at its parts and the file, so later staleness propagates to it."""
+    from nncq.uml import filecomp
+    path = path.replace("\\", "/").strip("/")
+    k = filecomp.key(path)
+    r = _row(st, k)
+    if r and not r["dirty"]:
+        return r
+
+    def sub(kind: str, subject: str = "", **opts) -> str | None:
+        try:
+            return auto(st, kind, subject, **opts)["key"]
+        except (ValueError, KeyError):
+            return None
+    spec = filecomp.spec(st, path, sub)
+    if not spec["members"]:
+        raise ValueError(f"nothing to show for {path!r}")
+    refs, unbound, scopes = P.bind(st, spec, "composition")
+    refs.append((path, "file:" + path, ""))
+    model = P.materialize_composition(st, spec)
+    if r and r["hash"] == _hash(model):
+        st.db.execute("DELETE FROM view_dirty WHERE view_id=?", (r["id"],))
+        return _row(st, k)
+    report = {"regenerated": time.strftime("%Y-%m-%d %H:%M:%S"), **_diff(json.loads(r["model"]), model)} if r else None
+    _save(st, k, "composition", spec["name"], "auto", "files", spec, model, refs, scopes, 0, report)
+    return _row(st, k)
+
+
 def check(st: Store, r: dict) -> dict:
     """Re-validate a view marked by a file change (see module doc). Returns the fresh row."""
     if not r["dirty"]:
@@ -203,6 +232,8 @@ def check(st: Store, r: dict) -> dict:
     spec = json.loads(r["spec"] or "{}")
     if r["origin"] == "auto":
         try:
+            if r["kind"] == "composition":
+                return file_composition(st, spec["auto_file"])
             return auto(st, spec["kind"], spec.get("subject", ""), **spec.get("opts", {}))
         except ValueError as e:
             report = {"regenerated": time.strftime("%Y-%m-%d %H:%M:%S"), "error": str(e)}
@@ -375,10 +406,6 @@ def get(st: Store, key: str, fmt: str = "ascii") -> dict:
     return out
 
 
-_BUILD_FILE = re.compile(r"(^|/)(cmakelists\.txt|[^/]+\.cmake|cmake(user)?presets\.json|pyproject\.toml|setup\.py|"
-                         r"setup\.cfg|meson\.build|makefile|build(\.bazel)?|[^/]+\.(vcxproj|csproj|sln|gradle|bzl))$", re.I)
-
-
 def _code_under(st: Store, folder: str) -> bool:
     return any(lang and langs.is_ast_lang(lang) for (lang,) in st.q(
         "SELECT DISTINCT lang FROM files WHERE path LIKE ?", (folder + "/%" if folder else "%",)))
@@ -386,9 +413,8 @@ def _code_under(st: Store, folder: str) -> bool:
 
 def default_targets(st: Store, subject: str = "", path: str = "") -> list[tuple[str, str, dict]]:
     """Best-guess diagrams for what a user is looking at, most specific first: a type -> its class view, a function
-    -> a sequence from it, a component -> its component view, a code file -> the types in it (Python: + module
-    imports) or its component, a build file -> the components it defines, a folder -> its packages, nothing -> the
-    workspace's components (else deployment, else packages)."""
+    -> a sequence from it, a component -> its component view, any file -> its file composition (filecomp.py; else
+    its component), a folder -> its packages, nothing -> the workspace's components (else deployment, packages)."""
     p = (path or "").replace("\\", "/").strip("/")
     out: list[tuple[str, str, dict]] = []
     if subject:
@@ -404,12 +430,8 @@ def default_targets(st: Store, subject: str = "", path: str = "") -> list[tuple[
         elif st.q("SELECT 1 FROM components WHERE name=? COLLATE NOCASE", (subject,)):
             out.append(("component", subject, {}))
     folder = p
-    if p and (row := st.q("SELECT lang FROM files WHERE path=?", (p,))):
-        lang = row[0][0] or ""
-        if _BUILD_FILE.search(p):
-            out.append(("component", "", {"path": p}))
-        elif langs.is_ast_lang(lang):
-            out += [("class", "", {"path": p}), ("component", "", {"path": p})]
+    if p and st.q("SELECT 1 FROM files WHERE path=?", (p,)):
+        out += [("file", "", {"path": p}), ("component", "", {"path": p})]
         folder = posixpath.dirname(p)
     if p:
         while folder and not _code_under(st, folder):
@@ -424,7 +446,7 @@ def default_view(st: Store, subject: str = "", path: str = "", fmt: str = "json"
     tried = []
     for kind, subj, opts in default_targets(st, subject, path):
         try:
-            r = auto(st, kind, subj, **opts)
+            r = file_composition(st, opts["path"]) if kind == "file" else auto(st, kind, subj, **opts)
         except (ValueError, KeyError) as e:
             tried.append(f"{kind} {subj or opts or 'workspace'}: {e}")
             continue
