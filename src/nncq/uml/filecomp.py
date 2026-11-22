@@ -53,7 +53,8 @@ def spec(st: Store, path: str, sub: Callable[..., str | None]) -> dict:
             ids[ref] = i
         return ids[ref]
 
-    def add(group: str, label: str, refs: list[tuple[str, str]], parent: str = "", auto_members=False) -> list[str]:
+    def add(group: str, label: str, refs: list[tuple[str, str]], parent: str = "", auto_members=False,
+            outside=False) -> list[str]:
         """refs: [(element id, label hint)]; returns the member ids (capped, '+N more' note)."""
         if not refs:
             return []
@@ -64,6 +65,8 @@ def spec(st: Store, path: str, sub: Callable[..., str | None]) -> dict:
             m = {"id": mid(ref, hint), "ref": ref}
             if auto_members:
                 m["members"] = "auto"
+            if outside:
+                m["outside"] = True
             members.append(m)
             out.append(m["id"])
         if len(refs) > CAP:
@@ -118,7 +121,7 @@ def spec(st: Store, path: str, sub: Callable[..., str | None]) -> dict:
             if ref not in ids and d.path != path and all(r != ref for r, _ in callees):
                 callees.append((ref, d.name))
             conns.append((f"sym:{f.qualname}@{path}", ref, "calls" + (f" x{n}" if n > 1 else "")))
-    add("calls", "Calls (other files)", callees)
+    add("calls", "Calls (other files)", callees, outside=True)
 
     # the file's class view: its types' relations to types outside the file
     class_key = sub("class", "", path=path) if types else None
@@ -134,7 +137,7 @@ def spec(st: Store, path: str, sub: Callable[..., str | None]) -> dict:
             for q in (a, b):
                 if q not in tq and ("sym:" + q) not in ids and all(x != "sym:" + q for x, _ in outside):
                     outside.append(("sym:" + q, _SEP.split(q)[-1]))
-        add("related", "Related types (other files)", outside)
+        add("related", "Related types (other files)", outside, outside=True)
         conns += [("sym:" + a, "sym:" + b, k) for a, b, k in rel]
 
     # dependencies, dependents, component
@@ -142,8 +145,8 @@ def spec(st: Store, path: str, sub: Callable[..., str | None]) -> dict:
                                "ORDER BY d.n DESC, f.path", (fid,)) if p != path]
     users = [p for (p,) in st.q("SELECT f.path FROM file_deps d JOIN files f ON f.id=d.src_id WHERE d.dst_id=? "
                                 "ORDER BY d.n DESC, f.path", (fid,)) if p != path]
-    add("includes", "Includes / imports", [("file:" + p, posixpath.basename(p)) for p in deps])
-    add("users", "Included / imported by", [("file:" + p, posixpath.basename(p)) for p in users])
+    add("includes", "Includes / imports", [("file:" + p, posixpath.basename(p)) for p in deps], outside=True)
+    add("users", "Included / imported by", [("file:" + p, posixpath.basename(p)) for p in users], outside=True)
     comps = [n for (n,) in st.q("SELECT name FROM components WHERE source=? AND kind!='external' ORDER BY name",
                                 (path,))]
     comps += [n for (n,) in st.q("SELECT c.name FROM comp_files cf JOIN components c ON c.id=cf.comp_id "

@@ -515,6 +515,8 @@ def materialize_composition(st: Store, spec: dict, depth: int = 0, prefix: str =
             n["expand"] = m.get("expand", depth < 2 and m["ref"].startswith("composition:"))
         b = resolve(ctx, m["ref"]) if m.get("ref") else None
         node = _node_for(ctx, n, "composition", b, depth, groups, extra, edges, seen)
+        if m.get("outside"):
+            node["outside"] = True
         if (node.get("type") in V.TYPE_KINDS or node.get("type") == "interface") and m.get("members") != "auto":
             node["members"] = []
             node["collapsed"] = True

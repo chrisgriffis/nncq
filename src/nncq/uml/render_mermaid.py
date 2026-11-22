@@ -21,6 +21,34 @@ _ARROW = {"inherits": "-->", "realizes": "-.->", "composes": "--o", "aggregates"
           "contains": "--o", "calls": "-->", "link": "---"}
 
 
+# fills by element kind (dark, readable text in light viewers too); the dashboard's list badges use the same hues
+PALETTE = {"class": ("#1b2a44", "#5aa9ff"), "interface": ("#2a1f44", "#b28cff"), "enum": ("#3a2d10", "#e5a50a"),
+           "struct": ("#13332e", "#3cc6b0"), "function": ("#14301f", "#4cc38a"), "instance": ("#13332e", "#5fd4c0"),
+           "component": ("#1e2633", "#8fa3bf"), "port": ("#1e2633", "#8fa3bf"), "package": ("#262033", "#a58bd6"),
+           "config": ("#2d2a18", "#c9b458"), "release": ("#14301f", "#4cc38a"), "debug": ("#3a2d08", "#e5a50a"),
+           "external": ("#17191d", "#5a6375"), "module": ("#232a33", "#7f8ea3"), "view": ("#1d2a44", "#5aa9ff"),
+           "composition": ("#33203a", "#d68be6"), "note": ("#2b2a14", "#8a7f3c"), "block": ("#262b36", "#8b95a7")}
+_ALIAS = {"union": "struct", "record": "struct", "trait": "interface", "lifeline": "function", "method": "function",
+          "artifact": "component", "actor": "block", "part": "block", "data": "block", "state": "block",
+          "usecase": "block"}
+
+
+def kind_of(n: dict) -> str:
+    """Palette key of a node: its type, abstract types as interfaces, configurations by release / debug."""
+    t = _ALIAS.get(n.get("type") or "", n.get("type") or "class")
+    st = (n.get("stereotype") or "").lower()
+    if t == "class" and ("abstract" in st or "interface" in st):
+        t = "interface"
+    if t == "config":
+        lab = (n.get("label") or "").lower()
+        t = "debug" if "debug" in lab else "release" if "release" in lab or "relwith" in lab else "config"
+    return t if t in PALETTE else "block"
+
+
+def _style(fill: str, stroke: str, extra: str = "") -> str:
+    return f"fill:{fill},stroke:{stroke},color:#d7dae0{extra}"
+
+
 def nid(i: str) -> str:
     return "n_" + re.sub(r"\W", "_", str(i))
 
@@ -74,6 +102,9 @@ def _class(model: dict) -> list[str]:
             out.append(f"  {i} : {_plain(s).replace(':', '꞉')}")
         if n.get("note") and n.get("type") in ("instance", "note", "block") :
             out.append(f'  note for {i} "{_q(n["note"])}"')
+        f, s = PALETTE[kind_of(n)]
+        out.append(f"  style {i} " + (_style("#3a2d08", "#e5a50a", ",stroke-dasharray:6 3") if n.get("stale")
+                                       else _style(f, s)))
     for e in model.get("edges", []):
         a, b, k = nid(e["from"]), nid(e["to"]), e["kind"]
         lab = _plain(e.get("label") or "").replace(":", "")
@@ -136,11 +167,12 @@ def _flow(model: dict) -> list[str]:
                 (f"<br/>… +{len(ms) - 10} more" if len(ms) > 10 else "")
         if n.get("stale"):
             head += f"<br/>(stale: {_q(n['stale'])})"
-            classes.append(f"  class {i} stale")
         if n.get("bespoke"):
             classes.append(f"  class {i} bespoke")
         ports = n.get("ports") or []
         if ports:
+            f, s = PALETTE[kind_of(n)]
+            classes.append(f"  style {i} {_style(f, s)}")
             res = [f'{ind}subgraph {i}["{head}"]', f"{ind}  direction TB"]
             for p in ports:
                 pi = nid(p["id"])
@@ -153,13 +185,24 @@ def _flow(model: dict) -> list[str]:
             res.append(f"{ind}end")
             return res
         a, b = _SHAPE.get(typ, ('["', '"]'))
+        classes.append(f"  class {i} k_{'ext' if n.get('outside') else kind_of(n)}")
+        if n.get("stale"):
+            classes.append(f"  class {i} stale")
         return [f"{ind}{i}{a}{head}{b}"]
 
     children: dict[str | None, list[dict]] = {}
     for g in groups:
         children.setdefault(g.get("parent"), []).append(g)
 
+    depth: dict[str, int] = {}
+
     def group_lines(g: dict, ind: str) -> list[str]:
+        d = depth[g["id"]] = depth.get(g.get("parent") or "", -1) + 1
+        lab = g.get("label") or ""
+        frame = ("#5aa9ff0d", "#5aa9ff66") if lab.startswith("«composition»") else \
+            ("#a58bd612", "#a58bd666") if lab.startswith("«namespace»") else \
+            ("#d68be60d", "#d68be655") if lab.startswith("«diagram»") else (f"#ffffff{6 + 3 * min(d, 4):02x}", "#3d4658")
+        classes.append(f"  style {nid(g['id'])} fill:{frame[0]},stroke:{frame[1]},color:#9aa3b0")
         res = [f'{ind}subgraph {nid(g["id"])}["{_q(g.get("label") or g["id"])}"]']
         for x in g.get("nodes", []):
             if x in nodes:
@@ -188,10 +231,12 @@ def _flow(model: dict) -> list[str]:
         out.append(f'  note_{i}>"{_q(x["text"])}"]')
         if x.get("on"):
             out.append(f"  note_{i} -.- {nid(x['on'])}")
-    out += ["  classDef provided fill:#12351f,stroke:#4cc38a,color:#d7dae0",
+    out += [f"  classDef k_{k} {_style(f, s)}" for k, (f, s) in PALETTE.items()]
+    out += ["  classDef k_ext fill:#15171b,stroke:#4a5160,color:#8b95a7,stroke-dasharray:3 3",
+            "  classDef provided fill:#12351f,stroke:#4cc38a,color:#d7dae0",
             "  classDef required fill:#3a2d08,stroke:#e5a50a,color:#d7dae0",
             "  classDef bespoke stroke-dasharray:4 3",
-            "  classDef stale stroke:#ef5b5b,stroke-width:2px,stroke-dasharray:6 3"]
+            "  classDef stale fill:#3a2d08,stroke:#e5a50a,stroke-width:2px,stroke-dasharray:6 3"]
     out += list(dict.fromkeys(classes))
     return out
 
