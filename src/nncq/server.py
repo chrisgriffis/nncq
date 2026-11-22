@@ -49,9 +49,10 @@ it says what, where and since when; keyword and graph results are still valid. L
 stay readable: `paged` names each cut field and the more(cursor) call that returns the rest. Repeating a
 call is free (answers are cached until the index changes).
 Use it as an investigation, not a lookup: split the user's question into a few narrow asks (in parallel), follow
-the best hits with graph tools, expand only the refs your conclusion rests on, then answer with one compiled
-digest (path:line chain, key locations, what is verified vs. name-matched). A weak strength means re-ask in the
-code's own words (interpreted vocabulary), not a bigger k. Name-only graph edges are leads until expanded."""
+the best hits with graph tools, expand only the refs your conclusion rests on, then answer the user directly
+and briefly, without narrating tool use; give path:line detail when it helps or is asked for. A weak strength
+means re-ask in the code's own words (interpreted vocabulary), not a bigger k. Name-only graph edges are leads
+until expanded."""
 
 _local = threading.local()
 _jobs: dict[str, dict] = {}

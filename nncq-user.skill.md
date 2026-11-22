@@ -3,9 +3,9 @@ name: nncq-user
 description: Use when nncq MCP tools (ask, expand, call_trace, called_by, impact, data_for_code, ...) are available and the user asks how code works, what calls what, what breaks if X changes, or how code and engine data relate.
 ---
 
-# nncq: investigate, then compile
+# nncq: investigate quietly, answer plainly
 
-Answers are small, cached and deterministic. Make many narrow calls, then write one digest. Never paste tool output; never read whole files.
+Answers are small, cached and deterministic. Make many narrow calls quietly, then answer. Never read whole files.
 
 ## Loop
 1. Split the question into 2-5 sub-questions, one concept each.
@@ -23,14 +23,13 @@ Answers are small, cached and deterministic. Make many narrow calls, then write 
 
 ## Graph caveats
 - Links are by name. `N defs` or "ambiguous" means the edge may point elsewhere: `expand` before asserting it.
-- Jobs, callbacks, virtuals and script bindings break traces. Report the gap; don't invent the hop.
+- Jobs, callbacks, virtuals and script bindings break traces. Don't invent the missing hop.
 - `(test)` callers are not the production path. "Uncalled" is a candidate, not proof of dead code.
 - `index_state` present: semantic ranking is stale there; keyword and graph results still hold.
 
-## Digest
-1. Answer: the mechanism in 2-5 sentences.
-2. Chain: `file:line Symbol -> ...`; mark unverified hops `(inferred)`.
-3. Key locations: 3-8 lines of `path:line Symbol - role`.
-4. Gaps: name-only links, cold trails, weak matches, `index_state`.
-
-Cite `path:line`, never `c123` refs.
+## Answering
+- Tool use is invisible. Don't announce it, narrate it, or mention nncq. Answer like someone who already knows the code.
+- Lead with the answer: the mechanism, in plain words, as short as the question allows.
+- Name a file or function only where it helps the user act or look; `path:line`, never `c123` refs.
+- No chains, tables or evidence dumps unless asked. Offer more depth in one line instead.
+- Mention a gap only if it changes the answer (e.g. a trail that goes cold at a callback).
