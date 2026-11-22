@@ -299,15 +299,7 @@ $('#list').onclick=e=>{const v=e.target.closest('[data-k]');if(v)go(v.dataset.k)
 const isFile=v=>String(v.key||'').startsWith('composition:file:');
 const originBadge=v=>v.origin==='auto'?'<span class="b o-auto" title="generated from the index, on demand; regenerated when its sources change">auto</span>':`<span class="b o-${esc(v.origin)}" title="${esc(v.provenance?v.provenance.tag+'\n'+v.provenance.detail:'made via MCP')}">${v.origin==='agent'?'mcp-agent':esc(v.origin)}</span>`;
 const kindBadge=v=>isFile(v)?'<span class="b k-file" title="file composition (generated on demand)">file</span>':`<span class="b k-${esc(v.kind)}">${esc(v.kind)}</span>`;
-/* embedded: navigation goes through the dashboard's single history (it replaces this frame's hash); a navigation
-   made here also selects the matching code in the Symbol explorer (syncNext) */
-let syncNext=false;
-function navTo(h){const x=host();if(x&&x.modelNav){syncNext=true;x.modelNav(h)}else location.hash=h}
-function go(key,q){navTo('#/uml/view/'+encodeURIComponent(key.startsWith('composition:')?key:'view:'+key)+(q||''))}
-const viewElem=()=>cur.key.startsWith('composition:')?cur.key:'view:'+cur.key;
-function codeOf(n){const r=n.ref||{};if(r.q)return {q:r.q,path:r.path||''};if(r.path&&n.type!=='package'&&!/\/$/.test(r.path))return {path:r.path,line:r.line||1};return null}
-function viewCode(){if(!cur)return null;if(cur.key.startsWith('composition:file:'))return {path:cur.key.slice(17)};const pm=(cur.model.params||{});
- if(pm.path)return {path:pm.path};if(['class','sequence','object'].includes(cur.kind)&&cur.model.subject&&!/[,/]/.test(cur.model.subject))return {q:cur.model.subject};return null}
+function go(key,q){location.hash='#/uml/view/'+encodeURIComponent(key.startsWith('composition:')?key:'view:'+key)+(q||'')}
 async function open(key){try{const d=await T('uml_view',{key,format:'json'});show(d);return d}catch(e){return null}}
 function show(d){cur=d;selN=null;$('#vt').textContent=d.title;
  $('#vb').innerHTML=`${kindBadge(d)} ${originBadge(d)}`+(d.stale||(d.report&&d.report.staleness)?' <span class="b w">stale</span>':'')+(d.report&&d.report.unbound?' <span class="b x">unbound refs</span>':'');
@@ -368,16 +360,15 @@ function nodeOf(raw){if(!cur)return null;const id=raw.replace(/^n_/,'');const ns
  if(!n)n=ns.find(x=>(x.ports||[]).some(p=>p.id===id));return n}
 function wire(){const svg=$('#out svg');if(!svg)return;
  svg.querySelectorAll('[id]').forEach(el=>{const m=/(?:^|-)(n_[A-Za-z0-9_]+?)(?:-\d+)?$/.exec(el.id);if(!m)return;const n=nodeOf(m[1]);if(!n)return;
-  el.setAttribute('data-n',n.id);el.addEventListener('click',ev=>{ev.stopPropagation();pick(n.id,true)})});
- if(cur.kind==='sequence')svg.querySelectorAll('text.actor,.actor-box text,text').forEach(t=>{const n=cur.model.nodes.find(x=>x.label===t.textContent.trim());if(n){t.style.cursor='pointer';t.addEventListener('click',()=>pick(n.id,true))}})}
-function nodeLinks(){const pre=$('#out pre');if(!pre||!cur)return;pre.addEventListener('click',()=>{const s=getSelection().toString().trim();const n=cur.model.nodes.find(x=>x.label===s);if(n)pick(n.id,true)})}
+  el.setAttribute('data-n',n.id);el.addEventListener('click',ev=>{ev.stopPropagation();pick(n.id)})});
+ if(cur.kind==='sequence')svg.querySelectorAll('text.actor,.actor-box text,text').forEach(t=>{const n=cur.model.nodes.find(x=>x.label===t.textContent.trim());if(n){t.style.cursor='pointer';t.addEventListener('click',()=>pick(n.id))}})}
+function nodeLinks(){const pre=$('#out pre');if(!pre||!cur)return;pre.addEventListener('click',()=>{const s=getSelection().toString().trim();const n=cur.model.nodes.find(x=>x.label===s);if(n)pick(n.id)})}
 function hl(id){document.querySelectorAll('#out .hl').forEach(x=>x.classList.remove('hl'));document.querySelectorAll(`#out [data-n="${CSS.escape(id)}"]`).forEach(x=>x.classList.add('hl'))}
 
 /* ---------- node details: element, relations, callers / callees, source, local actions ---------- */
 function loc(n){const r=n.ref||{};return r.path?{path:r.path,line:r.line||1,abs:r.abs,end:r.end}:null}
 function elemId(n){if(n.element)return n.element;const r=n.ref||{};if(r.q)return 'sym:'+r.q;if(r.component)return 'comp:'+r.component;if(n.type==='package'&&r.path)return 'pkg:'+r.path;return ''}
-async function pick(id,user){const n=cur.model.nodes.find(x=>x.id===id);if(!n)return;selN=id;hl(id);const l=loc(n),el=elemId(n);
- const x=user&&host();if(x&&x.modelPick)x.modelPick({h:'#/uml/view/'+encodeURIComponent(viewElem())+'?view='+encodeURIComponent(cur.key)+'&n='+encodeURIComponent(id),...(codeOf(n)||{})});
+async function pick(id){const n=cur.model.nodes.find(x=>x.id===id);if(!n)return;selN=id;hl(id);const l=loc(n),el=elemId(n);
  const rels=(cur.model.edges||[]).filter(e=>e.from===id||e.to===id).map(e=>{const o=e.from===id?e.to:e.from;const on=cur.model.nodes.find(x=>x.id===o);
   return `<span class="chip" data-go="${esc(o)}">${e.from===id?'→':'←'} ${esc(e.kind)} <b>${esc(on?on.label:o)}</b>${e.label?' · '+esc(e.label):''}</span>`}).join('');
  const msgs=(cur.model.messages||[]).filter(m=>m.from===id||m.to===id).slice(0,30).map(m=>`<span class="chip" data-msg="${esc(m.id)}">${m.from===id?'→':'←'} ${esc(m.label||m.kind)}</span>`).join('');
@@ -397,12 +388,12 @@ async function symbolCard(q,path){const box=$('#more');box.innerHTML='<div class
 $('#side').onclick=async e=>{const sx=e.target.closest('[data-symx]');const h=sx&&host();
  if(h&&!e.ctrlKey&&!e.shiftKey&&!e.metaKey){e.preventDefault();h.openSym(sx.dataset.symx,sx.dataset.symp);return}
  const t=e.target.closest('[data-go],[data-a],[data-mem],[data-sym],[data-open],[data-msg]');if(!t)return;
- if(t.dataset.go)return pick(t.dataset.go,true);
+ if(t.dataset.go)return pick(t.dataset.go);
  if(t.dataset.open)return go(t.dataset.open.replace(/^view:/,''));
  const n=cur.model.nodes.find(x=>x.id===$('#side').dataset.id);
  if(t.dataset.msg){const m=cur.model.messages.find(x=>x.id===t.dataset.msg);if(m&&m.ref)return source(m.ref.path,m.ref.line);return}
  if(t.dataset.mem){const m=(n.members||[]).find(x=>x.id===t.dataset.mem);const r=(m&&(m.impl||m.ref))||{};if(r.path)source(r.path,r.line,r.end);return}
- if(t.dataset.sym){const s=t.dataset.sym;const hit=cur.model.nodes.find(x=>(x.ref||{}).q===s||x.label===s);if(hit)return pick(hit.id,true);
+ if(t.dataset.sym){const s=t.dataset.sym;const hit=cur.model.nodes.find(x=>(x.ref||{}).q===s||x.label===s);if(hit)return pick(hit.id);
   try{const f=await T('find_symbol',{name:s});const m=/^(\S+) \[(\w+)\] (.+):(\d+)-(\d+)/.exec((f.definitions||[])[0]||'');if(m){symbolCard(m[1],m[3]);source(m[3],+m[4],+m[5])}}catch(x){}return}
  const l=loc(n);if(!l)return;const a=t.dataset.a;
  if(a==='src')return source(l.path,l.line,l.end);
@@ -477,7 +468,7 @@ $('#bpv').onclick=async()=>{if(!cur)return;const md=await text('markdown');ed=nu
  $('#cp').onclick=async()=>{try{await navigator.clipboard.writeText(md);$('#mstat').textContent='copied'}catch(e){$('#mstat').textContent='copy failed: '+e.message}};
  if(window.mermaid)mdMermaid($('#mview'))};
 $('#mview').addEventListener('click',e=>{const a=e.target.closest('a');if(!a)return;const href=a.getAttribute('href')||a.getAttribute('xlink:href')||'';const k=href.indexOf('/views#');
- if(k>=0&&href.startsWith(location.origin)){e.preventDefault();$('#mod').classList.remove('on');navTo(href.slice(k+6))}},true);
+ if(k>=0&&href.startsWith(location.origin)){e.preventDefault();$('#mod').classList.remove('on');location.hash=href.slice(k+6)}},true);
 $('#bvs').onclick=async()=>{if(!cur)return;const j=await L('export_md',{key:cur.key,open:'vscode'});
  notice(j.error?j.error:`Opened ${j.path} in VS Code: Ctrl+Shift+V for preview (Mermaid needs the "Markdown Preview Mermaid Support" extension).`)};
 
@@ -502,9 +493,7 @@ async function route(){const h=host();if(h&&h.modelHash)h.modelHash(location.has
  let key=p.get('view')||'';if(m[1]==='view'&&!key)key=el.replace(/^view:/,'');
  if(m[1]==='view'&&!p.get('view'))key=el.startsWith('composition:')?el:el.replace(/^view:/,'');
  if(!key){const x=/^(sym|comp|pkg):(.+)$/.exec(el);if(x)return x[1]==='pkg'?dflt('',x[2]):dflt(x[2],'')}
- const same=key&&cur&&cur.key===key&&!p.get('v'),sync=syncNext;syncNext=false;
- const d=key?(same?cur:await open(key)):null;let stale=false;
- if(d&&p.get('n')){if(d.model.nodes.some(x=>x.id===p.get('n')))pick(p.get('n'))}else if(d&&!same&&sync){const t=viewCode(),x=host();if(t&&x&&x.syncCode)x.syncCode(t)}
+ const d=key?await open(key):null;let stale=false;
  if(!d){stale=true;if(el.startsWith('view:')||el.startsWith('composition:'))await open(el.replace(/^view:/,''))}
  else{if(p.get('v')&&p.get('v')!==d.rev)stale=true;
   if(m[1]!=='view'){const n=d.model.nodes.find(x=>elemId(x)===el);if(n){pick(n.id);if(p.get('h')&&d.node_revs&&d.node_revs[n.id]!==p.get('h'))stale=true}else stale=true}}
