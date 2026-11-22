@@ -1,25 +1,26 @@
 # Design ideas (not implemented)
 
-## Deep index for selected `.xdata` assets
+## Deep index for selected data files
 
-By default `.xdata` data is not chunked or embedded. `datarefs.py` only keeps a static cross-reference:
-types per asset and asset→asset references. That's about 35 s per full scan over 392k files (30 GB).
+By default the data files matched by a profile's `[[xref]]` rules are not chunked or embedded. `datarefs.py` only
+keeps a static cross-reference: types per data file and file→file references. On a tree with a few hundred
+thousand data files that is tens of seconds per full scan.
 
-Idea: let a user opt specific assets into a full index.
-- **Candidates:** the most-referenced assets (`top_assets`, optionally rolled up by folder).
-- **Selection:** pick ranks, paths or globs and keep the list in a table. The indexer treats matching files as code, using lang `xdata`.
-- **Chunking per asset:**
-  - one embedded summary chunk (primary type, contained types, named instances, events, references)
+Idea: let a user opt specific data files into a full index.
+- **Candidates:** the most-referenced data files (`hot_data`, optionally rolled up by folder).
+- **Selection:** pick ranks, paths or globs and keep the list in a table. The indexer treats matching files as code, using the xref rule's name as the lang.
+- **Chunking per data file:**
+  - one embedded summary chunk (primary type, contained types, named instances, references)
   - one condensed chunk per instance (type, non-numeric field values, refs)
 - **Symbols:** one per instance.
-- **Edges:** `instance_of` (data type), `asset_ref`, and schematic `event`/`link`/`property` connections parsed from `EventConnections`/`LinkConnections`/`PropertyConnections` (Source/Target refs + SourceEvent/TargetEvent names).
-- **Scale:** in samples, a `.xdata` averages about 20 instances, so a full deep index would be about 8M chunks. Only opt-in is viable.
+- **Edges:** `instance_of` (data type), `data_ref`, and, where the profile declares extra patterns for them, wiring between instances (event / link / property connections given as source and target refs).
+- **Scale:** at about 20 instances per data file, a full deep index of a few hundred thousand files is millions of chunks. Only opt-in is viable.
 
 ## Usage-driven ranking
 
-Ranking assets or code by what people actually use. Static references are a fixed baseline. Real usage needs runtime or editor signals:
+Ranking data files or code by what people actually use. Static references are a fixed baseline. Real usage needs runtime or editor signals:
 - MCP tool-call activity (files queried, read, returned)
-- Perforce `opened`/submitted files (editor checks `.xdata` out)
+- Perforce `opened`/submitted files (editors that check data files out)
 - editor event watching
 
 A separate collector would write its own tables, and ranking would consult them (e.g. filter or boost heavy hitters, raise background embedding priority).
@@ -64,7 +65,7 @@ Per-file facts to record during the crawl (one pass, free):
 - Function references that are not calls (`&Foo::bar`, `bind(...)`, delegate/event `+=`, Lua callbacks)
   as `ref` edges. These remove most false "uncalled" results and let traces pass through callbacks.
 - `virtual`/`override`/`final` flags on methods, so an override can be linked to its base method.
-- Lambdas attributed to their enclosing function, not to `fb` / file level.
+- Lambdas attributed to their enclosing function, not to the namespace / file level.
 
 Background-job candidates (each is O(whole graph) and only useful as a precomputed table):
 - Transitive caller count per function (blast-radius ranking for every symbol).

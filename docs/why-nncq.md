@@ -9,7 +9,7 @@
 **Visual Assist (VA)**
 - Its own fast C/C++ parser. No build needed. Find Symbol, Find References, Go To Implementation, outline, refactoring.
 - Interactive and one step at a time: you click, it answers, you click again.
-- Scoped to what is loaded in the solution. engine solutions are generated per configuration and usually contain a subset of the tree.
+- Scoped to what is loaded in the solution. Large codebases often generate solutions per configuration, each with a subset of the tree.
 - Its database is not available to Copilot. The agent cannot ask VA anything.
 
 **Copilot in Visual Studio (agent mode)**
@@ -19,10 +19,10 @@
 - Every tool result lands in the model's context. Grep across a large tree returns hundreds of lines, and reading files to understand them costs thousands of tokens each.
 
 **nncq**
-- An index of the tree on disk, not of the solution: C++, C#, HLSL, Lua, Python, DDF and more, including the code that never makes it into a generated `.sln`.
+- An index of the tree on disk, not of the solution: C++, C#, HLSL, Lua, Python, your own definition languages (declared in a codebase profile) and more, including the code that never makes it into a generated `.sln`.
 - A call and type graph built from tree-sitter, no build needed: callers, callees, call traces, blast radius, type hierarchy, includes.
-- The engine `.xdata` code<->data cross-reference: which assets use a type, and which code a given asset needs.
-- Search that returns whole functions and classes, ranked. Full profile adds embeddings and a reranker for questions that share no words with the code.
+- A code<->data cross-reference, when the codebase profile declares data rules: which data files use a type, and which code a given data file needs.
+- Search that returns whole functions and classes, ranked. Full mode adds embeddings and a reranker for questions that share no words with the code.
 - Answers sized for an agent: `ask` returns a short map of where the answer is (a few KB), and the agent opens only what it needs.
 - Local only: one index per person, on their machine, matching their synced changelist. nncq adds no new place your code goes (no server, no cloud, no shared index).
 
@@ -34,11 +34,11 @@
 |---|---|---|---|
 | Where is `Foo` defined? | Best: instant, precise | OK: search, then read | OK: `find_symbol` |
 | Who calls `Foo::bar`, precisely? | Best: parser-aware references | Grep: every `bar`, unranked | Good: name-based, ranked by class, ambiguity flagged |
-| How does execution get from the frame loop to X? | Manual, one level per click | Many greps and reads; often gives up | One `call_trace`: pseudo stacks with `file:line` |
+| How does execution get from the main loop to X? | Manual, one level per click | Many greps and reads; often gives up | One `call_trace`: pseudo stacks with `file:line` |
 | What breaks if I change this signature? | Manual | Grep and guess | `impact`: callers grouped by folder |
 | "Where do we throttle streaming under memory pressure?" (no known names) | No help | Guesses words to grep | Full: semantic search + reranker. Lite: keywords, then re-ask using the code's vocabulary |
-| Which assets use this entity type? Which code does this asset need? | No | No (a `.xdata` grep takes ~35 s per pass, unranked) | `data_for_code` / `code_for_data` in milliseconds |
-| Code outside the loaded solution (tools, shaders, Lua, DDF, other configs) | Not indexed | Grep only | Indexed, graph included |
+| Which data files use this type? Which code does this data file need? | No | No (a grep over a large data tree takes tens of seconds per pass, unranked) | `data_for_code` / `code_for_data` in milliseconds |
+| Code outside the loaded solution (tools, shaders, scripts, custom DSLs, other configs) | Not indexed | Grep only | Indexed, graph included |
 | Exact overload or template resolution | Better than nncq | IntelliSense, when configured | Weaker: links are by name |
 | Rename, refactor, edit | Yes | Yes | No (read-only) |
 | Why is it slow at runtime? | No | No | No: static code only. It can list what the cost depends on; a profiler says which part fires |
@@ -49,7 +49,7 @@
 
 The deciding factor is context, not cleverness. An agent answers a research question by spending tool calls, and every result costs context it can't reuse:
 
-- **Copilot alone** on "how do player counts in view affect CPU render cost": grep for guessed words, get 300 hits, read 4-6 files (several thousand tokens each), and stop when the budget runs out. What it finds depends on which words it guessed.
+- **Copilot alone** on "how does the number of open connections affect request latency": grep for guessed words, get 300 hits, read 4-6 files (several thousand tokens each), and stop when the budget runs out. What it finds depends on which words it guessed.
 - **Copilot + nncq**: 3-4 narrow `ask`s (a few KB each), a `call_trace` and an `impact` on the best symbols, then `expand` on the 2-3 functions the answer rests on. For the same budget the agent has considered far more of the codebase, and every claim points to a `file:line`.
 
 The `nncq-user` skill (installed by `nncq agents`) tells the agent to work this way: break the question into several small asks, follow the best hits through the graph, verify, then write one digest. Copilot without it tends to do one search and start reading files.

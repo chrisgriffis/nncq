@@ -460,12 +460,12 @@ def build(stdio: bool = False) -> FastMCP:
         @mcp.tool()
         async def data_file(file: str, k: int = 25, repo: str = "") -> dict:
             """What a data file instantiates, what it references and what references it. Any path suffix."""
-            return await _run(_with, repo, lambda r, st: datarefs.asset_info(st, file, k))
+            return await _run(_with, repo, lambda r, st: datarefs.data_file(st, file, k))
 
         @mcp.tool()
         async def hot_data(k: int = 50, under: str = "", group_depth: int = 0, repo: str = "") -> dict:
             """Most-referenced data files (static inbound refs); group_depth > 0 rolls up to folders."""
-            return await _run(_with, repo, lambda r, st: {"files": datarefs.top_assets(st, k, under, group_depth)})
+            return await _run(_with, repo, lambda r, st: {"files": datarefs.hot_data(st, k, under, group_depth)})
 
     @mcp.tool()
     async def index_status(repo: str = "") -> dict:

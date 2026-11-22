@@ -342,7 +342,7 @@ def ask(store: Store, root: Path, question: str, k: int = 8, path: str = "", lan
             (f" ({_pct(vec_cover)} of chunks have vectors so far; the rest is found by keyword only)"
              if vec_cover is not None and vec_cover < 0.999 else "")
     elif config.settings().lite:
-        interp["meaning"] = "off (lite profile: keywords + graph; use the code's words, see code_vocabulary)"
+        interp["meaning"] = "off (lite mode: keywords + graph; use the code's words, see code_vocabulary)"
     else:
         interp["meaning"] = "not used: " + "; ".join(c["notes"] or ["no vectors"])
     if vocab:

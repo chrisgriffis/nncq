@@ -283,7 +283,7 @@ def _keys_for_path(path: str) -> list[str]:
     return ["/".join(parts[i:]) for i in range(len(parts))]
 
 
-def asset_info(store: Store, q: str, k: int = 25) -> dict:
+def data_file(store: Store, q: str, k: int = 25) -> dict:
     """Types instantiated, outgoing references, incoming referrers for one data file."""
     rows = resolve(store, q, 10)
     if not rows:
@@ -399,7 +399,7 @@ def code_for_data(store: Store, q: str, k: int = 8, suffix: str = "") -> dict:
 
 # ------------------------------------------------------------------ most referenced
 
-def top_assets(store: Store, k: int = 50, under: str = "", group_depth: int = 0) -> list[dict]:
+def hot_data(store: Store, k: int = 50, under: str = "", group_depth: int = 0) -> list[dict]:
     """Most-referenced data files (static inbound reference count); group_depth rolls up to folders."""
     args: list = []
     where = "inbound>0"
