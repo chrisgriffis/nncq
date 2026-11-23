@@ -25,7 +25,7 @@ std::size_t CcsdsDecoder::extractPackets(const std::uint8_t* data, std::size_t s
         if (at + 6 + length > size)
             break;   // continues in the next frame; not reassembled in this version
         if (!p.idle()) {
-            p.data.assign(data + at + 6, data + at + 6 + length);
+            p.body.assign(data + at + 6, data + at + 6 + length);
             out.packets.push_back(std::move(p));
             ++count;
         }

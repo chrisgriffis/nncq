@@ -13,7 +13,7 @@ struct Packet {
     std::uint16_t apid = 0;
     std::uint16_t sequenceCount = 0;
     core::Clock::Millis time = 0;
-    std::vector<std::uint8_t> data;
+    std::vector<std::uint8_t> body;
     const core::Frame* source = nullptr;   // the frame it came from (valid during dispatch only)
 
     bool idle() const { return apid == kIdleApid; }

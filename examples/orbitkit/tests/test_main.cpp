@@ -2,11 +2,11 @@
 
 int main()
 {
-    for (const auto& c : check::registry()) {
+    for (const auto& c : harness::registry()) {
         std::printf("%-40s", c.name);
-        const int before = check::failures();
+        const int before = harness::failures();
         c.fn();
-        std::printf("%s\n", check::failures() == before ? "ok" : "FAILED");
+        std::printf("%s\n", harness::failures() == before ? "ok" : "FAILED");
     }
-    return check::failures() ? 1 : 0;
+    return harness::failures() ? 1 : 0;
 }

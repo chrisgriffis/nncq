@@ -25,12 +25,12 @@ FileSink::~FileSink()
 void FileSink::write(const Packet& packet)
 {
     const std::uint8_t head[4] = {static_cast<std::uint8_t>(packet.apid >> 8), static_cast<std::uint8_t>(packet.apid),
-                                  static_cast<std::uint8_t>(packet.data.size() >> 8),
-                                  static_cast<std::uint8_t>(packet.data.size())};
+                                  static_cast<std::uint8_t>(packet.body.size() >> 8),
+                                  static_cast<std::uint8_t>(packet.body.size())};
     out_.write(reinterpret_cast<const char*>(head), sizeof head);
-    out_.write(reinterpret_cast<const char*>(packet.data.data()), static_cast<std::streamsize>(packet.data.size()));
+    out_.write(reinterpret_cast<const char*>(packet.body.data()), static_cast<std::streamsize>(packet.body.size()));
     crc_ = core::Crc::crc32(head, sizeof head, crc_);
-    crc_ = core::Crc::crc32(packet.data.data(), packet.data.size(), crc_);
+    crc_ = core::Crc::crc32(packet.body.data(), packet.body.size(), crc_);
 }
 
 void FileSink::flush()
@@ -49,7 +49,7 @@ void UdpSink::write(const Packet& packet)
 
 void ConsoleSink::write(const Packet& packet)
 {
-    std::printf("apid=0x%03X seq=%5u len=%4zu\n", packet.apid, packet.sequenceCount, packet.data.size());
+    std::printf("apid=0x%03X seq=%5u len=%4zu\n", packet.apid, packet.sequenceCount, packet.body.size());
 }
 
 }  // namespace orbitkit::telemetry

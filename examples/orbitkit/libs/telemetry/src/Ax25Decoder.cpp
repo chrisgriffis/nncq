@@ -40,7 +40,7 @@ DecodeResult Ax25Decoder::decodeBody(const std::uint8_t* body, std::size_t size,
     frame.payload.assign(body + kAddressBytes + 2, body + size);
     Packet p;
     p.apid = 0x0A0;
-    p.data = frame.payload;
+    p.body = frame.payload;
     result.packets.push_back(std::move(p));
     return result;
 }

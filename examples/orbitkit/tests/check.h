@@ -4,7 +4,7 @@
 #include <functional>
 #include <vector>
 
-namespace check {
+namespace harness {
 
 struct Case {
     const char* name;
@@ -27,17 +27,17 @@ struct Registrar {
     Registrar(const char* name, std::function<void()> fn) { registry().push_back({name, std::move(fn)}); }
 };
 
-}  // namespace check
+}  // namespace harness
 
 #define TEST(name)                                                   \
     static void name();                                              \
-    static check::Registrar name##_registrar(#name, name);           \
+    static harness::Registrar name##_registrar(#name, name);           \
     static void name()
 
 #define CHECK(cond)                                                                    \
     do {                                                                               \
         if (!(cond)) {                                                                 \
             std::fprintf(stderr, "%s:%d: CHECK(%s) failed\n", __FILE__, __LINE__, #cond); \
-            ++check::failures();                                                       \
+            ++harness::failures();                                                       \
         }                                                                              \
     } while (0)
