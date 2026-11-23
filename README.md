@@ -54,7 +54,7 @@ Also: [Modes: full and lite](#modes-full-and-lite) | [Codebase profiles](#codeba
 | `find_symbol` | where a class, function or method is defined |
 | `file_outline` | the symbols in a file, with line ranges, without reading the file |
 | `find_references` | callers, subclasses, and text mentions of a name |
-| `symbol_context`, `calls`, `called_by`, `call_tree`, `call_trace`, `impact`, `type_hierarchy`, `file_context`, `hotspots` | the symbol graph views, [see below](#graph-tools) |
+| `symbol_context`, `calls`, `called_by`, `call_tree`, `call_trace`, `impact`, `type_hierarchy`, `depends`, `file_context`, `hotspots` | the symbol graph views, [see below](#graph-tools) |
 | `read_code` | an exact line range from disk |
 | `data_for_code` | data: which data types / data files use this code type |
 | `code_for_data` | data: which code defines or implements the types this data file uses |

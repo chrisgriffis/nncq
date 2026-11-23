@@ -273,6 +273,52 @@ def test_nested_type_class_view_shows_its_enclosing_type(repo):
         st.close()
 
 
+def test_type_deps_both_directions(repo):
+    from nncq import graph
+    st = _st(repo)
+    try:
+        d = graph.type_deps(st, "dev::Device")
+        out = {(e["to"], e["kind"]) for e in d["edges"] if e["from"] == "dev::Device"}
+        assert {("dev::IDevice", "inherits"), ("dev::Conn", "composes"), ("dev::Item", "aggregates"),
+                ("dev::Logger", "associates"), ("dev::Item", "instantiates")} <= out
+        c = graph.type_deps(st, "dev::Conn", "in")
+        assert ("dev::Device", "dev::Conn", "composes") in {(e["from"], e["to"], e["kind"]) for e in c["edges"]}
+        assert all(e["to"] == "dev::Conn" for e in c["edges"])
+        assert graph.type_deps(st, "dev::Device::run")["type"] == "dev::Device"          # a member: its owner type
+        assert graph.type_deps(st, "dev::Device", limit=2).get("more_out", {}).get("dev::Device", 0) >= 1
+    finally:
+        st.close()
+
+
+def test_dep_walk_marks_cycles_and_caps():
+    from nncq import graph
+    g = {"A": ["B"], "B": ["C"], "C": ["A", "D"], "D": []}
+    nb = lambda n, way: [(o, "depends", 1, "", 0, {"id": o, "label": o}) for o in (g[n] if way == "out" else
+                                                                              [k for k, v in g.items() if n in v])]
+    r = graph._dep_walk("A", {"id": "A", "label": "A"}, nb, "out", 5, 10)
+    assert r["cycles"] == 1 and {(e["from"], e["to"]) for e in r["edges"] if e.get("cycle")} == {("C", "A")}
+    assert {n["id"] for n in r["nodes"]} == {"A", "B", "C", "D"}
+    assert graph._dep_walk("A", {"id": "A"}, nb, "out", 1, 10)["cycles"] == 0          # depth-limited
+    assert graph._dep_walk("C", {"id": "C"}, nb, "out", 1, 1)["more_out"] == {"C": 1}  # capped
+
+
+def test_depends_views_for_a_type_and_a_file(repo):
+    from nncq import graph
+    st = _st(repo)
+    try:
+        d = catalog.view(st, "depends", "dev::Device", fmt="json")
+        assert d["key"] == "depends:dev::Device" and {"Device", "Conn", "IDevice"} <= {n["label"] for n in d["model"]["nodes"]}
+        mm = catalog.get(st, d["key"], "mermaid")["mermaid"]
+        assert mm.startswith("flowchart") and "linkStyle 0 stroke:" in mm and "class n_Device root" in mm
+        f = graph.file_deps(st, "lib/include/Device.hpp")
+        assert {(e["from"], e["to"]) for e in f["edges"]} >= {("lib/include/Device.hpp", "lib/include/Conn.hpp"),
+                                                              ("lib/src/Device.cpp", "lib/include/Device.hpp")}
+        v = catalog.view(st, "depends", path="lib/include/Device.hpp", fmt="json")
+        assert v["model"]["params"]["mode"] == "include" and "Device.cpp" in {n["label"] for n in v["model"]["nodes"]}
+    finally:
+        st.close()
+
+
 def test_ascii_is_bounded():
     m = {"kind": "class", "title": "big", "nodes": [{"id": f"n{i}", "label": f"C{i}", "members": []}
                                                    for i in range(50)], "edges": []}

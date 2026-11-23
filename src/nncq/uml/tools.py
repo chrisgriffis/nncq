@@ -39,7 +39,8 @@ def register(mcp, run, with_, job, owned) -> None:
     @mcp.tool()
     async def uml_view(kind: str = "", subject: str = "", key: str = "", format: str = "ascii", depth: int = 0,
                        under: str = "", path: str = "", repo: str = "") -> dict:
-        """A diagram. Generated from the index: kind = class | object | component | package | deployment | sequence,
+        """A diagram. Generated from the index: kind = class | object | component | package | deployment | sequence |
+        depends (dependency graph: subject = a type, or path = a file for its include / import graph),
         subject = type / component / entry function name, under = folder filter, depth = relation hops (class,
         sequence: call depth; package: folder depth), path = a file (class: the types declared in it; component:
         the components it defines or belongs to). No kind (or kind=default): the best diagram for a subject and / or
