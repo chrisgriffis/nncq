@@ -69,7 +69,7 @@ def _defs_named(store: Store, name: str, limit: int = 2000) -> list[Def]:
 
 
 def _defs_exact(store: Store, name: str, langs: list[str] | None = None, limit: int = 500) -> list[Def]:
-    """Definitions spelled exactly `name` (callee resolution: EndFrame in C# is not endFrame in C++)."""
+    """Definitions spelled exactly `name` (callee resolution: Flush in C# is not flush in C++)."""
     lw, la = _lang_sql(langs or [])
     return [Def(*r) for r in store.q(
         "SELECT s.id, s.name, s.qualname, s.kind, s.parent, s.start_line, s.end_line, s.signature, f.path, s.file_id "
@@ -87,7 +87,7 @@ def is_test(path: str, caller: str = "") -> bool:
 
 
 def find_defs(store: Store, name: str, path: str = "", kinds: set[str] | None = None) -> list[Def]:
-    """Definitions matching a short or qualified name (Foo, app::Foo::bar, Entity.LayerData), best first."""
+    """Definitions matching a short or qualified name (Foo, app::Foo::bar, Billing.Invoice), best first."""
     s = short(name)
     rows = _defs_named(store, s)
     if _SEP.search(name.strip()):
@@ -120,7 +120,7 @@ _FAMILIES = [{"c", "cpp", "objc", "cuda"}, {"javascript", "typescript", "tsx"}]
 
 
 def lang_family(store: Store, file_id: int | None) -> list[str]:
-    """Languages whose calls can reach a definition in this file: a C++ `render` is not called from Python.
+    """Languages whose calls can reach a definition in this file: a C++ `parse` is not called from Python.
     [] = no restriction (unknown file)."""
     if file_id is None:
         return []
@@ -153,7 +153,7 @@ def _line_text(store: Store, file_id: int, line: int) -> str:
 
 def own_call(store: Store, file_id: int, line: int, name: str, cls: str = "") -> bool | None:
     """Is `name(...)` on this line a call on the caller's own class (plain, this->, Base::, or a receiver named
-    after the class: gameRenderer->, g_gameRenderer.)? False: only on other objects (m_pool->name());
+    after the class: server->, g_server. in Server)? False: only on other objects (m_pool->name());
     None: the call is not on this line."""
     found = None
     named = cls.lower()
@@ -188,7 +188,7 @@ def callers(store: Store, target: Def | None, name: str, limit: int, ambiguous: 
     grp = f"SELECT e.src, e.file_id, f.path, MIN(e.line), COUNT(*) {base}"
     cls = short(target.parent) if target and target.parent else ""
     rows = []
-    if cls and ambiguous:      # same-class callers first, whatever their call counts (render() has thousands)
+    if cls and ambiguous:      # same-class callers first, whatever their call counts (a name like update() can have thousands)
         rows = store.q(f"{grp} AND e.src LIKE ? GROUP BY e.src, e.file_id LIMIT 200", (s, *la, f"%{cls}%"))
     seen = {(r[0], r[1]) for r in rows}
     rows += [r for r in store.q(f"{grp} GROUP BY e.src, e.file_id ORDER BY COUNT(*) DESC LIMIT 400", (s, *la))
@@ -254,7 +254,7 @@ def callees(store: Store, quals: list[str], limit: int, langs: list[str] | None 
         if mine and len(groups) > 1 and not any(
                 own_call(store, int(f), int(ln), dst, _parent_short(mine[0].qualname)) is not False
                 for f, ln in (x.split(":") for x in sites.split(",")[:8])):
-            mine = []       # every call is on another object: m_pool->endFrame() is not our endFrame
+            mine = []       # every call is on another object: m_pool->flush() is not our flush
         row = {"line": line, "name": dst, "times": n}
         if len(groups) == 1:
             d = next(iter(groups.values()))
@@ -554,7 +554,7 @@ def _bfs_callers(store: Store, start: str, max_depth: int, cap: int = 6000, lang
     """Backward BFS over call edges from `start` (short name).
     dist[s]  hops from s down to start
     via[s]   [(callee short, caller qual, call site)] on shortest routes
-    roots    expanded names nothing in the index calls (entry points: ticks, handlers, bindings, main)"""
+    roots    expanded names nothing in the index calls (entry points: handlers, callbacks, bindings, main)"""
     lw, la = _lang_sql(langs or [])
     hint = {start: cls}          # class of the definition we reached a name through: its own class calls it first
     dist = {start: 0}
@@ -669,7 +669,7 @@ def call_trace(store: Store, to: str, frm: str = "", max_depth: int = 8, k: int 
     if not frm:
         loc = _loc(store, to)
         # soft entry points: shared names whose only callers are other classes' functions of that name
-        # (jobs, callbacks, virtuals): the static trail goes cold there, the stack above is probably wrong
+        # (tasks, callbacks, virtuals): the static trail goes cold there, the stack above is probably wrong
         callers_of: dict[str, list[str]] = {}
         for lst in via.values():
             for callee, q, _ in lst:
@@ -693,7 +693,7 @@ def call_trace(store: Store, to: str, frm: str = "", max_depth: int = 8, k: int 
             fr = _stack(best[r], st, loc, cut=r in frontier and r not in roots and r not in soft, amb=amb, leaf_q=tq)
             if r in soft:
                 fr.append(f"    ... {r} is called only by same-named functions of other classes "
-                          f"({len(set(callers_of.get(r, [])))}): likely reached via a job, callback or virtual")
+                          f"({len(set(callers_of.get(r, [])))}): likely reached via a task queue, callback or virtual")
             stacks.append(fr)
         ends += sorted(roots - set(best), key=lambda r: (dist[r], r))
         out = {"target": to, "defined_at": loc, "stacks": stacks,

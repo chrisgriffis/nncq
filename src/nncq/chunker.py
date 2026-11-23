@@ -4,7 +4,7 @@ Three strategies, picked by language:
   ast    tree-sitter: chunks at function/class boundaries, containers too big for one chunk are split
          into a header chunk + one chunk per member; symbols for every definition; call edges.
   dsl    C-like definition languages declared by a codebase profile ([[dsl]] in profile.toml): brace-matched
-         blocks at the declaration keywords the profile lists (class/struct/enum/service/...). With a
+         blocks at the declaration keywords the profile lists (class/struct/enum/interface/...). With a
          module_keyword, `module X;` qualifies the declarations that follow (X.Foo).
   text   everything else: line windows (markdown: by heading).
 
@@ -296,7 +296,7 @@ class _Ast:
             kind = "class" if v.type == "class" else "function"
             name_node = n.child_by_field_name("name")
         elif t == "assignment_statement" and self.lang == "lua":
-            # M.spawn = function(...) end  /  local Foo = {}   (first target only)
+            # M.open = function(...) end  /  local Foo = {}   (first target only)
             vl = next((c for c in n.named_children if c.type == "variable_list"), None)
             el = next((c for c in n.named_children if c.type == "expression_list"), None)
             v = el.named_children[0] if el is not None and el.named_child_count else None

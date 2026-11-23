@@ -8,13 +8,13 @@ nncq is a local code index for you and your coding agent. Search gives you lines
 
 - **For your agent** (Copilot CLI, Claude Code, Visual Studio, anything that speaks MCP): `ask` returns a short map instead of ten code dumps; graph tools trace callers, call paths, dependencies and blast radius with `file:line`; `uml_*` tools draw and author diagrams. Every answer is sized for an agent's context (a few KB).
 - **For you**: a three-pane dashboard at `http://127.0.0.1:8765/`: Ask, a Symbol explorer and a Model explorer, kept in sync.
-- **Offline and private**: the network is used only by `init`. The server binds to `127.0.0.1`. One index per person, matching what they have synced.
+- **Offline and private**: the network is used only by `init`. The server binds to `127.0.0.1`. One index per person, matching their working copy.
 - **Lite or full**: lite runs anywhere (keywords + graph + model, ~150 MB, no GPU); full adds NVIDIA-GPU embeddings and a reranker for questions that share no words with the code.
 
 <a href="docs/img/hero.png"><img src="docs/img/hero.png" alt="The three panes on the bundled demo: an answered question with how it was read and the files it found; the Symbol explorer on FramedDecoder::decode with its card, file outline and code; the Model explorer showing the sequence diagram generated for it" width="100%"></a>
 <sub>The three panes on the bundled demo (`demo/orbitkit`, a fictional satellite ground-station toolkit, lite mode): a question answered on the left, the symbol it led to in the middle, its generated sequence diagram on the right.</sub>
 
-> **Status:** indexing (tree-sitter + profile-declared DSLs, data cross-reference), hybrid search, the graph tools, the UML / SysML model and Model explorer, codebase profiles, the MCP server, the dashboard and the CLI are in and tested; developed against a 4,000-file slice of a large C++ workspace and the bundled demo. Not yet: Linux `init.sh`, editor plugins.
+> **Status:** indexing (tree-sitter + profile-declared DSLs, data cross-reference), hybrid search, the graph tools, the UML / SysML model and Model explorer, codebase profiles, the MCP server, the dashboard and the CLI are in and tested; developed against real C++ and Python workspaces and the bundled demo. Not yet: Linux `init.sh`, editor plugins.
 
 ## Contents
 
@@ -28,7 +28,7 @@ nncq is a local code index for you and your coding agent. Search gives you lines
 | [Agent setup](#agent-setup-nncq-agents) | &nbsp;&nbsp;[Model explorer](#model-explorer) | [GPU use during indexing](#gpu-use-during-indexing-on-demand-interruptible) |
 | [Configuration (`.env`)](#configuration-env) | [Exports: Markdown, Mermaid, ASCII](#exports-markdown-mermaid-ascii) | [Local only and air-gapped](#local-only-and-air-gapped) |
 
-Also: [Why not just Copilot + Visual Assist?](docs/why-nncq.md) · [Ideas not built yet](docs/ideas.md) · [Requirements and cost](#requirements-and-cost) · [Tests and tools](#tests-and-tools) · [Limitations](#limitations) · [Roadmap](#roadmap)
+Also: [Why not just an agent and your IDE?](docs/why-nncq.md) · [Ideas not built yet](docs/ideas.md) · [Requirements and cost](#requirements-and-cost) · [Tests and tools](#tests-and-tools) · [Limitations](#limitations) · [Roadmap](#roadmap)
 
 ---
 
@@ -53,12 +53,12 @@ Double-click `demo\demo.cmd` (Linux / macOS: `demo/demo.sh`). The first run inst
 ### Index your own code
 
 ```powershell
-.venv\Scripts\nncq profile new myapp D:\src\myapp     # wizard: roots, markers, code folders, ignores, VCS
+.venv\Scripts\nncq profile new myapp C:\src\myapp     # wizard: roots, markers, code folders, ignores, VCS
 .venv\Scripts\nncq index --name myapp                  # T0 parse (+ data xref if the profile has rules); full mode embeds alongside
-.venv\Scripts\nncq index D:\src\other --dirs src,tools # or ad hoc, without a profile
+.venv\Scripts\nncq index C:\src\other --dirs src,tools # or ad hoc, without a profile
 ```
 
-Day to day: the server's watcher re-indexes on save; `nncq update` catches up after a sync (only files whose content changed are re-parsed); `nncq status`, `nncq pause` / `nncq resume` (embedding), `nncq stop`.
+Day to day: the server's watcher re-indexes on save; `nncq update` catches up after a pull or sync (only files whose content changed are re-parsed); `nncq status`, `nncq pause` / `nncq resume` (embedding), `nncq stop`.
 
 ### Modes: full and lite
 
@@ -71,7 +71,7 @@ Day to day: the server's watcher re-indexes on save; `nncq update` catches up af
 | Graph, `depends`, data cross-reference, `ask` / `expand`, UML model and diagrams, dashboard | yes | yes, identical |
 | Match strength in `ask` | strong / fair / weak | `unrated`: verify top hits |
 
-Lite is the coworker default: the graph tools, the model and the data cross-reference need no GPU and carry most of the value for structural questions. What lite loses is "find code that does X" when the question shares no words with the code; the agent compensates partly by re-asking with the `code_vocabulary` that `ask` returns. Upgrading is in place: run `.\init.ps1` without `-Lite` (installs the `gpu` extra and the models, sets `NNCQ_MODE=full`), and the worker embeds the existing index. Nothing is re-parsed.
+Lite is the low-friction choice: the graph tools, the model and the data cross-reference need no GPU and carry most of the value for structural questions. What lite loses is "find code that does X" when the question shares no words with the code; the agent compensates partly by re-asking with the `code_vocabulary` that `ask` returns. Upgrading is in place: run `.\init.ps1` without `-Lite` (installs the `gpu` extra and the models, sets `NNCQ_MODE=full`), and the worker embeds the existing index. Nothing is re-parsed.
 
 ### Codebase profiles
 
@@ -86,7 +86,7 @@ nncq's code knows no particular codebase. Everything specific to one lives in a 
 
 ```powershell
 nncq profile list                       # profiles, and the workspace each found on this machine
-nncq profile new myapp D:\src\myapp     # wizard (nncq init runs it too: pick or create a profile)
+nncq profile new myapp C:\src\myapp     # wizard (nncq init runs it too: pick or create a profile)
 nncq profile show myapp
 nncq profile export myapp               # one compressed profiles\archive\myapp-<time>.nncqprofile
 nncq profile import profiles\archive\myapp-<time>.nncqprofile [--as name] [--force]
@@ -422,7 +422,7 @@ Diagrams are queries over the same index, so they exist for any parsed code with
 
 ## Never stale: staleness and sync propagation
 
-- **Deltas, not rebuilds.** The watcher re-indexes on save; `nncq update` after a sync re-parses only files whose content changed (SHA-1), and unchanged chunks keep their vectors. The graph is stored per file and resolved by name at query time, so a changed header does not re-process the files that include it.
+- **Deltas, not rebuilds.** The watcher re-indexes on save; `nncq update` after a pull or sync re-parses only files whose content changed (SHA-1), and unchanged chunks keep their vectors. The graph is stored per file and resolved by name at query time, so a changed header does not re-process the files that include it.
 - **Diagrams follow.** A changed or removed file marks only the views and compositions that depend on it. Generated views regenerate on next access (parts first for file compositions), with a report of what was added or removed. Authored ones get a per-member staleness report (changed, missing, moved, with the new location) and keep their members until the agent or user repairs them; the list shows a `stale` badge. Deleting an item flags everything that referenced it. Cached answers and renders are dropped with them.
 - **Answers check the disk.** A result whose cited files changed since they were indexed carries a `divergent` field, and those files are re-indexed in the background right away.
 - **Degradation is explicit.** When part of the index is catching up (a sync in progress, new code not embedded yet), responses carry `index_state`: what is degraded, where, since when, and what still works. Healthy responses carry nothing extra.
@@ -431,11 +431,11 @@ Diagrams are queries over the same index, so they exist for any parsed code with
 
 ## The symbol graph: "how does it know that without a build?"
 
-Usually, "who calls this", "what derives from this" or "who includes this header" needs an IDE that has **built** the project: clangd with `compile_commands.json`, IntelliSense with the right configuration, or a SCIP indexer running the compiler front-end. For a large C++ codebase that means generated code, millions of lines and hours of indexing. nncq gets a useful graph **without compiling anything**, using [tree-sitter](https://tree-sitter.github.io/):
+Usually, "who calls this", "what derives from this" or "who includes this header" needs an IDE that has **built** the project: clangd with `compile_commands.json`, an IDE index with the right configuration, or a SCIP indexer running the compiler front-end. For a large C++ codebase that means a working build setup, generated code and a long indexing run. nncq gets a useful graph **without compiling anything**, using [tree-sitter](https://tree-sitter.github.io/):
 
 ![Symbol graph without a build: file, tree-sitter, facts per file, SQLite joins by name, graph and UML views](docs/img/graph.svg)
 
-1. **Parse every file on its own.** tree-sitter is an incremental, error-tolerant parser, the one editors use for syntax highlighting. It needs no headers, macros, include paths or compiler flags; broken code still parses. For C, C++, HLSL and C#, the parser sees one branch of each `#if`/`#elif`/`#else`, as ctags does; definitions and calls in the other branches come from a second parse.
+1. **Parse every file on its own.** tree-sitter is an incremental, error-tolerant parser, the one editors use for syntax highlighting. It needs no headers, macros, include paths or compiler flags; broken code still parses. For C, C++, C#, Objective-C, CUDA and HLSL, the parser sees one branch of each `#if`/`#elif`/`#else`, as ctags does; definitions and calls in the other branches come from a second parse.
 2. **Walk the tree once and record facts:** definitions with qualified names, parents, spans and signatures; calls from the enclosing definition to the callee's name and receiver; bases; includes; and the UML facts above.
 3. **Join by name in SQLite.** "Callers of X" is an indexed lookup on the callee name; call trees, call paths, impact and dependency graphs are breadth-first walks over those joins.
 4. **Chunk on the same tree.** Search chunks are cut at the same definition boundaries, so every search hit is already a graph node.
@@ -444,10 +444,10 @@ Parsing runs at about 500 files/s per CPU core. **The trade-off is honest:** lin
 
 ### Compared with a grep or search skill
 
-- **Concepts versus strings.** "Where do we throttle streaming when memory is low" matches nothing literally; embeddings and the reranker find it (full mode). BM25 still catches exact identifiers, and the two are fused.
+- **Concepts versus strings.** "Where do we back off retries when the queue is full" matches nothing literally; embeddings and the reranker find it (full mode). BM25 still catches exact identifiers, and the two are fused.
 - **Ranking and units of meaning.** Grep returns every matching line in file order; here a hit is the whole enclosing function, labelled with its class, and the best ten come first.
 - **Structure.** Grep can't tell which method a call is in, what a class derives from or what depends on a header; the graph answers from one index lookup.
-- **Data ↔ code.** Finding which of 390k data files use a type costs a ripgrep pass of tens of seconds each time; the profile-driven cross-reference answers in milliseconds.
+- **Data ↔ code.** Finding which data files use a type costs a ripgrep pass over the whole data tree every time; the profile-driven cross-reference answers in milliseconds.
 
 `grep_code` is still included, because for an exact string grep is the right tool.
 
@@ -485,8 +485,8 @@ Parsing runs at about 500 files/s per CPU core. **The trade-off is honest:** lin
 | **torch (CUDA) + transformers + sentence-transformers** (full mode) | Runs both models in-process: no model server to install or keep running |
 | **SQLite (FTS5)** | One file per workspace: chunks, BM25 index, vectors, symbols, edges, the UML model, views and the data cross-reference. No database server, safe concurrent reads (WAL) |
 | **numpy** | Brute-force cosine over in-memory vectors: exact and fast enough for a few million chunks |
-| **tree-sitter + language pack** | Fast, error-tolerant parsers for 20+ languages: chunk boundaries, symbols, calls and UML facts without compiling |
-| **ripgrep** | Lists 1M+ files in seconds, honours `.gitignore` / `.p4ignore`; streams the data-file scan and backs `grep_code`. Installed into the venv from pip |
+| **tree-sitter + language pack** | Fast, error-tolerant parsers for 20 languages (C, C++, C#, Java, Kotlin, Go, Rust, Python, JavaScript / TypeScript, Ruby, PHP, Swift, Scala, Lua, Bash, PowerShell, HLSL / GLSL): chunk boundaries, symbols, calls and UML facts without compiling |
+| **ripgrep** | Lists large trees in seconds, honours `.gitignore` / `.p4ignore`; streams the data-file scan and backs `grep_code`. Installed into the venv from pip |
 | **Mermaid** (pinned, vendored by `init`) | Renders the diagrams in the dashboard; the same text goes into Markdown exports that GitHub and VS Code render |
 | **watchdog** | File-change events for automatic delta re-indexing |
 | **mcp + uvicorn** | The standard MCP server (streamable HTTP and stdio) |
@@ -509,7 +509,7 @@ An agent does not need ten code blocks; it needs to know **which few places matt
 
 ![How a question is answered: keyword BM25 and meaning search, fused, reranked, then summarised as a map](docs/img/query.svg)
 
-- **How the question was read:** the words used (with stems and identifier parts), how common each is in the code, what was ignored, whether meaning search was used. "`seat`: 0.00% of code" says the codebase uses another word.
+- **How the question was read:** the words used (with stems and identifier parts), how common each is in the code, what was ignored, whether meaning search was used. "`tenant`: 0.00% of code" says the codebase uses another word.
 - **The code's own words:** identifiers that recur across the top candidates, to ask with next.
 - **What came back:** areas, kinds, which channel found the hits, and a **strength verdict** from the reranker (lite: `unrated`). A weak result says so instead of presenting noise as an answer.
 - **Facts instead of code, one line each:** signature and doc comment, calls that matter, callers with counts, bases and members, the 1-2 best-matching lines; then **links between hits** (A calls B, derives from, same class), which is usually the actual answer to "how does X work".
@@ -538,7 +538,7 @@ Over stdio, nncq runs **inside** the agent's MCP process and exits with it, stop
 - **Lite:** any Windows machine with Python 3.11+, ~150 MB.
 - **Full:** NVIDIA GPU with CUDA 12.8 support; the embedder and reranker are ~1B parameters each, about 2.5 GB VRAM each in bf16. Developed on a 16 GB card; 8 GB should work with a smaller `NNCQ_GPU_BATCH_TOKENS`.
 - **Disk (full):** `.venv` 4.6 GB (4.1 GB of it CUDA torch), `cache/models` 9.2 GB, `cache/tools` 2.7 GB (mostly a deletable pip cache). Index: vectors 2 KB per chunk (about 2 GB per million chunks); data cross-reference about 1 KB per data file.
-- **Time (measured on a large C++ workspace):** T0 parsing about 300 files/s with the process pool (4,199 files, 42k chunks in 12-15 s); embedding about 3 min of cards then about 20 min of full vectors per 42k chunks; a query with reranking about 1 s; graph views 0-220 ms on 43k symbols and 260k edges. The demo indexes in under a second.
+- **Time:** T0 parsing about 300 files/s with the process pool; embedding about 3 min of cards then about 20 min of full vectors per 40k chunks on a 16 GB card; a query with reranking about 1 s; graph views typically well under a second. The demo indexes in under a second.
 
 ## Configuration (`.env`)
 
@@ -583,13 +583,13 @@ The README visuals are reproducible from the demo, against a running server (`de
 ## Limitations
 
 - **The graph is name-based, not type-resolved.** See [the trade-off](#the-symbol-graph-how-does-it-know-that-without-a-build). Sequence diagrams follow a call through an interface to the interface, not to its implementations.
-- **Static only.** Jobs, callbacks, virtual dispatch and script bindings break traces; nncq says where a trail goes cold instead of inventing the hop.
+- **Static only.** Callbacks, virtual dispatch, message queues and cross-language bindings break traces; nncq says where a trail goes cold instead of inventing the hop.
 - **Data ↔ code goes through type names**, not runtime paths.
-- **One machine per person, by design.** No shared or LAN server; coworkers without a GPU use lite mode.
+- **One machine per person, by design.** No shared or LAN server; machines without a GPU use lite mode.
 - **Windows first.** Nothing in the core is Windows-specific, but there is no `init.sh` yet.
 
 ## Roadmap
 
-- **Next:** changelist stamping and range deltas, constructor and callback edges in the call graph, override links, Linux `init.sh` ([docs/ideas.md](docs/ideas.md)).
+- **Next:** revision stamping and range deltas, constructor and callback edges in the call graph, override links, Linux `init.sh` ([docs/ideas.md](docs/ideas.md)).
 - **Editor plugins** calling the same local server: symbol card, call tree, impact and diagrams for the symbol under the caret; "what data uses this" for profile data rules.
 - **Round-trip UML:** diagram edits turned into source patches (the model keeps the spans and declaration text it needs).

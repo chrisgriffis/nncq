@@ -27,7 +27,7 @@ Answers are small, cached and deterministic. Make many narrow calls quietly, the
 ## Graph caveats
 - Links are by name. `N defs`, "ambiguous", `[by name]` = guess: `expand` before asserting it. `[same class]` / `[mentions X]` rank higher.
 - `xN` = call sites. `(test)` = test code, not the production path. "Uncalled" is a candidate, not proof of dead code.
-- Jobs, callbacks, virtuals and script bindings break traces. Don't invent the missing hop.
+- Callbacks, virtuals, message queues and cross-language bindings break traces. Don't invent the missing hop.
 - `index_state` present: semantic ranking is stale there; keyword and graph results still hold.
 - `divergent` present: cited files changed on disk since indexing (re-index queued). Re-ask or `expand` before quoting those lines.
 

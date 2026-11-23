@@ -108,7 +108,7 @@ def _glob_re(pat: str) -> str:
 
 
 class Ignorer:
-    """Python-side version of the rg ignore rules, for single paths reported by the watcher / p4 sync."""
+    """Python-side version of the rg ignore rules, for single paths reported by the watcher / a sync."""
 
     def __init__(self, root: Path, extra_ignore: str = "", dirs: list[str] | None = None):
         lines = [g[1:] for g in DEFAULT_SKIP]

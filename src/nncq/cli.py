@@ -384,7 +384,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--no-embed", action="store_true", help="don't start the embedding worker afterwards")
     p.set_defaults(fn=cmd_index)
 
-    for name, fn, h in (("update", cmd_update, "re-index files changed on disk, e.g. after a p4 sync (stat delta)"),):
+    for name, fn, h in (("update", cmd_update, "re-index files changed on disk, e.g. after a pull or sync (stat delta)"),):
         p = sub.add_parser(name, help=h)
         p.add_argument("--repo", default="")
         p.set_defaults(fn=fn)

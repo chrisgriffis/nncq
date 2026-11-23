@@ -8,7 +8,7 @@ UML (nncq/uml): when on for the index, the same parse records UML facts, and the
 file dependencies, build configurations) is rebuilt or refreshed after the code pass.
 Read-only on the workspace: files are only listed, stat'ed and read; everything is written under cache/.
 
-Sync cost is proportional to what changed, never to the workspace (sync with P4V / p4 as usual):
+Sync cost is proportional to what changed, never to the workspace (pull / sync with git or p4 as usual):
   - the watcher hands over exactly the paths that changed; at start-up a stat pass finds the rest
   - content-identical files (same sha1) are just re-stamped
   - the graph is name-based per file, so a changed header does not re-process the files that include it

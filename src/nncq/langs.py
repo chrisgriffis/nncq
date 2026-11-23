@@ -20,7 +20,7 @@ TEXT_LANG_BY_EXT = {
     ".json": "json", ".yaml": "yaml", ".yml": "yaml", ".toml": "toml", ".ini": "ini", ".cfg": "ini",
     ".xml": "xml", ".csproj": "xml", ".props": "xml", ".targets": "xml", ".vcxproj": "xml",
     ".cmake": "cmake", ".sql": "sql", ".bat": "batch", ".cmd": "batch", ".proto": "proto",
-    ".gradle": "groovy", ".lua.txt": "text",
+    ".gradle": "groovy",
 }
 FILENAME_LANG = {"CMakeLists.txt": "cmake", "Makefile": "make", "Dockerfile": "dockerfile"}
 
