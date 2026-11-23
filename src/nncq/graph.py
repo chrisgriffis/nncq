@@ -366,10 +366,11 @@ def symbol_context(store: Store, name: str, path: str = "", limit: int = 12) -> 
             chains = base_chains(store, quals)
             if any(len(c) > 1 for c in chains):
                 out["base_chains"] = [" -> ".join(c) for c in chains[:6]]
-        d = derived_of(store, p.name)
+        fl = lang_family(store, p.file_id)
+        d = derived_of(store, p.name, langs=fl)
         if d:
             out["derived"] = [f"{q} {pth}:{ln}" for q, pth, ln in d[:limit]]
-            out["derived_total"] = len(derived_closure(store, p.name))
+            out["derived_total"] = len(derived_closure(store, p.name, langs=fl))
         members = store.q("SELECT name, kind FROM symbols WHERE parent IN (" + ",".join("?" * len(quals)) +
                           ") ORDER BY start_line", quals)
         if members:

@@ -151,6 +151,7 @@ def test_derived_types_stay_in_the_language_of_the_base(repo):
     try:
         h = graph.type_hierarchy(st, "dev::IDevice")
         assert [d["type"] for d in h["derived"]] == ["dev::Device"] and h["derived_total"] == 1
+        assert graph.symbol_context(st, "dev::IDevice")["derived_total"] == 1
         m, _, _ = views.class_view(st, "dev::IDevice")
         assert "FakeDevice" not in {x["label"] for x in m["nodes"]} and "Device" in {x["label"] for x in m["nodes"]}
     finally:
