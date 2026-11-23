@@ -336,7 +336,7 @@ def ask(store: Store, root: Path, question: str, k: int = 8, path: str = "", lan
     if vec_cover is None:
         vec_cover = min(1.0, search.vectors(store).n / ndocs)
     tinfo = []
-    caution = []
+    caution, common = [], []
     for t in terms:
         s = t["word"]
         if t["prefix"]:
@@ -346,11 +346,12 @@ def ask(store: Store, root: Path, question: str, k: int = 8, path: str = "", lan
         if have_vocab:
             df = _df(store, t["prefix"], True) if t["prefix"] else _df(store, t["exact"])
             s += f" · {'~' if t['prefix'] else ''}{_pct(df / ndocs)} of chunks" if df else " · not in the code vocabulary"
-            if df / ndocs > 0.1:
-                caution.append(f"'{t['word']}' is in {_pct(df / ndocs)} of chunks: too common to rank on; "
-                               f"add a more specific word or a path filter")
+            common.append((t["word"], df / ndocs))
         s += f" · in {sum(t['word'] in it['matched'] for it in shown)}/{len(shown)} hits"
         tinfo.append(s)
+    if common and len(common) == len(terms) and min(x for _, x in common) > 0.1:     # nothing rare to anchor on
+        caution.append(" and ".join(f"'{w}' ({_pct(x)} of chunks)" for w, x in common)
+                       + ": too common to rank on; add a more specific word or a path filter")
     rels = [it["rel"] for it in shown if it.get("rel") is not None]
     if len(rels) >= 3 and min(rels) >= 0.8:
         caution.append("the hits score within 20% of each other: their order is close to arbitrary")
