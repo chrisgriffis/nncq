@@ -136,6 +136,20 @@ def _st(r):
     return Store(r.db, cache_mb=8)
 
 
+def test_derived_types_stay_in_the_language_of_the_base(repo):
+    from nncq import graph
+    (repo.root / "py" / "svc" / "fake.py").write_text("class FakeDevice(IDevice):\n    pass\n", encoding="utf-8")
+    indexer.update(repo, log=lambda m: None)
+    st = _st(repo)
+    try:
+        h = graph.type_hierarchy(st, "dev::IDevice")
+        assert [d["type"] for d in h["derived"]] == ["dev::Device"] and h["derived_total"] == 1
+        m, _, _ = views.class_view(st, "dev::IDevice")
+        assert "FakeDevice" not in {x["label"] for x in m["nodes"]} and "Device" in {x["label"] for x in m["nodes"]}
+    finally:
+        st.close()
+
+
 def test_model_components_and_generated_views(repo):
     st = _st(repo)
     try:
