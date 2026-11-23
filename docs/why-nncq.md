@@ -72,7 +72,7 @@ The `nncq-user` skill (installed by `nncq agents`, with `nncq-uml-modeler` for d
 ## Recommended setup
 
 1. Keep Visual Assist for your own navigation and refactoring.
-2. Install nncq **lite** (`init.ps1 -Lite`): about 150 MB, no GPU, the index builds in minutes. To see what it does first, index the bundled demo (`nncq init --lite --yes --profile _demo`, see the README).
+2. Install nncq **lite** (`init.ps1 -Lite`): about 150 MB, no GPU, the index builds in minutes. To see what it does first, index the bundled demo (`nncq init --yes --profile _demo`, see the README).
 3. `nncq agents --targets vs` (and `copilot`, `claude` if you use them): registers nncq in `%USERPROFILE%\.mcp.json` and installs the skill where the agent supports one. In Visual Studio, enable the nncq tools in the Copilot Chat tool picker (agent mode), and paste `nncq-user.skill.md` into your custom instructions.
 4. Ask research questions in plain words. Expect a mechanism plus `file:line` locations and a list of gaps, not a guess.
 5. Upgrade one machine to **full** (GPU) if questions with no shared words with the code keep coming back weak.

@@ -1,0 +1,42 @@
+Deployment: workspace
+
+[apps]
+  - «executable» groundd.exe  apps/groundd/CMakeLists.txt
+[tests]
+  - «executable» orbit_tests.exe  tests/CMakeLists.txt
+[libs]
+  - «library STATIC» orbit_core  libs/core/CMakeLists.txt
+  - «library STATIC» orbit_link  libs/link/CMakeLists.txt
+  - «library STATIC» orbit_sched  libs/sched/CMakeLists.txt
+  - «library STATIC» orbit_telemetry  libs/telemetry/CMakeLists.txt
+[python]
+  - «python package» orbitkit-tools  python/pyproject.toml
+  - «script» cli.py  python/orbitkit_tools/cli.py
+  - «script» orbit-tools  python/pyproject.toml
+[Build configurations]
+  - «config» Debug  CMakeLists.txt  -- CMAKE_CONFIGURATION_TYPES (CMakeLists.txt:9)
+  - «config» Release  CMakeLists.txt  -- CMAKE_CONFIGURATION_TYPES (CMakeLists.txt:9)
+  - «preset:build» debug  CMakePresets.json
+  - «preset:build» release  CMakePresets.json
+  - «preset:configure» debug  CMakePresets.json  -- Debug (asserts, no optimisation), CMAKE_BUILD_TYPE=Debug
+  - «preset:configure» mast-release  CMakePresets.json  -- Release for the antenna-mast computer (aarch64)
+  - «preset:configure» release  CMakePresets.json  -- Release (station deployment), CMAKE_BUILD_TYPE=Release
+  - «preset:test» unit  CMakePresets.json
+[Toolchains]
+  - «toolchain» aarch64-linux  cmake/toolchains/aarch64-linux.cmake  -- CMAKE_SYSTEM_NAME=Linux, CMAKE_C_COMPILER=aarch64-linux-gnu-gcc, CMAKE_CXX_COMPILER=aarch64-linux-gnu-g++, CMAKE_CXX_STANDARD=17
+Relations:
+  orbit_tests.exe ..> orbit_sched   link PRIVATE
+  orbit_tests.exe ..> orbit_telemetry   link PRIVATE
+  orbit_tests.exe ..> orbit_link   link PRIVATE
+  orbit_tests.exe ..> orbit_core   link PRIVATE
+  groundd.exe ..> orbit_sched   link PRIVATE
+  groundd.exe ..> orbit_telemetry   link PRIVATE
+  groundd.exe ..> orbit_link   link PRIVATE
+  groundd.exe ..> orbit_core   link PRIVATE
+  orbit_link ..> orbit_core   link PUBLIC
+  orbit_sched ..> orbit_core   link PUBLIC
+  orbit_sched ..> orbit_link   link PUBLIC
+  orbit_sched ..> orbit_telemetry   link PUBLIC
+  orbit_telemetry ..> orbit_core   link PUBLIC
+  orbit_telemetry ..> orbit_link   link PUBLIC
+Note: Build options: ORBITKIT_BUILD_TESTS: Build the unit tests [default ON]; ORBITKIT_WITH_SDR: Build the SDR radio backend (needs a vendor SDR driver) [default ON]
