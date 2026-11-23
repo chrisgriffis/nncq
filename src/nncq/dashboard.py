@@ -577,7 +577,8 @@ $('#tree').addEventListener('click',async e=>{const r=e.target.closest('[data-r]
  const t=e.target.closest('[data-t]');const row=e.target.closest('.tn');if(!row)return;const nd=nodes[+row.dataset.id];
  if(t&&!nd.leaf){expand(nd);return}
  selNode=nd.id;drawTree();
- if(nd.resolve&&!nd.path){try{const x=defsOf(await T('find_symbol',{name:nd.sym,kind:'type'}))[0];if(x){Object.assign(nd,{path:x.path,line:x.start,end:x.end,dpath:x.path});drawTree();show(x.path,x.start,x.end)}}catch(err){}return}
+ if(nd.resolve&&!nd.path){try{const x=defsOf(await T('find_symbol',{name:nd.sym,kind:'type'}))[0];if(x){Object.assign(nd,{path:x.path,line:x.start,end:x.end,dpath:x.path});drawTree();show(x.path,x.start,x.end);selSync(nd)}}catch(err){}return}
+ selSync(nd);
  if(nd.callPath&&tmode==='callees')show(nd.callPath,nd.callLine);else if(nd.path)show(nd.path,nd.line,nd.end);
  else if(nd.sym&&tmode==='types')openSym(nd.sym)});
 $('#tree').addEventListener('dblclick',e=>{const row=e.target.closest('.tn');if(!row)return;const nd=nodes[+row.dataset.id];if(nd.sym&&!nd.noroot)openSym(nd.sym,nd.dpath||nd.path)});
@@ -587,6 +588,10 @@ async function show(path,line,end){setView('sym');closeEdit();$('#cpath').innerH
   const done=NC.fill($('#sview'),c.text,c.start,d.path,line);center();const top=box.scrollTop;await done;if(box.scrollTop===top)center()}   /* again once links and layout settle */
  catch(e){$('#sview').innerHTML=`<span class="err">${esc(e.message)}</span>`}}
 /* edit mode for the symbol explorer's code: the shared editor in place of the view */
+/* Sync views: a row picked in a tree (callers, callees, outline, type tree) is a selection too: the model pane shows its
+   default diagram, as one history entry; the tree itself keeps its root (double-click / ◎ re-roots) */
+function selSync(nd){if(!syncOn||mpinned()||!nd||!nd.sym||/^\(/.test(nd.sym)||nd.site||!(nd.dpath||nd.path))return;
+ const h=dhash({s:nd.sym,p:nd.dpath||nd.path}).slice(1);setHash({m:h},true);mrestore(h)}
 function closeEdit(){const e=$('#sedit');if(e){e.remove();$('#sview').parentElement.hidden=false}}
 $('#cpath').addEventListener('click',e=>{const a=e.target.closest('.ced');if(!a)return;e.preventDefault();closeEdit();const pb=$('#sview').parentElement;pb.hidden=true;
  const box=document.createElement('div');box.id='sedit';box.style.cssText='flex:1;min-height:0;display:flex;flex-direction:column';pb.after(box);const path=a.dataset.path,line=+a.dataset.line;

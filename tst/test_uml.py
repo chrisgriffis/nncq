@@ -45,7 +45,7 @@ void Device::run() { open("x"); m_conn->send(); auto it = std::make_unique<Item>
 """
 CONN_HPP = """#pragma once
 namespace dev {
-class Conn { public: void connect(const std::string& h); void send(); };
+class Conn { public: void connect(const std::string& h); void send(); struct Endpoint { int port; }; };
 class Item { public: int id; };
 class Logger { public: void log(); };
 }
@@ -258,6 +258,17 @@ def test_code_links_resolve_calls_types_includes_and_definitions(repo):
         assert any(x.get("def") and x["sym"] == "dev::Device::run" for x in ls)
         assert all(x["line"] >= 1 for x in ls)
         assert codeview.links(st, "lib/src/Device.cpp", 1, 2)["links"] and not codeview.links(st, "nope.cpp")["links"]
+    finally:
+        st.close()
+
+
+def test_nested_type_class_view_shows_its_enclosing_type(repo):
+    st = _st(repo)
+    try:
+        d = catalog.view(st, subject="dev::Conn::Endpoint", fmt="json")
+        n = {x["label"]: x["id"] for x in d["model"]["nodes"]}
+        assert d["kind"] == "class" and {"Endpoint", "Conn"} <= set(n)
+        assert any(e["kind"] == "contains" and e["from"] == n["Conn"] and e["to"] == n["Endpoint"] for e in d["model"]["edges"])
     finally:
         st.close()
 
