@@ -215,6 +215,7 @@ def views_hash(key: str) -> str:
 
 def dash(b: Browser, base: str, hash_: str = "", panes: dict | None = None, wait: str = "", settle: float = 2.5):
     """The main page with fresh storage, optional pane widths, then a hash."""
+    fresh(b)
     b.goto(base + "/", 0.5)
     b.js("localStorage.clear();sessionStorage.clear();" + (
         f"localStorage.setItem('nncq.panes',{json.dumps(json.dumps(panes))});" if panes else ""))
@@ -224,7 +225,14 @@ def dash(b: Browser, base: str, hash_: str = "", panes: dict | None = None, wait
         time.sleep(1.0)
 
 
+def fresh(b: Browser) -> None:
+    """A new document (no state left over from the previous scene) and the mouse out of the way."""
+    b.goto("about:blank", 0.2)
+    b.mouse(1, 1)
+
+
 def views(b: Browser, base: str, key: str = "", settle: float = 2.5, wait: str = "document.querySelector('#out svg')"):
+    fresh(b)
     b.goto(base + "/views" + (views_hash(key) if key else ""), settle)
     if wait:
         b.until(wait, 20)
@@ -256,11 +264,166 @@ def scene_hero(b: Browser, base: str):
     b.resize(1920, 1080, 1)
     dash(b, base, f"#q={q(QUESTION)}&s={q('orbitkit::telemetry::FramedDecoder::decode')}",
          {"w": {"dash": 33, "sym": 31, "model": 36}}, wait=f"{FRAME}.querySelector('#out svg')", settle=3)
-    b.js("document.querySelector('#dashb').scrollTop=372", 0.6)
+    b.js("const d=document.querySelector('#dashb');d.scrollTop=document.querySelector('#s-search').offsetTop-d.offsetTop-6", 0.6)
     b.shot("hero")
 
 
-SCENES = {"hero": scene_hero}
+def scene_ask(b: Browser, base: str):
+    """An answer with a path filter: how the question was read, the portfolio, the files; filtered panels outlined."""
+    b.resize(1700, 1500, 1.25)
+    dash(b, base, f"#q={q(QUESTION)}&qp=libs/telemetry", {"w": {"dash": 44, "sym": 28, "model": 28}},
+         wait="document.querySelector('#answer .frow')")
+    b.js("const d=document.querySelector('#dashb');d.scrollTop=document.querySelector('#s-search').offsetTop-d.offsetTop-6", 0.5)
+    b.shot("ask", union(b, "document.querySelector('#s-search')", "document.querySelector('#answer')", pad=6))
+
+
+def _sym(b: Browser, base: str, sym: str, mode: str = "outline", w=(26, 44, 30), size=(1700, 1100, 1.25)):
+    b.resize(*size)
+    dash(b, base, f"#s={q(sym)}", {"w": {"dash": w[0], "sym": w[1], "model": w[2]}},
+         wait="document.querySelector('#scard .t')")
+    b.js(f"document.querySelector('#tmode a[data-m={mode}]').click()", 1.8)
+
+
+def scene_code(b: Browser, base: str):
+    """The code view: every known symbol is a link (definition, call, type), with its target on hover."""
+    _sym(b, base, "orbitkit::telemetry::FramedDecoder::decode")
+    link = ("[...document.querySelectorAll('#sview .sym')].find(e=>e.textContent==='check'&&"
+            "e.closest('.l').dataset.ln==='36')")
+    b.hover(link)
+    tip(b, link, f"({link}).title")
+    r = union(b, "document.querySelector('#cpath')", "document.querySelector('#sview .l[data-ln=\"42\"]')")
+    b.shot("code", {**r, "y": r["y"] - 4, "height": r["height"] + 8})
+
+
+def scene_editor(b: Browser, base: str):
+    """Edit in place: the code view turns into an editor with the workspace's VCS actions."""
+    _sym(b, base, "orbitkit::telemetry::Pipeline::run")
+    b.js("document.querySelector('#cpath a.ced').click()", 2)
+    b.shot("editor", union(b, "document.querySelector('#cpath')", "document.querySelector('#cpath').parentElement.lastElementChild", pad=2))
+
+
+def scene_outline(b: Browser, base: str):
+    """Symbol explorer: the card of a symbol and the outline of its file."""
+    _sym(b, base, "orbitkit::telemetry::FramedDecoder", "outline")
+    b.shot("symbols-outline", union(b, "document.querySelector('#right .ph')", "document.querySelector('#tree')"))
+
+
+def scene_callers(b: Browser, base: str):
+    """Symbol explorer: callers of Crc::check, expanded up to main."""
+    _sym(b, base, "orbitkit::core::Crc::check", "callers")
+    for _ in range(6):
+        b.js("""(()=>{const n=[...document.querySelectorAll('#tree .tn')].filter(x=>{const c=x.querySelector('.car');
+             return c&&c.textContent==='\u25b8'&&!/TEST|test/.test(x.textContent)});if(n.length)n[n.length-1].querySelector('.car').click()})()""", 1.2)
+    b.shot("symbols-callers", union(b, "document.querySelector('#sform')", "document.querySelector('#tree')"))
+
+
+def scene_depends(b: Browser, base: str):
+    """Symbol explorer: Depends of a type, as a graph thumbnail and as an outline that stops at cycles."""
+    _sym(b, base, "orbitkit::sched::Tracker", "depends", size=(1700, 1300, 1.25))
+    b.until("document.querySelector('#dthumb svg')", 15)
+    time.sleep(1)
+    b.shot("symbols-depends", union(b, "document.querySelector('#sform')", "document.querySelector('#tree')"))
+    b.js("document.querySelector('#tree a[data-dv=outline]').click()", 1.5)
+    for _ in range(3):
+        b.js("""(()=>{const c=[...document.querySelectorAll('#tree .tn')].filter(x=>/Scheduler/.test(x.textContent)&&
+             x.querySelector('.car')&&x.querySelector('.car').textContent==='\u25b8');if(c.length)c[0].querySelector('.car').click()})()""", 1.2)
+    b.shot("symbols-depends-outline", union(b, "document.querySelector('#sform')", "document.querySelector('#tree')"))
+
+
+def _canvas(b: Browser, pad: int = 0) -> dict:
+    return union(b, "document.querySelector('#vt')", "document.querySelector('#out')", pad=pad)
+
+
+def scene_class(b: Browser, base: str):
+    """Model explorer: a class view (members, nested type, composition / aggregation), a picked node's details,
+    and the inheritance tooltip of a type."""
+    b.resize(1800, 1050, 1.25)
+    views(b, base, "class:orbitkit::telemetry::Pipeline")
+    b.js("[...document.querySelectorAll('#out g.node[data-n]')].find(g=>/Pipeline/.test(g.textContent)).dispatchEvent(new MouseEvent('click',{bubbles:true}))", 1.5)
+    b.shot("model-class", union(b, "document.querySelector('#vt')", "document.querySelector('#out')", "document.querySelector('#side')"))
+
+
+def scene_hierarchy(b: Browser, base: str):
+    """Hovering a type in any diagram shows its inheritance (bases up, derived types down)."""
+    b.resize(1500, 1000, 1.25)
+    views(b, base, "class:orbitkit::telemetry::FramedDecoder")
+    b.hover("[...document.querySelectorAll('#out g.node[data-n]')].find(g=>/^\\W*abstract\\W*FramedDecoder/.test(g.textContent.trim()))")
+    b.until("getComputedStyle(document.querySelector('#htip')).display!=='none'", 6)
+    time.sleep(0.8)
+    b.shot("model-hierarchy", union(b, "document.querySelector('#vt')", "document.querySelector('#out')"))
+
+
+def _model(b: Browser, base: str, key: str, name: str, size=(1700, 1000, 1.25), zoom: int = 0, full=False):
+    b.resize(*size)
+    views(b, base, key)
+    for _ in range(abs(zoom)):
+        b.js(f"document.querySelector('#{'zi' if zoom > 0 else 'zo'}').click()", 0.4)
+    time.sleep(0.6)
+    b.shot(name, None if full else _canvas(b))
+
+
+def scene_sequence(b: Browser, base: str):
+    _model(b, base, "sequence:orbitkit::sched::Scheduler::tick|depth=2", "model-sequence", (2300, 1350, 1))
+
+
+def scene_component(b: Browser, base: str):
+    _model(b, base, "component:orbit_telemetry", "model-component", (1500, 950, 1.25))
+
+
+def scene_deployment(b: Browser, base: str):
+    _model(b, base, "deployment:*", "model-deployment", (2300, 1150, 1))
+
+
+def scene_filecomp(b: Browser, base: str):
+    _model(b, base, "composition:file:libs/telemetry/src/Pipeline.cpp", "model-file", (2300, 1000, 1))
+
+
+def scene_dependsgraph(b: Browser, base: str):
+    _model(b, base, "depends:*|path=libs/sched/include/orbitkit/sched/Tracker.h", "model-depends", (1900, 1100, 1))
+
+
+def scene_agent(b: Browser, base: str):
+    """An agent-made composition: mcp-agent badge with its provenance, groups, bespoke parts, a nested diagram."""
+    b.resize(1700, 1050, 1.25)
+    views(b, base, "composition:ground-segment")
+    badge = "document.querySelector('#vt').parentElement.querySelector('.b.o-agent')"
+    b.hover(badge)
+    tip(b, badge, f"({badge}).title")
+    b.shot("model-agent", {"x": 0, "y": 0, "width": 1240, "height": 1050, "scale": 1})
+
+
+def scene_minimap(b: Browser, base: str):
+    """Pan / zoom: zoomed in, the overview minimap shows where you are; toolbar and key bindings."""
+    b.resize(1600, 900, 1.25)
+    views(b, base, "component:*")
+    for _ in range(4):
+        b.js("document.querySelector('#zi').click()", 0.3)
+    time.sleep(0.8)
+    b.shot("model-minimap", {"x": 0, "y": 0, "width": 1240, "height": 560, "scale": 1})
+
+
+def scene_preview(b: Browser, base: str):
+    """Preview .md: the Markdown export rendered like an editor preview, Mermaid included."""
+    b.resize(1500, 1100, 1.25)
+    views(b, base, "class:orbitkit::telemetry::FramedDecoder")
+    b.js("document.querySelector('#bpv').click()", 3)
+    b.until("document.querySelector('#mod svg, #mview svg')", 15)
+    time.sleep(1)
+    b.shot("model-preview", union(b, "document.querySelector('#mod').firstElementChild || document.querySelector('#mod')", pad=0))
+
+
+def scene_status(b: Browser, base: str):
+    """Index status in lite mode."""
+    b.resize(1500, 900, 1.5)
+    dash(b, base, "", {"w": {"dash": 40, "sym": 30, "model": 30}}, wait="document.querySelector('#status .ring, #status svg')")
+    b.shot("status", union(b, "document.querySelector('#status')", pad=4))
+
+
+SCENES = {"hero": scene_hero, "ask": scene_ask, "code": scene_code, "editor": scene_editor, "outline": scene_outline,
+          "callers": scene_callers, "depends": scene_depends, "class": scene_class, "hierarchy": scene_hierarchy, "sequence": scene_sequence,
+          "component": scene_component, "deployment": scene_deployment, "filecomp": scene_filecomp,
+          "dependsgraph": scene_dependsgraph, "agent": scene_agent, "minimap": scene_minimap,
+          "preview": scene_preview, "status": scene_status}
 
 
 def main() -> int:

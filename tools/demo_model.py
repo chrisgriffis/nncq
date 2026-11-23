@@ -5,7 +5,9 @@ write their ASCII / Markdown exports for the README.
     nncq init --profile _demo --lite --yes && nncq index --name orbitkit && nncq start
     python tools/demo_model.py --url http://127.0.0.1:8765/mcp [--out cache/demo-out]
 
-Re-running replaces the stored items (upsert by key / id).
+Re-running replaces the stored items (upsert by key / id). The script introduces itself as the MCP client
+"copilot-cli" (client info and User-Agent: stateless HTTP sessions record the latter) with the model id below, so the
+stored items carry the same provenance an agent session would leave.
 """
 from __future__ import annotations
 
@@ -80,6 +82,7 @@ GENERATED = [
     ("class-pipeline", {"kind": "class", "subject": "orbitkit::telemetry::Pipeline"}),
     ("class-decoders", {"kind": "class", "subject": "orbitkit::telemetry::FramedDecoder"}),
     ("component", {"kind": "component"}),
+    ("component-telemetry", {"kind": "component", "subject": "orbit_telemetry"}),
     ("package-libs", {"kind": "package", "under": "libs"}),
     ("deployment", {"kind": "deployment"}),
     ("depends-scheduler", {"kind": "depends", "subject": "orbitkit::sched::Scheduler"}),
@@ -100,7 +103,7 @@ def text(r) -> dict:
 async def main(url: str, out: Path) -> int:
     out.mkdir(parents=True, exist_ok=True)
     bad = 0
-    async with streamablehttp_client(url) as (rd, wr, _):
+    async with streamablehttp_client(url, headers={"User-Agent": f"{CLIENT.name}/{CLIENT.version}"}) as (rd, wr, _):
         async with ClientSession(rd, wr, client_info=CLIENT) as s:
             await s.initialize()
 
