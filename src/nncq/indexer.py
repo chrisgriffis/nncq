@@ -74,6 +74,10 @@ def open_store(repo: Repo) -> Store:
     st = Store(repo.db)
     if st.meta("root") != str(repo.root):
         st.set_meta("root", str(repo.root))
+    if st.meta("data_parse") != "1":     # XML / JSON / YAML indexed as text before structdata: parse them once
+        ph = ",".join("?" * len(langs.DATA_LANGS))
+        st.db.execute(f"UPDATE files SET mtime_ns=NULL, sha1=NULL WHERE lang IN ({ph})", tuple(sorted(langs.DATA_LANGS)))
+        st.set_meta("data_parse", "1")
     return st
 
 

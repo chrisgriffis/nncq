@@ -42,6 +42,11 @@ def lang_for(path: str, ext_map: dict[str, str]) -> str | None:
     return ext_map.get(p.suffix.lower())
 
 
+# structured data: parsed into keys / elements + references when kept (structdata.py); never UML, never types
+DATA_LANGS = {"xml", "json", "yaml"}
+DATA_KINDS = {"key", "element", "item"}
+
+
 def is_ast_lang(lang: str) -> bool:
     return lang in set(AST_LANG_BY_EXT.values())
 

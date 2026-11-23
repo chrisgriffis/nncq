@@ -21,13 +21,15 @@ import re
 from collections import Counter, OrderedDict, deque
 from dataclasses import dataclass
 
+from nncq.langs import DATA_KINDS
 from nncq.store import Store
 
 _SEP = re.compile(r"::|\.|\\")
 MACRO = re.compile(r"^[A-Z0-9_]+$")
 UTILITY_CALLS = 1500     # names called from more places than this are plumbing (get, size, assert, log...)
 FUNCS = {"function", "method"}
-NON_TYPES = FUNCS | {"namespace", "module", "field", "variable", "constant", "macro", "property", "module_doc"}
+NON_TYPES = FUNCS | {"namespace", "module", "field", "variable", "constant", "macro", "property", "module_doc"} | DATA_KINDS
+_NOT_DATA = f" AND s.kind NOT IN ({','.join(repr(k) for k in sorted(DATA_KINDS))})"
 
 
 def short(name: str) -> str:
@@ -69,12 +71,13 @@ def _defs_named(store: Store, name: str, limit: int = 2000) -> list[Def]:
 
 
 def _defs_exact(store: Store, name: str, langs: list[str] | None = None, limit: int = 500) -> list[Def]:
-    """Definitions spelled exactly `name` (callee resolution: EndFrame in C# is not endFrame in C++)."""
+    """Definitions spelled exactly `name` (callee resolution: EndFrame in C# is not endFrame in C++).
+    Data keys / elements are never call targets."""
     lw, la = _lang_sql(langs or [])
     return [Def(*r) for r in store.q(
         "SELECT s.id, s.name, s.qualname, s.kind, s.parent, s.start_line, s.end_line, s.signature, f.path, s.file_id "
-        "FROM symbols s JOIN files f ON f.id=s.file_id WHERE s.name=? COLLATE NOCASE AND s.name=?" + lw + " LIMIT ?",
-        (name, name, *la, limit))]
+        "FROM symbols s JOIN files f ON f.id=s.file_id WHERE s.name=? COLLATE NOCASE AND s.name=?" + _NOT_DATA + lw +
+        " LIMIT ?", (name, name, *la, limit))]
 
 
 _TEST_PATH = re.compile(r"(^|/)(unit_?)?tests?(/|$)|(^|/)tests?[^/]*$|[_.]tests?\.[a-z]+$|(^|/)mocks?(/|$)", re.I)
@@ -98,7 +101,7 @@ def find_defs(store: Store, name: str, path: str = "", kinds: set[str] | None = 
         rows = [r for r in rows if p in r.path.lower()] or rows
     if kinds:
         rows = [r for r in rows if (r.kind in kinds) or ("type" in kinds and is_type(r.kind))] or rows
-    rows.sort(key=lambda r: (r.name != s, 0 if is_type(r.kind) else 1 if r.kind in FUNCS else 2,
+    rows.sort(key=lambda r: (r.name != s, r.kind in DATA_KINDS, 0 if is_type(r.kind) else 1 if r.kind in FUNCS else 2,
                              r.path.count("/"), r.path))
     return rows
 
@@ -175,17 +178,20 @@ def own_call(store: Store, file_id: int, line: int, name: str, cls: str = "") ->
 def callers(store: Store, target: Def | None, name: str, limit: int, ambiguous: bool,
             langs: list[str] | None = None, path: str = "") -> tuple[list[dict], int, int]:
     """Call sites of `name`, grouped by calling symbol. Ranked: same class > mentions class > by name.
-    langs: caller languages (default: the target's language family). path: substring filter on caller files."""
+    langs: caller languages (default: the target's language family). path: substring filter on caller files.
+    Data files that name it (XML / JSON / YAML `ref` edges, any language) are listed too, as 'data ref'."""
     s = short(name)
     if langs is None:
         langs = lang_family(store, target.file_id) if target else []
     lw, la = _lang_sql(langs)
+    pw, pa = "", ()
     if path:
-        lw += " AND f.path LIKE ?"
-        la += (f"%{path.replace(chr(92), '/')}%",)
-    base = "FROM edges e JOIN files f ON f.id=e.file_id WHERE e.dst=? AND e.kind='call'" + lw
+        pw, pa = " AND f.path LIKE ?", (f"%{path.replace(chr(92), '/')}%",)
+    base = (f"FROM edges e JOIN files f ON f.id=e.file_id WHERE e.dst=? AND ((e.kind='call'{lw}) OR e.kind='ref')"
+            + pw)
+    la = (*la, *pa)
     total, files = store.q(f"SELECT COUNT(*), COUNT(DISTINCT e.file_id) {base}", (s, *la))[0]
-    grp = f"SELECT e.src, e.file_id, f.path, MIN(e.line), COUNT(*) {base}"
+    grp = f"SELECT e.src, e.file_id, f.path, MIN(e.line), COUNT(*), MAX(e.kind='ref') {base}"
     cls = short(target.parent) if target and target.parent else ""
     rows = []
     if cls and ambiguous:      # same-class callers first, whatever their call counts (render() has thousands)
@@ -198,7 +204,11 @@ def callers(store: Store, target: Def | None, name: str, limit: int, ambiguous: 
     # classes with their own `name`: their unqualified calls go to that one, not to the target
     owners = ({_parent_short(d.qualname) for d in _defs_exact(store, s, langs, 2000)} - {"", cls}
               if cls and ambiguous else set())
-    for i, (src, fid, path_, line, n) in enumerate(rows):
+    for i, (src, fid, path_, line, n, data) in enumerate(rows):
+        if data:
+            out.append({"caller": src or "(file level)", "at": f"{path_}:{line}", "calls": n, "match": "data ref",
+                        "test": is_test(path_, src)})
+            continue
         if owners and _parent_short(src) in owners:
             continue
         conf = "by name"
@@ -213,9 +223,18 @@ def callers(store: Store, target: Def | None, name: str, limit: int, ambiguous: 
             conf = "unique name"
         out.append({"caller": src or "(file level)", "at": f"{path_}:{line}", "calls": n, "match": conf,
                     "test": is_test(path_, src)})
-    rank = lambda c: 0 if c["match"] in ("same class", "unique name") else 1 if c["match"].startswith("mentions") else 2
+    rank = lambda c: (0 if c["match"] in ("same class", "unique name") else 1 if c["match"].startswith("mentions")
+                      else 3 if c["match"] == "data ref" else 2)
     out.sort(key=lambda c: (c["test"], rank(c), -c["calls"]))
     return out[:limit], total, files
+
+
+def data_refs(store: Store, name: str, limit: int = 60) -> list[dict]:
+    """Data files (XML / JSON / YAML) whose values name `name`, as callers() rows (match 'data ref')."""
+    rows = store.q("SELECT e.src, f.path, MIN(e.line), COUNT(*) FROM edges e JOIN files f ON f.id=e.file_id "
+                   "WHERE e.dst=? AND e.kind='ref' GROUP BY e.src, e.file_id ORDER BY f.path LIMIT ?", (short(name), limit))
+    return [{"caller": src or "(file level)", "at": f"{p}:{ln}", "calls": n, "match": "data ref", "test": is_test(p, src)}
+            for src, p, ln, n in rows]
 
 
 def caller_rows(cs: list[dict]) -> list[dict]:
@@ -237,18 +256,18 @@ def callees(store: Store, quals: list[str], limit: int, langs: list[str] | None 
     if not quals:
         return []
     ph = ",".join("?" * len(quals))
-    rows = store.q(f"SELECT dst, COUNT(*), MIN(line), GROUP_CONCAT(file_id || ':' || line) FROM edges "
-                   f"WHERE kind='call' AND src IN ({ph}) GROUP BY dst ORDER BY MIN(line)", tuple(quals))
+    rows = store.q(f"SELECT dst, COUNT(*), MIN(line), GROUP_CONCAT(file_id || ':' || line), MAX(kind='ref') FROM edges "
+                   f"WHERE kind IN ('call','ref') AND src IN ({ph}) GROUP BY dst ORDER BY MIN(line)", tuple(quals))
     own = {_parent_short(q) for q in quals} - {""}
     out, minor = [], []
-    for dst, n, line, sites in rows:
+    for dst, n, line, sites, data in rows:
         tag = f" x{n}" if n > 1 else ""
         if MACRO.match(dst) or len(dst) < 3 or _call_count(store, dst) > UTILITY_CALLS:
             minor.append(dst + tag)
             continue
         if len(out) >= limit:
             continue
-        ds = _defs_exact(store, dst, langs)
+        ds = _defs_exact(store, dst, None if data else langs)     # a data value names code in any language
         groups = {norm(d.qualname): d for d in ds}
         mine = [d for d in groups.values() if _parent_short(d.qualname) in own]
         if mine and len(groups) > 1 and not any(
@@ -384,6 +403,10 @@ def symbol_context(store: Store, name: str, path: str = "", limit: int = 12) -> 
             dt = datarefs.data_for_code(store, p.qualname if "." in p.qualname else p.name, k=1)["data_types"]
             if dt:
                 out["data_types"] = [f"{t['type']} ({t['via']}, {t['files']} data files)" for t in dt[:6]]
+        dr = data_refs(store, p.name, limit)
+        if dr:
+            out["referenced_by_data"] = [f"{c['caller']}  {c['at']}" for c in dr]
+            out["data_refs_list"] = caller_rows(dr)
     if p.kind in FUNCS or not is_type(p.kind):
         cs, total, files = callers(store, p, p.name, limit, ambiguous)
         if total:
