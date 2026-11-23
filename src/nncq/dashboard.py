@@ -660,6 +660,8 @@ $('#tree').addEventListener('click',async e=>{const dv=e.target.closest('[data-d
  const r=e.target.closest('[data-r]');if(r){const nd=nodes[+r.dataset.r];openSym(nd.sym,nd.dpath||nd.path);return}
  const t=e.target.closest('[data-t]');const row=e.target.closest('.tn');if(!row)return;const nd=nodes[+row.dataset.id];
  if(t&&!nd.leaf){expand(nd);return}
+ /* the outline is the file's own structure: a picked row becomes the target, so the card, tree and code agree */
+ if(tmode==='outline'&&nd.sym&&!nd.noroot&&(nd.dpath||nd.path)){if(!cur||cur.sym!==nd.sym)openSym(nd.sym,nd.dpath||nd.path);return}
  selNode=nd.id;drawTree();
  if(nd.resolve&&!nd.path){try{const x=defsOf(await T('find_symbol',{name:nd.sym,kind:'type'}))[0];if(x){Object.assign(nd,{path:x.path,line:x.start,end:x.end,dpath:x.path});drawTree();show(x.path,x.start,x.end);selSync(nd)}}catch(err){}return}
  selSync(nd);
