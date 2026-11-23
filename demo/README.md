@@ -14,7 +14,8 @@ package, a three-level inheritance hierarchy, a call chain from `main` to a CRC 
 First run: installs nncq into `../.venv` in lite mode (no torch, no GPU, about 150 MB) and fetches the
 init assets (tree-sitter parsers, the pinned Mermaid build the dashboard draws diagrams with). Every run: indexes
 `orbitkit/` (a second or two, incremental after that), starts the server, seeds the model once, opens the dashboard
-on http://127.0.0.1:8766/. Close the window (or Ctrl+C) to stop it.
+on http://127.0.0.1:8766/ (preset to the class view of `python/orbitkit_tools/frames.py`, `DecodeResult` in
+`Decoder.h` and an "encoder" query; `START` in `run.py`). Close the window (or Ctrl+C) to stop it.
 
 Options (passed through to `run.py`): `--fresh` (re-parse and re-seed), `--no-seed`, `--no-browser`.
 

@@ -81,6 +81,7 @@ GENERATED = [
     ("sequence-tick", {"kind": "sequence", "subject": "orbitkit::sched::Scheduler::tick", "depth": 2}),
     ("class-pipeline", {"kind": "class", "subject": "orbitkit::telemetry::Pipeline"}),
     ("class-decoders", {"kind": "class", "subject": "orbitkit::telemetry::FramedDecoder"}),
+    ("class-frames-py", {"kind": "class", "path": "python/orbitkit_tools/frames.py"}),     # run.py opens on this
     ("component", {"kind": "component"}),
     ("component-telemetry", {"kind": "component", "subject": "orbit_telemetry"}),
     ("package-libs", {"kind": "package", "under": "libs"}),

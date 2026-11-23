@@ -26,6 +26,11 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO = "orbitkit"
+# dashboard state to open on: Model explorer on the class view of python/orbitkit_tools/frames.py, Symbol explorer on
+# DecodeResult in Decoder.h, "encoder" in the ask box, symbol tab, panes not synced
+START = ("#m=%2Fuml%2Fview%2Fview%253Aclass%253A*%257Cpath%253Dpython%252Forbitkit_tools%252Fframes.py"
+         "&s=orbitkit%3A%3Atelemetry%3A%3ADecodeResult"
+         "&p=libs%2Ftelemetry%2Finclude%2Forbitkit%2Ftelemetry%2FDecoder.h&q=encoder&v=sym&sync=0")
 
 
 def nncq(*args: str) -> list[str]:
@@ -56,7 +61,7 @@ def main() -> int:
     if h and REPO in h.get("repos", []):
         print(f"== demo already running: {url}")
         if not a.no_browser:
-            webbrowser.open(url)
+            webbrowser.open(url + START)
         return 0
 
     from nncq import init
@@ -87,9 +92,9 @@ def main() -> int:
             if asyncio.run(seed_model.main(url + "mcp", config.CACHE / "seed-out")) == 0:
                 marker.write_text(time.strftime("%Y-%m-%d %H:%M:%S"), encoding="utf-8")
 
-        print(f"== demo ready: {url}")
+        print(f"== demo ready: {url}{START}")
         if not a.no_browser:
-            webbrowser.open(url)
+            webbrowser.open(url + START)
         return srv.wait()
     except KeyboardInterrupt:
         return 0
