@@ -323,7 +323,7 @@ The page has a visible **❚❚ pause** button for when you need the card yourse
 - **One page, three panes:** the dashboard (status, the ask box, answers, console) | the **Symbol explorer** (search hits or a symbol: card, call trees, code) | the **Model explorer** (`/views` embedded: the UML / SysML diagrams).
   - Each explorer collapses to a thin strip from **–** in its header and expands from the strip; drag the gaps to resize (double-click resets); widths and collapse states are remembered.
   - A link aimed at an explorer (a hit, the **Model explorer** link, a diagram's **Symbol explorer** chip, a deep link) opens it: when it is collapsed it swaps with the other explorer, or with the dashboard when both are collapsed.
-  - The Model explorer follows the Symbol explorer with the default diagram of the symbol or file shown (📌 pins the current diagram). `/#m=<views hash>` opens the page with the model pane on that target; `/views` still works on its own.
+  - **Sync views** (a checkbox in both explorer headers, on by default): a symbol or file picked anywhere shows its default diagram in the Model explorer, a diagram element picked there reveals its code in the Symbol explorer, and Back / Forward restore both together. Off, each explorer goes its own way with its own history; ticking it again syncs to wherever the last selection was made. `/#m=<views hash>` opens the page with the model pane on that target; `/views` still works on its own.
 - **Two roll-ups for an answer.**
   1. How the question was read, plus the portfolio.
   2. The list of files.
