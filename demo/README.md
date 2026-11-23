@@ -4,6 +4,8 @@ A self-contained nncq home with a small, fictional, original codebase to try nnc
 ground-station toolkit (four C++ libraries, a daemon, tests, CMake presets, an aarch64 toolchain, a Python tools
 package, a three-level inheritance hierarchy, a call chain from `main` to a CRC check, a deliberate include cycle).
 
+Don't want to install anything? The same demo runs read-only at **https://chrisgriffis.rocks**.
+
 ## Run it
 
 | OS            | Run                       |
