@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "orbitkit-tools"
+version = "0.4.0"
+description = "Offline analysis tools for orbitkit pass archives: decode frames, plan passes, write pass reports"
+requires-python = ">=3.10"
+
+[project.scripts]
+orbit-tools = "orbitkit_tools.cli:main"
+
+[tool.setuptools]
+packages = ["orbitkit_tools"]

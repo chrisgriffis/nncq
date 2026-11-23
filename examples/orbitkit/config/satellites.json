@@ -1,0 +1,7 @@
+{
+  "satellites": [
+    { "name": "AURORA-3", "norad": 99101, "downlink_hz": 435900000, "protocol": "ccsds", "priority": 2 },
+    { "name": "KESTREL-1", "norad": 99102, "downlink_hz": 437500000, "protocol": "beacon:KST1", "priority": 1 },
+    { "name": "PIKA-SAT", "norad": 99103, "downlink_hz": 145800000, "protocol": "ax25:PIKA", "priority": 0 }
+  ]
+}

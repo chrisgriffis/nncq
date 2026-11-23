@@ -249,7 +249,7 @@ def cmd_profile(a):
             print(f"{p.name:16} {p.root or '(workspace not found on this machine)'}  {p.path}")
             if p.root is None:
                 for c in p.roots:
-                    print(f"{'':16}   {c}: {p.accepts(Path(c).expanduser()) or 'ok'}")
+                    print(f"{'':16}   {c}: {p.accepts(profiles.candidate(c)) or 'ok'}")
         return 0
     if a.action == "new":
         from nncq import init

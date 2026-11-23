@@ -3,13 +3,15 @@ profiles/_template is the documented, shared example). The core stays codebase-a
 
 A profile says
   - how to find its workspace on this machine ([workspace]: candidate roots checked against markers / git remote,
-    or NNCQ_WORKSPACE_<NAME>). Workspaces live anywhere outside the nncq folder, never inside it.
+    or NNCQ_WORKSPACE_<NAME>). Workspaces live anywhere outside the nncq folder, never inside it (the bundled
+    demo under examples/ excepted; a relative root is relative to the nncq folder).
   - which folders to index and what to ignore
   - extra file extensions, brace-block definition languages ([[dsl]])
   - data cross-reference rules ([[xref]]): regexes over data files naming the types they instantiate and the
     files they reference (see datarefs.py)
   - notes appended to the MCP server instructions ([mcp])
-Each profile is one index: cache/db/<name>/index.db.
+Each profile is one index: cache/db/<name>/index.db. Folders starting with _ are shared samples: _template (documented
+example) and _demo (the bundled demo workspace, activated by `nncq init --profile _demo`).
 """
 from __future__ import annotations
 
@@ -26,6 +28,7 @@ from nncq import config
 
 DIR = config.ROOT / "profiles"
 TEMPLATE = "_template"
+EXAMPLES = config.ROOT / "examples"     # bundled demo workspaces: the one place inside nncq a workspace may live
 
 DSL_KEYWORDS = ["class", "struct", "enum", "interface", "valuetype", "component", "service", "type", "method",
                 "namespace", "delegate", "event", "union", "flags", "module", "function", "entity", "contract"]
@@ -99,10 +102,11 @@ class Profile:
 
     @cached_property
     def root(self) -> Path | None:
-        """This machine's workspace: NNCQ_WORKSPACE_<NAME>, else the first candidate root that is accepted."""
+        """This machine's workspace: NNCQ_WORKSPACE_<NAME>, else the first candidate root that is accepted.
+        A relative candidate is relative to the nncq folder (the bundled demo: examples/<name>)."""
         env = os.environ.get("NNCQ_WORKSPACE_" + re.sub(r"\W", "_", self.name).upper(), "")
         for c in ([env] if env else []) + self.roots:
-            p = Path(os.path.expandvars(c)).expanduser()
+            p = candidate(c)
             if not self.accepts(p):
                 return p.resolve()
         return None
@@ -124,10 +128,18 @@ class Profile:
         return next((x for x in self.xrefs if x.matches(path)), None)
 
 
+def candidate(c: str) -> Path:
+    p = Path(os.path.expandvars(c)).expanduser()
+    return p if p.is_absolute() else config.ROOT / p
+
+
 def nested(root: Path) -> bool:
+    """root overlaps the nncq folder (bundled demos under examples/ excepted)."""
     try:
         a, b = root.resolve(), config.ROOT.resolve()
     except OSError:
+        return False
+    if EXAMPLES.resolve() in a.parents:
         return False
     return a == b or b in a.parents or a in b.parents
 
@@ -177,10 +189,12 @@ def parse(path: Path) -> Profile:
 
 
 def load_all() -> dict[str, Profile]:
+    """Active profiles. Folders starting with _ are shared samples (the template, the bundled demo): inactive until
+    activate() copies one to profiles/<its name>/."""
     out = {}
     if DIR.is_dir():
         for f in sorted(DIR.glob("*/profile.toml")):
-            if f.parent.name == TEMPLATE or f.parent.name.startswith("."):
+            if f.parent.name.startswith(("_", ".")):
                 continue
             p = parse(f)
             out[p.name] = p
@@ -189,6 +203,22 @@ def load_all() -> dict[str, Profile]:
 
 def get(name: str) -> Profile | None:
     return load_all().get(name)
+
+
+def is_sample(name: str) -> bool:
+    return name.startswith("_") and name != TEMPLATE and (DIR / name / "profile.toml").is_file()
+
+
+def activate(sample: str) -> Profile:
+    """profiles/_demo -> profiles/<name>/ (git-ignored like any profile); an existing active copy is kept."""
+    src = parse(DIR / sample / "profile.toml")
+    if src.name.startswith("_"):
+        raise ValueError(f"{src.path}: a sample profile needs a name that does not start with _")
+    dst = DIR / src.name / "profile.toml"
+    if not dst.exists():
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_text(src.path.read_text(encoding="utf-8"), encoding="utf-8")
+    return parse(dst)
 
 
 # ---------------------------------------------------------------- writing (nncq init / nncq profile new)

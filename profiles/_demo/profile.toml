@@ -1,0 +1,26 @@
+# Shared sample profile for the bundled demo workspace (examples/orbitkit, a fictional ground-station toolkit).
+# Activate it with `nncq init --profile _demo` (copies it to profiles/orbitkit/, git-ignored like any profile),
+# then `nncq index --name orbitkit`. A relative root is relative to the nncq folder.
+
+name = "orbitkit"
+description = "orbitkit (demo): a fictional satellite ground-station toolkit, C++17 libraries + a Python tools package"
+
+[workspace]
+roots = ["examples/orbitkit"]
+markers = ["CMakeLists.txt", "CMakePresets.json"]
+git_remote = ""
+vcs = "git"
+dirs = []
+ignore = ["out/**"]
+ignore_defaults = true
+# ---- end of [workspace]
+
+[index]
+extensions = {}
+text_langs = ["markdown", "cmake"]
+
+[mcp]
+notes = """orbitkit: libs/core (clock, CRC, frames), libs/link (radios, antenna), libs/telemetry (decoders, sinks,
+Pipeline), libs/sched (ephemeris, passes, Tracker, Scheduler), apps/groundd (Station, main), python/orbitkit_tools
+(offline twins of the decoders, pass planner, reports). One tick: main -> Station::run -> Scheduler::tick ->
+Pipeline::run -> IDecoder::decode -> Crc::check."""

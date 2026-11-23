@@ -368,6 +368,27 @@ def test_profile_export_import_round_trip(prof):
     assert "name = 'acme2'" in (dst / "profile.toml").read_text(encoding="utf-8")
 
 
+def test_sample_profile_activates_and_links_a_workspace_under_examples(prof, tmp_path, monkeypatch):
+    from nncq import profiles
+    demo = profiles.parse(profiles.EXAMPLES.parent / "profiles" / "_demo" / "profile.toml")    # the bundled demo
+    assert demo.root == (profiles.EXAMPLES / "orbitkit").resolve()
+    home = tmp_path / "nncq"
+    (home / "examples" / "demo").mkdir(parents=True)
+    (home / "examples" / "demo" / "CMakeLists.txt").write_text("", encoding="utf-8")
+    (home / "src").mkdir()
+    monkeypatch.setattr(config, "ROOT", home)
+    monkeypatch.setattr(profiles, "EXAMPLES", home / "examples")
+    (profiles.DIR / "_demo").mkdir(parents=True)
+    (profiles.DIR / "_demo" / "profile.toml").write_text(
+        "name = 'demo'\n[workspace]\nroots = ['examples/demo']\nmarkers = ['CMakeLists.txt']\n", encoding="utf-8")
+    assert profiles.is_sample("_demo") and not profiles.is_sample(profiles.TEMPLATE)
+    assert "demo" not in profiles.load_all()
+    p = profiles.activate("_demo")
+    assert p.path == profiles.DIR / "demo" / "profile.toml" and "demo" in profiles.load_all()
+    assert p.root == (home / "examples" / "demo").resolve()
+    assert "overlaps" in p.accepts(home / "src") and "overlaps" in p.accepts(home)
+
+
 def test_results_citing_files_changed_on_disk_are_flagged(repo):
     st = _store(repo)
     try:

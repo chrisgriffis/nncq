@@ -1,0 +1,36 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/out/${presetName}",
+      "generator": "Ninja"
+    },
+    {
+      "name": "debug",
+      "inherits": "base",
+      "displayName": "Debug (asserts, no optimisation)",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "release",
+      "inherits": "base",
+      "displayName": "Release (station deployment)",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "mast-release",
+      "inherits": "release",
+      "displayName": "Release for the antenna-mast computer (aarch64)",
+      "toolchainFile": "${sourceDir}/cmake/toolchains/aarch64-linux.cmake"
+    }
+  ],
+  "buildPresets": [
+    { "name": "debug", "configurePreset": "debug" },
+    { "name": "release", "configurePreset": "release" }
+  ],
+  "testPresets": [
+    { "name": "unit", "configurePreset": "debug", "output": { "outputOnFailure": true } }
+  ]
+}
