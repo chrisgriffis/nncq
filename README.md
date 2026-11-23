@@ -4,6 +4,8 @@
 
 **Ask questions, don't search the code. See its model. Nothing leaves the machine.**
 
+**[Try the live demo at chrisgriffis.rocks](https://chrisgriffis.rocks)**: the dashboard on the bundled sample codebase, read-only, nothing to install. Agents can connect to its MCP endpoint, `https://chrisgriffis.rocks/mcp`.
+
 nncq is a local code index for you and your coding agent. Search gives you lines that match a string; nncq gives the agent the structure of the codebase: whole functions and classes, who calls what, how execution gets from A to B, what depends on what, what breaks if X changes and, with a [codebase profile](#codebase-profiles), which data files use which code. It draws the same index as UML / SysML diagrams that stay in step with the code, and lets agents add their own. No build, no IDE index, no cloud: everything runs on your machine.
 
 - **For your agent** (Copilot CLI, Claude Code, Visual Studio, anything that speaks MCP): `ask` returns a short map instead of ten code dumps; graph tools trace callers, call paths, dependencies and blast radius with `file:line`; `uml_*` tools draw and author diagrams. Every answer is sized for an agent's context (a few KB).
@@ -46,7 +48,13 @@ git clone <this repo> nncq; cd nncq
 
 `demo/orbitkit` is a small, fictional, original codebase made for this: a satellite ground-station toolkit with four C++ libraries, a daemon, tests, Debug / Release configurations and presets, an aarch64 toolchain, a Python tools package, docs, an inheritance hierarchy three levels deep, composition and aggregation, a call chain from `main` to a CRC check, and a deliberate include cycle. Every screenshot in this README is of it.
 
-A read-only copy runs at **https://chrisgriffis.rocks** (the `Dockerfile`, redeployed from master by `.github/workflows/deploy.yml`); its MCP endpoint is `https://chrisgriffis.rocks/mcp`.
+A read-only copy runs at **https://chrisgriffis.rocks** (the `Dockerfile`, redeployed from master by `.github/workflows/deploy.yml`); its MCP endpoint is `https://chrisgriffis.rocks/mcp`. To point an agent at it, add it as an HTTP MCP server, e.g. in `~/.copilot/mcp-config.json`:
+
+```json
+{ "mcpServers": { "nncq-demo": { "type": "http", "url": "https://chrisgriffis.rocks/mcp", "tools": ["*"] } } }
+```
+
+The first request after a quiet spell takes 10-20 s while the container starts.
 
 Double-click `demo\demo.cmd` (Linux / macOS: `demo/demo.sh`). The first run installs nncq into `.venv` in lite mode (no torch, no GPU, about 150 MB); every run indexes the demo (a second or two), starts the server and opens the dashboard on http://127.0.0.1:8766/. Close the window to stop it.
 
