@@ -30,10 +30,8 @@ TEMPLATE = "_template"
 TEMPLATE_FILE = config.ROOT / "profiles" / TEMPLATE / "profile.toml"   # shared by every home
 
 
-DSL_KEYWORDS = ["class", "struct", "enum", "interface", "valuetype", "component", "service", "type", "method",
-                "namespace", "delegate", "event", "union", "flags", "module", "function", "entity", "contract"]
-DSL_CONTAINERS = ["class", "struct", "interface", "valuetype", "component", "service", "namespace", "union",
-                  "entity", "contract", "type"]
+DSL_KEYWORDS = ["class", "struct", "enum", "interface", "union", "namespace", "module", "type", "function"]
+DSL_CONTAINERS = ["class", "struct", "interface", "union", "namespace", "module", "type"]
 
 
 @dataclass(frozen=True)

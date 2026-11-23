@@ -10,28 +10,28 @@ from nncq import answers, chunker, config, graph, health, indexer
 from nncq.repos import Repo
 from nncq.store import Store
 
-CPP = """#include "physics.h"
-namespace eng {
-struct Body { float x, v; };
+CPP = """#include "billing.h"
+namespace acct {
+struct Account { double balance, rate; };
 
 void
-integrate(Body& b, float dt)
+accrue(Account& a, double days)
 {
-    b.x += b.v * dt;
+    a.balance += a.rate * days;
 }
 
 void
-stepWorld(Body* bodies, int n, float dt)
+accrueAll(Account* accounts, int n, double days)
 {
     for (int i = 0; i < n; ++i)
-        integrate(bodies[i], dt);
+        accrue(accounts[i], days);
 }
 
 int
-mainLoop()
+runBatch()
 {
-    Body b[4] = {};
-    stepWorld(b, 4, 0.016f);
+    Account a[4] = {};
+    accrueAll(a, 4, 30.0);
     return 0;
 }
 }
@@ -44,14 +44,14 @@ local function clamp(v, lo, hi)
   return v
 end
 
-function M.spawn(world, kind)
-  local e = world:create(kind)
-  M.applyDefaults(e)
-  return e
+function M.open(pool, kind)
+  local c = pool:create(kind)
+  M.applyDefaults(c)
+  return c
 end
 
-function M.applyDefaults(e)
-  e.speed = clamp(e.speed, 0, 10)
+function M.applyDefaults(c)
+  c.retries = clamp(c.retries, 0, 10)
 end
 
 return M
@@ -59,21 +59,21 @@ return M
 
 
 def test_namespace_is_split_into_functions_with_full_signatures():
-    r = chunker.process("physics.cpp", CPP.encode(), "cpp")
+    r = chunker.process("billing.cpp", CPP.encode(), "cpp")
     syms = {c.symbol for c in r.chunks}
-    assert {"eng::integrate", "eng::stepWorld", "eng::mainLoop", "eng::Body"} <= syms
-    assert "eng" not in syms                     # no header-only / punctuation chunks for the namespace
+    assert {"acct::accrue", "acct::accrueAll", "acct::runBatch", "acct::Account"} <= syms
+    assert "acct" not in syms                     # no header-only / punctuation chunks for the namespace
     lines = [(c.start_line, c.end_line) for c in r.chunks]
     assert len(lines) == len(set(lines))          # nothing duplicated
     sig = {s.qualname: s.signature for s in r.symbols}
-    assert sig["eng::integrate"] == "void integrate(Body& b, float dt)"
+    assert sig["acct::accrue"] == "void accrue(Account& a, double days)"
 
 
 def test_lua_methods_and_calls():
-    r = chunker.process("spawner.lua", LUA.encode(), "lua")
+    r = chunker.process("pool.lua", LUA.encode(), "lua")
     kinds = {s.qualname: (s.kind, s.parent) for s in r.symbols}
-    assert kinds["M.spawn"] == ("method", "M")
-    assert ("M.spawn", "applyDefaults") in {(e.src, e.dst) for e in r.edges if e.kind == "call"}
+    assert kinds["M.open"] == ("method", "M")
+    assert ("M.open", "applyDefaults") in {(e.src, e.dst) for e in r.edges if e.kind == "call"}
 
 
 @pytest.fixture
@@ -82,10 +82,10 @@ def repo(tmp_path, monkeypatch):
     monkeypatch.setenv("NNCQ_INDEX_PROCS", "1")
     monkeypatch.setenv("NNCQ_DATA", "false")
     root = tmp_path / "ws"
-    (root / "engine").mkdir(parents=True)
+    (root / "src").mkdir(parents=True)
     (root / "scripts").mkdir()
-    (root / "engine" / "physics.cpp").write_text(CPP, encoding="utf-8")
-    (root / "scripts" / "spawner.lua").write_text(LUA, encoding="utf-8")
+    (root / "src" / "billing.cpp").write_text(CPP, encoding="utf-8")
+    (root / "scripts" / "pool.lua").write_text(LUA, encoding="utf-8")
     r = Repo("t", root)
     indexer.update(r, log=lambda m: None)
     return r
@@ -98,11 +98,11 @@ def _store(r):
 def test_call_trace_and_called_by(repo):
     st = _store(repo)
     try:
-        t = graph.call_trace(st, "integrate")
-        assert [f.split()[1] for f in t["stacks"][0]] == ["integrate", "eng::stepWorld", "eng::mainLoop"]
-        rel = graph.call_trace(st, "clamp", frm="M.spawn")
+        t = graph.call_trace(st, "accrue")
+        assert [f.split()[1] for f in t["stacks"][0]] == ["accrue", "acct::accrueAll", "acct::runBatch"]
+        rel = graph.call_trace(st, "clamp", frm="M.open")
         assert rel["from_reaches_to"]
-        assert [x.split()[0] for x in graph.called_by(st, "applyDefaults")["callers"]] == ["M.spawn"]
+        assert [x.split()[0] for x in graph.called_by(st, "applyDefaults")["callers"]] == ["M.open"]
     finally:
         st.close()
 
@@ -118,20 +118,20 @@ def test_delta_reuses_vectors_and_updates_graph(repo):
                            (cid, 2, np.ones(4, np.float16).tobytes()))
     finally:
         st.close()
-    p = repo.root / "engine" / "physics.cpp"
-    p.write_text(CPP.replace("int\nmainLoop()", "void\nsubstep(Body& b, float dt)\n{\n    integrate(b, dt);\n}\n\n"
-                             "int\nmainLoop()"), encoding="utf-8")
-    res = indexer.update_paths(repo, ["engine/physics.cpp"], log=lambda m: None)
+    p = repo.root / "src" / "billing.cpp"
+    p.write_text(CPP.replace("int\nrunBatch()", "void\naccrueOne(Account& a, double days)\n{\n    accrue(a, days);\n}\n\n"
+                             "int\nrunBatch()"), encoding="utf-8")
+    res = indexer.update_paths(repo, ["src/billing.cpp"], log=lambda m: None)
     assert res["changed"] == 1
     st = _store(repo)
     try:
         tiers = dict(st.q("SELECT c.symbol, c.tier FROM chunks c"))
-        assert tiers["eng::integrate"] == 2 and tiers["eng::stepWorld"] == 2   # unchanged text: vector kept
-        assert tiers["eng::substep"] == 0                                     # new code: pending
-        assert any("eng::substep" in c for c in graph.called_by(st, "integrate")["callers"])
+        assert tiers["acct::accrue"] == 2 and tiers["acct::accrueAll"] == 2   # unchanged text: vector kept
+        assert tiers["acct::accrueOne"] == 0                                 # new code: pending
+        assert any("acct::accrueOne" in c for c in graph.called_by(st, "accrue")["callers"])
         st_, _ = health.compute(st, 2)
-        assert any("not embedded yet" in d and "engine/physics.cpp" in d for d in st_["degraded"])
-        out = health.annotate({}, st, ["engine/physics.cpp"], 2, semantic=True)
+        assert any("not embedded yet" in d and "src/billing.cpp" in d for d in st_["degraded"])
+        out = health.annotate({}, st, ["src/billing.cpp"], 2, semantic=True)
         assert "1 of 1" in out["index_state"]["affects_these_results"]
         assert "index_state" not in health.annotate({}, st, None, 2, semantic=False)
     finally:
@@ -139,61 +139,61 @@ def test_delta_reuses_vectors_and_updates_graph(repo):
 
 
 PP = """namespace app {
-#if FB_USING(NEW_PATH)
-void Renderer::onFrame(int a)
+#if HAS_FEATURE(NEW_PATH)
+void Server::onRequest(int a)
 #else
-void Renderer::onFrame(int a, int b)
+void Server::onRequest(int a, int b)
 #endif
 {
-    present(a);
+    reply(a);
 #if 0
-    legacyPresent();
-#elif defined(CONSOLE)
-    consolePresent();
+    legacyReply();
+#elif defined(USE_TLS)
+    tlsReply();
 #endif
 }
 
-void Renderer::onFlip() { flip(); }
+void Server::onClose() { close(); }
 }
 """
 
 
 def test_preprocessor_branches_keep_one_parse_and_recover_the_rest():
-    r = chunker.process("r.cpp", PP.encode(), "cpp")
+    r = chunker.process("server.cpp", PP.encode(), "cpp")
     ext = {s.qualname: (s.start_line, s.end_line) for s in r.symbols}
-    assert ext["app::Renderer::onFrame"] == (3, 14)        # not swallowing onFlip
-    assert ext["app::Renderer::onFlip"] == (16, 16)
+    assert ext["app::Server::onRequest"] == (3, 14)        # not swallowing onClose
+    assert ext["app::Server::onClose"] == (16, 16)
     calls = {(e.src, e.dst) for e in r.edges if e.kind == "call"}
-    assert ("app::Renderer::onFrame", "present") in calls
-    assert ("app::Renderer::onFrame", "consolePresent") in calls    # from the branch the parser did not see
+    assert ("app::Server::onRequest", "reply") in calls
+    assert ("app::Server::onRequest", "tlsReply") in calls    # from the branch the parser did not see
     assert not any(e.src == "" for e in r.edges if e.kind == "call")
 
 
 def test_callers_stay_in_the_language_family(repo):
-    (repo.root / "scripts" / "sim.lua").write_text("function tick(b)\n  integrate(b, 1)\nend\n", encoding="utf-8")
-    indexer.update_paths(repo, ["scripts/sim.lua"], log=lambda m: None)
+    (repo.root / "scripts" / "jobs.lua").write_text("function nightly(a)\n  accrue(a, 1)\nend\n", encoding="utf-8")
+    indexer.update_paths(repo, ["scripts/jobs.lua"], log=lambda m: None)
     st = _store(repo)
     try:
-        assert [c.split()[0] for c in graph.called_by(st, "integrate")["callers"]] == ["eng::stepWorld"]
-        assert graph.called_by(st, "integrate", caller_path="nothing/here")["callers"] == []
+        assert [c.split()[0] for c in graph.called_by(st, "accrue")["callers"]] == ["acct::accrueAll"]
+        assert graph.called_by(st, "accrue", caller_path="nothing/here")["callers"] == []
     finally:
         st.close()
 
 
 def test_shared_names_resolve_to_the_callers_own_class(repo):
-    (repo.root / "engine" / "loop.cpp").write_text(
-        "void A::update() {}\nvoid A::tick() { update(); }\nvoid B::update() {}\nvoid B::run() { update(); }\n"
+    (repo.root / "src" / "shared.cpp").write_text(
+        "void A::update() {}\nvoid A::refresh() { update(); }\nvoid B::update() {}\nvoid B::run() { update(); }\n"
         "void Test_A::update() {}\nvoid TEST_F() { A a; a.update(); }\nvoid C::poke(A* a) { a->update(); }\n"
         "void A::flush() { m_child->update(); }\n",
         encoding="utf-8")
-    indexer.update_paths(repo, ["engine/loop.cpp"], log=lambda m: None)
+    indexer.update_paths(repo, ["src/shared.cpp"], log=lambda m: None)
     st = _store(repo)
     try:
-        assert graph.calls(st, "A::tick")["calls"][0].split(" -> ")[1].startswith("A::update")
+        assert graph.calls(st, "A::refresh")["calls"][0].split(" -> ")[1].startswith("A::update")
         assert "(ambiguous)" in graph.calls(st, "A::flush")["calls"][0]          # m_child->update(): not ours
         rows = graph.called_by(st, "A::update")["callers"]
         names = [r.split()[0] for r in rows]
-        assert names[0] == "A::tick" and set(names[1:3]) == {"A::flush", "C::poke"} and names[3] == "TEST_F"
+        assert names[0] == "A::refresh" and set(names[1:3]) == {"A::flush", "C::poke"} and names[3] == "TEST_F"
         assert "[same class]" in rows[0] and not any("[same class]" in r for r in rows[1:])   # flush: m_child->
         assert rows[-1].endswith("(test)")
     finally:
@@ -241,8 +241,8 @@ def test_lite_profile_never_touches_models_and_reports_no_degradation(repo, monk
     monkeypatch.setattr(search, "_model", lambda name: pytest.fail("lite loaded a model"))
     st = _store(repo)
     try:
-        out = asker.ask(st, repo.root, "integrate bodies over time", 5)
-        assert "eng::integrate" in [h["sym"] for h in out["hits"]]
+        out = asker.ask(st, repo.root, "accrue interest on accounts", 5)
+        assert "acct::accrue" in [h["sym"] for h in out["hits"]]
         assert out["portfolio"]["strength"].startswith("unrated (lite")
         assert out["interpreted"]["meaning"].startswith("off (lite")
         assert "note" not in out                          # no "no vectors yet" noise in lite
@@ -284,12 +284,12 @@ lang = 'idl'
 extensions = ['.idl']
 
 [[xref]]
-name = 'scenes'
-glob = '*.scene'
-instance = '<node type="(?P<type>[A-Za-z_]+)"'
-reference = 'ref="(?P<ref>[^"]+)"'
+name = 'flows'
+glob = '*.flow'
+instance = '<step type="(?P<type>[A-Za-z_]+)"'
+reference = 'next="(?P<ref>[^"]+)"'
 type_suffix = 'Data'
-label = 'scene'
+label = 'flow'
 """
 
 
@@ -304,11 +304,11 @@ def prof(tmp_path, monkeypatch):
     (ws / "src").mkdir(parents=True)
     (ws / "vendor").mkdir()
     (ws / "build.txt").write_text("", encoding="utf-8")
-    (ws / "src" / "door.cpp").write_text("struct Door { void open(); };\nvoid Door::open() {}\n", encoding="utf-8")
-    (ws / "src" / "door.idl").write_text("component DoorData {\n  bool locked;\n}\n", encoding="utf-8")
+    (ws / "src" / "order.cpp").write_text("struct Order { void submit(); };\nvoid Order::submit() {}\n", encoding="utf-8")
+    (ws / "src" / "order.idl").write_text("struct OrderData {\n  bool paid;\n}\n", encoding="utf-8")
     (ws / "vendor" / "lib.cpp").write_text("void vendored() {}\n", encoding="utf-8")
-    (ws / "a.scene").write_text('<node type="DoorData" ref="b"/>\n', encoding="utf-8")
-    (ws / "b.scene").write_text('<node type="DoorData"/>\n', encoding="utf-8")
+    (ws / "a.flow").write_text('<step type="OrderData" next="b"/>\n', encoding="utf-8")
+    (ws / "b.flow").write_text('<step type="OrderData"/>\n', encoding="utf-8")
     d = config.PROFILES_DIR / "acme"
     d.mkdir(parents=True)
     (d / "profile.toml").write_text(PROFILE.format(root=ws.as_posix()), encoding="utf-8")
@@ -326,12 +326,12 @@ def test_profile_links_its_workspace_and_drives_dsl_ignore_and_data_rules(prof, 
     st = Store(r.db, cache_mb=8)
     try:
         paths = set(st.file_stats())
-        assert "src/door.idl" in paths and "vendor/lib.cpp" not in paths
-        d = search.find_symbol(st, "DoorData", "", "")
-        assert d["match"] == "exact" and "door.idl" in d["definitions"][0]
-        uses = json.dumps(datarefs.data_for_code(st, "Door", 10))
-        assert "a.scene" in uses and "b.scene" in uses
-        assert "a.scene" in json.dumps(datarefs.data_file(st, "b.scene", 10))
+        assert "src/order.idl" in paths and "vendor/lib.cpp" not in paths
+        d = search.find_symbol(st, "OrderData", "", "")
+        assert d["match"] == "exact" and "order.idl" in d["definitions"][0]
+        uses = json.dumps(datarefs.data_for_code(st, "Order", 10))
+        assert "a.flow" in uses and "b.flow" in uses
+        assert "a.flow" in json.dumps(datarefs.data_file(st, "b.flow", 10))
     finally:
         st.close()
 
@@ -388,12 +388,12 @@ def test_demo_is_a_self_contained_home(tmp_path, monkeypatch):
 def test_results_citing_files_changed_on_disk_are_flagged(repo):
     st = _store(repo)
     try:
-        assert health.divergence(st, repo.root, ["engine/physics.cpp"]) == []
-        (repo.root / "engine" / "physics.cpp").write_text(CPP + "\n// edited\n", encoding="utf-8")
-        (repo.root / "scripts" / "spawner.lua").unlink()
+        assert health.divergence(st, repo.root, ["src/billing.cpp"]) == []
+        (repo.root / "src" / "billing.cpp").write_text(CPP + "\n// edited\n", encoding="utf-8")
+        (repo.root / "scripts" / "pool.lua").unlink()
         div = health.divergence(st, repo.root, health.result_paths(
-            {"results": [{"path": "engine/physics.cpp"}, {"file": "scripts/spawner.lua"}]}))
-        assert [d["path"] for d in div] == ["engine/physics.cpp", "scripts/spawner.lua"]
+            {"results": [{"path": "src/billing.cpp"}, {"file": "scripts/pool.lua"}]}))
+        assert [d["path"] for d in div] == ["src/billing.cpp", "scripts/pool.lua"]
         assert div[1]["state"] == "missing on disk"
     finally:
         st.close()

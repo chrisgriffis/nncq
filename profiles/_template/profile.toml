@@ -8,13 +8,13 @@ description = "What this codebase is (shown to agents in the MCP instructions)"
 [workspace]
 # How this profile finds its workspace on the current machine. The workspace lives anywhere outside the nncq
 # folder (never inside it). Candidates are tried in order; the first that passes the checks wins.
-# NNCQ_WORKSPACE_<NAME> (in .env or the environment) overrides the list, e.g. NNCQ_WORKSPACE_EXAMPLE=D:/ws.
-roots = ["~/src/example", "D:/example"]
+# NNCQ_WORKSPACE_<NAME> (in .env or the environment) overrides the list, e.g. NNCQ_WORKSPACE_EXAMPLE=C:/src/example.
+roots = ["~/src/example", "C:/src/example"]
 markers = ["CMakeLists.txt"]        # paths that must exist under the root
 git_remote = ""                     # optional: substring the git origin URL must contain
 vcs = ""                            # git | p4 | none: which VCS buttons the dashboard editor shows ("" = detect)
 dirs = []                           # code folders under the root to index ([] = everything)
-ignore = []                         # extra gitignore-style globs (case-insensitive), e.g. "**/Prebuild/**"
+ignore = []                         # extra gitignore-style globs (case-insensitive), e.g. "**/generated/**"
 ignore_defaults = true              # also skip the built-in vendored / generated defaults (walk.py)
 # ---- end of [workspace]
 
@@ -29,17 +29,19 @@ extensions = {}
 # [[dsl]]
 # lang = "idl"
 # extensions = [".idl"]
-# keywords = ["class", "struct", "enum", "interface", "service"]   # declaration keywords (default: a broad set)
+# Defaults: keywords class, struct, enum, interface, union, namespace, module, type, function; containers the same
+# without enum and function.
+# keywords = ["class", "struct", "enum", "interface", "service"]   # declaration keywords
 # containers = ["class", "struct", "interface", "service"]          # kinds whose members get their own chunks
 # module_keyword = "module"                                          # `module X;` qualifies what follows (X.Foo)
 
-# Data cross-reference: data files (XML / JSON / YAML assets ...) that instantiate code types and reference
-# each other. Answers: what data uses this code type, what code an asset uses, who references an asset, the
-# most referenced assets. Regexes run with ripgrep (Rust syntax) and Python; keep them to the common subset.
+# Data cross-reference: data files (XML / JSON / YAML definitions ...) that instantiate code types and reference
+# each other. Answers: what data uses this code type, what code a data file uses, who references a data file, the
+# most referenced data files. Regexes run with ripgrep (Rust syntax) and Python; keep them to the common subset.
 # [[xref]]
-# name = "assets"
-# label = "asset"                                       # what a data file is called in answers
-# glob = "*.asset.xml"
+# name = "workflows"
+# label = "workflow"                                    # what a data file is called in answers
+# glob = "*.workflow.xml"
 # instance = '<object [^>]*?type="(?P<type>[^"]+)"'     # each match: a type the file instantiates
 # reference = 'ref="(?P<ref>[^"#]+)#'                    # each match: another file it references (no extension)
 # type_suffix = "Data"                                  # data type FooData belongs to code class Foo
