@@ -104,6 +104,13 @@ def test_cpp_members_visibility_relations_and_stereotypes():
     assert chunker.process("Device.hpp", DEV_HPP.encode(), "cpp").symbols[0].visibility == ""   # uml off: unchanged
 
 
+def test_qualified_call_receiver_is_the_whole_qualifier():
+    src = "namespace app { void tick() { core::Crc::check(); ::log(); } }\n"
+    r = chunker.process("tick.cpp", src.encode(), "cpp", uml=True)
+    roles = {e.dst: e.role for e in r.edges if e.kind == "call" and e.src == "app::tick"}
+    assert roles["check"] == "core::Crc::"
+
+
 def test_python_fields_relations_and_imports():
     r = chunker.process("svc/service.py", PY.encode(), "python", uml=True)
     f = {x.name: x for x in r.symbols if x.kind == "field"}

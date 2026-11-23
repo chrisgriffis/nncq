@@ -398,8 +398,8 @@ class Extractor:
         obj = n.child_by_field_name("object")
         if obj is None and fn is not None:
             if fn.type in ("qualified_identifier", "scoped_identifier"):
-                sc = fn.child_by_field_name("scope") or fn.child_by_field_name("path")
-                s = _one(_t(sc))
+                full = re.sub(r"\s+", "", _t(fn))                # ns::Type::fn: the whole qualifier, not just ns
+                s = full.rsplit("::", 1)[0] if "::" in full else ""
                 return s + "::" if s and re.fullmatch(r"[\w:]+", s) else ""
             for f in ("argument", "object", "expression", "operand", "value"):
                 obj = fn.child_by_field_name(f)
