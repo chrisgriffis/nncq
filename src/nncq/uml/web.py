@@ -245,7 +245,8 @@ pre.code .hl{background:#2b2a14;display:block}pre.code span.l{display:block;padd
 #mstate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:0 1 auto}header>*{flex:none}header>#mstate{flex:0 1 auto}
 body.embed header{padding:6px 10px;gap:8px}body.embed header b{font-size:13px}
 #bpin{filter:grayscale(1);opacity:.45;padding:1px 6px}#bpin.on{filter:none;opacity:1;border-color:var(--acc);background:#1d2a44}
-.hb{padding:1px 8px;color:var(--dim)}.syncb{align-items:center;gap:4px;font-size:11px;color:var(--dim);white-space:nowrap;cursor:pointer}.syncb input{margin:0 4px 0 0;padding:0;accent-color:var(--acc);vertical-align:-2px}.syncb:has(input:checked){color:var(--acc)}.hb:hover{color:var(--fg)}
+.hb{padding:1px 8px;color:var(--dim)}.navb{display:flex}.navb a{padding:0 7px;font-size:18px;line-height:22px;color:var(--dim);cursor:pointer;border-radius:5px;user-select:none}
+.navb a:hover{color:var(--fg);background:#1b1f29}.navb a.off{opacity:.3;pointer-events:none}.syncb{align-items:center;gap:4px;font-size:11px;color:var(--dim);white-space:nowrap;cursor:pointer}.syncb input{margin:0 4px 0 0;padding:0;accent-color:var(--acc);vertical-align:-2px}.syncb:has(input:checked){color:var(--acc)}.hb:hover{color:var(--fg)}
 .spin{display:inline-block;width:11px;height:11px;border:2px solid #262b36;border-top-color:var(--acc);border-radius:50%;animation:sp .7s linear infinite;vertical-align:-2px}@keyframes sp{to{transform:rotate(360deg)}}
 .cw{position:relative;display:flex;flex:1;min-width:0}.cw>input{flex:1;min-width:0;padding-right:26px!important}
 .cx{position:absolute;right:6px;top:50%;transform:translateY(-50%);color:var(--dim);cursor:pointer;font-size:16px;line-height:1;display:none;padding:0 4px;user-select:none}.cx:hover{color:var(--fg)}
@@ -266,7 +267,7 @@ pre .k,.mdv .k{color:#c792ea}pre .s,.mdv .s{color:#c3e88d}pre .c,.mdv .c{color:#
  main>.col:last-child{grid-column:1/-1;border-left:0;border-top:1px solid var(--line)}}
 </style></head><body>
 <div id="notice"></div>
-<header><b><span class="noemb">nncq · model explorer</span><span class="emb">Model explorer</span></b><a href="./" class="dim noemb">← dashboard</a>
+<header><b><span class="noemb">nncq · model explorer</span><span class="emb">Model explorer</span></b><span class="navb"><a id="nback" title="back (Alt+←)">‹</a><a id="nfwd" title="forward (Alt+→)">›</a></span><a href="./" class="dim noemb">← dashboard</a>
  <label class="emb syncb" title="Sync views (shared with the Symbol explorer): diagram selections reveal their code there, symbol / file selections show their default diagram here, one Back / Forward history for both"><input type="checkbox" id="csync">Sync views</label>
  <button id="bpin" class="emb" title="pin: keep this diagram when the Symbol explorer moves (unpinned, the Model explorer follows it)">📌</button>
  <select id="repo" title="index"></select><span id="mstate" class="dim"></span><span class="sp"></span>
@@ -321,7 +322,7 @@ const pinned=()=>localStorage.getItem('nncq.mpin')==='1';
 function pinUi(){$('#bpin').classList.toggle('on',pinned())}
 $('#bpin').onclick=()=>{localStorage.setItem('nncq.mpin',pinned()?'0':'1');pinUi()};pinUi();
 $('#bcol').onclick=()=>{const h=host();if(h)h.collapse('model')};
-$('#csync').checked=synced();$('#csync').onchange=e=>{const h=host();if(h&&h.setSync)h.setSync(e.target.checked)};
+$('#csync').checked=synced();$('#csync').onchange=e=>{const h=host();if(h&&h.setSync)h.setSync(e.target.checked);navUi()};
 $('#bsolo').onclick=()=>{$('#bsolo').href='views'+(tok?'?token='+encodeURIComponent(tok):'')+location.hash};
 $('#bbuild').onclick=async()=>{const b=$('#bbuild');b.disabled=true;b.innerHTML='<span class="spin"></span> Refreshing…';
  const done=()=>{b.disabled=false;b.textContent='⟳ Refresh';init()};
@@ -559,7 +560,17 @@ async function dflt(s,p){const my=++seq;$('#out').innerHTML='<div class="dim" st
   if(n||n2)pick((n||n2).id);else if(mm||mm2){const [x,y]=mm||mm2;pickMember(x.id,y.id)}else $('#side').innerHTML=`<div class="dim" style="padding:14px">Default diagram for ${esc(s||p||'the workspace')} (${esc(d.kind)}). Click a node for details.</div>`;
   if(!document.querySelector(`#list .vi[data-k="${CSS.escape(d.key)}"]`))list()}
  catch(e){if(my===seq){cur=null;$('#vt').textContent='No diagram';$('#out').innerHTML=`<div class="err" style="padding:20px">${esc(e.message)}</div>`}}}
-async function route(){const h=host();if(h&&h.modelHash)h.modelHash(location.hash);
+/* ‹ › : this explorer's own history of diagrams / selections (with Sync views on: the dashboard's single history) */
+const NAVH={list:[],i:-1,jump:null};
+function navTrack(){const h=location.hash||'#';if(NAVH.jump!=null&&NAVH.list[NAVH.jump]===h){NAVH.i=NAVH.jump;NAVH.jump=null}
+ else if(NAVH.list[NAVH.i]===h){}else if(NAVH.list[NAVH.i-1]===h)NAVH.i--;else if(NAVH.list[NAVH.i+1]===h)NAVH.i++;
+ else{NAVH.list=NAVH.list.slice(0,NAVH.i+1);NAVH.list.push(h);NAVH.i=NAVH.list.length-1;if(NAVH.list.length>200){NAVH.list.shift();NAVH.i--}}navUi()}
+function navUi(){const g=synced();$('#nback').classList.toggle('off',!g&&NAVH.i<=0);$('#nfwd').classList.toggle('off',!g&&NAVH.i>=NAVH.list.length-1)}
+function navStep(d){if(synced()){try{parent.history.go(d)}catch(e){}return}const j=NAVH.i+d;if(j<0||j>=NAVH.list.length)return;NAVH.jump=j;
+ location.replace(location.pathname+location.search+NAVH.list[j])}
+navUi();$('#nback').onclick=()=>navStep(-1);$('#nfwd').onclick=()=>navStep(1);
+document.addEventListener('keydown',e=>{if(e.altKey&&(e.key==='ArrowLeft'||e.key==='ArrowRight')&&!/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)){e.preventDefault();navStep(e.key==='ArrowLeft'?-1:1)}});
+async function route(){const h=host();if(h&&h.modelHash)h.modelHash(location.hash);navTrack();
  const dm=/^#\/uml\/default\/?(?:\?(.*))?$/.exec(location.hash);
  if(!location.hash||location.hash==='#'||dm){const p=new URLSearchParams(dm&&dm[1]||'');useRepo(p.get('repo'));return dflt(p.get('s')||p.get('c')||'',p.get('p')||'')}
  const m=/^#\/uml\/([^/]+)\/([^?]*)(?:\?(.*))?$/.exec(location.hash);if(!m)return;

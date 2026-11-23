@@ -266,6 +266,9 @@ def class_view(st: Store, subject: str = "", under: str = "", depth: int = 1, me
             for dst, label in st.q("SELECT dst, label FROM edges WHERE src=? AND kind IN "
                                    "('inherits','composes','aggregates','associates')", (t.qualname,)):
                 near.append(ctx.type_for(dst, t.path))
+            if t.parent:                                  # a nested type: its enclosing type
+                near += [x for x in ctx.find(t.parent, kinds={"type"}) if x.kind in TYPE_KINDS
+                         and graph.norm(x.qualname) == graph.norm(t.parent)][:1]
             for (src,) in st.q("SELECT DISTINCT src FROM edges WHERE dst=? AND kind='inherits' LIMIT 12", (t.name,)):
                 near += [x for x in ctx.q("WHERE s.qualname=? AND s.kind IN (%s) LIMIT 1" % ",".join(
                     "?" * len(TYPE_KINDS)), (src, *TYPE_KINDS))]
@@ -309,6 +312,10 @@ def class_view(st: Store, subject: str = "", under: str = "", depth: int = 1, me
                       type=label or "")
         edges.setdefault(e["id"], e)
         strong.add((a, b))
+    for q, t in types.items():                            # nested types hang off their enclosing type
+        if t.parent in nodes and t.parent != q:
+            e = _edge(ctx, nodes[t.parent]["id"], nodes[q]["id"], "contains", "nested", t.path, t.start)
+            edges.setdefault(e["id"], e)
     mq = [m for q in quals for m in [q]]
     for src, dst, kind, line, col, path, parent in st.q(
             f"SELECT e.src, e.dst, e.kind, e.line, e.col, f.path, s.parent FROM edges e JOIN files f ON f.id=e.file_id "
