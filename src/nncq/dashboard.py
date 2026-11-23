@@ -71,6 +71,10 @@ svg{display:block}
 .cw{position:relative;display:flex;flex:1;min-width:0}.cw>input{flex:1;min-width:0;padding-right:26px!important}
 .cx{position:absolute;right:6px;top:50%;transform:translateY(-50%);color:var(--dim);cursor:pointer;font-size:16px;line-height:1;display:none;padding:0 4px;user-select:none}.cx:hover{color:var(--fg)}
 .pt{font-size:12px;font-weight:600;white-space:nowrap}
+:root{--hc:#ffffff;--hcfg:#000000}
+.unf{display:none;font-size:11px;line-height:16px;padding:0 8px;border-radius:9px;background:var(--hc);color:var(--hcfg);border:0;font-weight:600;cursor:pointer;flex:none}.unf:hover{opacity:.85}
+body.pf-on .unf{display:inline-block}body.pf-on #qpath{outline:2px solid var(--hc);outline-offset:-2px}body.pf-on .pf-aff{outline:2px solid var(--hc);outline-offset:-2px}
+#right:not(.v-hits) #unf-hits{display:none!important}
 #sform .cw{min-width:120px}.sside .cw{flex:1}#right>.ph{position:relative;padding-right:34px}#right>.ph>.xc{position:absolute;right:8px;top:9px}
 .syncb{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--dim);white-space:nowrap;cursor:pointer;flex:none}.syncb input{margin:0;accent-color:var(--acc)}.syncb:has(input:checked){color:var(--acc)}
 #left{background:none}#left>.xh{display:flex;align-items:center;gap:8px;padding:3px 4px 7px 6px}#left>.xh .sp{flex:1}
@@ -237,7 +241,7 @@ ul.tree{list-style:none;margin:0;padding-left:16px}ul.tree.root{padding-left:0}
  <div class="xs" data-i="0" title="drag to resize · double-click to reset"></div>
 
  <section id="right" class="pane xp" data-pane="sym">
-  <div class="ph"><b class="pt">Symbol explorer</b><span class="navb"><a onclick="history.back()" title="back (Alt+←, mouse back)">‹</a><a onclick="history.forward()" title="forward (Alt+→)">›</a></span><div class="seg" id="vtab"><a data-v="hits">Active search</a><a data-v="sym">Symbol</a></div><a id="mlink" href="views" title="show this symbol / file in the Model explorer (UML / SysML diagrams; ctrl-click: on its own page)" style="font-size:12px;color:var(--acc);white-space:nowrap">Model explorer</a><span id="vtitle" class="mono"></span><label class="syncb" title="Sync views: symbol / file selections show their default diagram in the Model explorer, diagram selections reveal their code here, and Back / Forward restore both panes together. Off: each explorer navigates on its own."><input type="checkbox" id="csync">Sync views</label><button class="xc" data-col="sym" title="collapse the Symbol explorer (its strip expands it again)">–</button></div>
+  <div class="ph"><b class="pt">Symbol explorer</b><span class="navb"><a onclick="history.back()" title="back (Alt+←, mouse back)">‹</a><a onclick="history.forward()" title="forward (Alt+→)">›</a></span><div class="seg" id="vtab"><a data-v="hits">Active search</a><a data-v="sym">Symbol</a></div><button class="unf" id="unf-hits">unfilter</button><a id="mlink" href="views" title="show this symbol / file in the Model explorer (UML / SysML diagrams; ctrl-click: on its own page)" style="font-size:12px;color:var(--acc);white-space:nowrap">Model explorer</a><span id="vtitle" class="mono"></span><label class="syncb" title="Sync views: symbol / file selections show their default diagram in the Model explorer, diagram selections reveal their code here, and Back / Forward restore both panes together. Off: each explorer navigates on its own."><input type="checkbox" id="csync">Sync views</label><button class="xc" data-col="sym" title="collapse the Symbol explorer (its strip expands it again)">–</button></div>
   <div class="vb pb" id="vhits" style="padding:0"><div class="empty">Ask something, then pick a file.</div></div>
   <div class="vb" id="vsym" hidden>
    <form class="ph" id="sform" onsubmit="event.preventDefault();findSym($('#sq').value)">
@@ -409,7 +413,7 @@ $('#q').addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();h
 $('#qx').addEventListener('click',home);
 function home(quiet){$('#q').value='';$('#qpath').value='';$('#qx').style.display='none';ans=null;fsel=-1;$('#answer').innerHTML='';setHash({q:'',qp:'',k:'',f:''},true);recent();
  $('#vhits').innerHTML='<div class="empty">Ask something, then pick a file.</div>';if(view==='hits')vtitle('');if(quiet!==true)$('#q').focus()}
-function setView(v){view=v;setHash({v:v==='hits'?'':v});$('#mlink').href='views'+dhash(curTarget());$('#vhits').hidden=v!=='hits';$('#vsym').hidden=v!=='sym';
+function setView(v){view=v;$('#right').classList.toggle('v-hits',v==='hits');setHash({v:v==='hits'?'':v});$('#mlink').href='views'+dhash(curTarget());$('#vhits').hidden=v!=='hits';$('#vsym').hidden=v!=='sym';
  document.querySelectorAll('#vtab a').forEach(a=>a.classList.toggle('on',a.dataset.v===v));
  vtitle(v==='hits'?(ans&&fsel>=0?ans.files[fsel].p:''):(cur?cur.path:''))}
 function vtitle(t){$('#vtitle').innerHTML=t?`<a data-file="${esc(t)}" title="open / view in folder / copy path">&lrm;${esc(t)}</a>`:''}
@@ -458,7 +462,7 @@ function drawAnswer(){const d=ans,ip=d.interpreted||{},pf=d.portfolio||{},hits=d
    <span class="fn">${esc(bn)}</span><span class="fs">${f.hs.map(h=>`<span title="${esc(h.sym)}">${esc(lastName(h.sym))}</span>`).join('')}</span>
    <span class="fd" title="${esc(f.p)}">&lrm;${esc(dir)}</span></div>`}).join('');
  $('#answer').innerHTML=`<details class="blk" open><summary><span class="tw" title="roll up / unroll">▾</span>${stw?`<span class="st ${stw}" title="${esc(pf.strength)}">${stw}</span>`:''}<span class="h">Read as</span>${terms}${ign}
-   <span class="dim" style="margin-left:auto">${esc((pf.shown||'').replace(/ \(.*\)/,''))} · ${n(d.ms)} ms</span></summary>
+   <button class="unf" title="clear the path filter (same as × in the filter field)">unfilter</button><span class="dim" style="margin-left:auto">${esc((pf.shown||'').replace(/ \(.*\)/,''))} · ${n(d.ms)} ms</span></summary>
   <div class="bb" data-rz="readas" data-rzmin="60">${voc?`<span class="lab">code says</span><div>${voc}</div>`:''}
    <span class="lab">found by</span><div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">${fb}</div>
    ${ab?`<span class="lab">areas</span><div class="abar">${ab}</div>`:''}
@@ -466,7 +470,7 @@ function drawAnswer(){const d=ans,ip=d.interpreted||{},pf=d.portfolio||{},hits=d
    ${links?`<span class="lab">links</span><div class="lnk">${links}</div>`:''}
    ${led?`<span class="lab">leads</span><div class="lnk">${led}</div>`:''}
    ${notes?`<span class="lab">notes</span><div class="lnk">${notes}</div>`:''}</div></details>
-  <details class="blk" open><summary><span class="tw" title="roll up / unroll">▾</span><span class="h">Files</span><span class="dim">${d.files.length} files · ${hits.length} hits · pick one to open it on the right</span></summary>
+  <details class="blk" open><summary><span class="tw" title="roll up / unroll">▾</span><span class="h">Files</span><span class="dim">${d.files.length} files · ${hits.length} hits · pick one to open it on the right</span><button class="unf" title="clear the path filter (same as × in the filter field)">unfilter</button></summary>
    <div class="files" data-rz="files" data-rzmin="80">${files||'<div class="empty">nothing found</div>'}</div></details>`}
 $('#answer').addEventListener('click',e=>{
  const v=e.target.closest('[data-ask]');if(v){$('#q').value=v.dataset.ask;doSearch();return}
@@ -689,9 +693,17 @@ function clearable(inp,apply){const w=document.createElement('span');w.className
  const x=document.createElement('a');x.className='cx';x.textContent='×';x.title='clear (Esc)';w.appendChild(x);
  const upd=()=>{x.style.display=inp.value?'block':'none'};CLR.push(upd);inp.addEventListener('input',upd);
  const clr=()=>{inp.value='';upd();if(apply)apply();inp.focus()};x.addEventListener('click',e=>{e.preventDefault();clr()});
- inp.addEventListener('keydown',e=>{if(e.key==='Escape'&&inp.value){e.preventDefault();e.stopPropagation();clr()}});upd()}
+ inp.addEventListener('keydown',e=>{if(e.key==='Escape'&&inp.value){e.preventDefault();e.stopPropagation();clr()}});upd();return clr}
 setInterval(()=>CLR.forEach(f=>f()),400);            /* values set by code (history, links) */
-clearable($('#qpath'),()=>{if($('#q').value.trim())doSearch()});clearable($('#sq'));
+/* the path filter narrows the ask: its answer sections (Read as, Files) and the Active search viewer. While the field
+   has text, each of those panels gets a white outline and an "unfilter" button (same as × in the field); all of it goes
+   when the field empties by any means. A new panel opts in with pfAffect(panel, header). */
+const qpClear=clearable($('#qpath'),()=>{if($('#q').value.trim())doSearch()});clearable($('#sq'));
+function pfAffect(panel,header){panel.classList.add('pf-aff');if(header&&!header.querySelector(':scope>.unf'))header.insertAdjacentHTML('beforeend','<button class="unf" title="clear the path filter (same as × in the filter field)">unfilter</button>')}
+const pfUi=()=>{const v=$('#qpath').value.trim();document.body.classList.toggle('pf-on',!!v);
+ document.querySelectorAll('#answer .blk').forEach(b=>b.classList.add('pf-aff'));document.querySelectorAll('.unf').forEach(b=>b.title=`clear the path filter "${v}" (same as × in the filter field)`)};
+pfAffect($('#vhits'));CLR.push(pfUi);$('#qpath').addEventListener('input',pfUi);
+document.addEventListener('click',e=>{const b=e.target.closest('.unf');if(!b)return;e.preventDefault();e.stopPropagation();qpClear()},true);
 
 /* ---------- start ---------- */
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll()});
