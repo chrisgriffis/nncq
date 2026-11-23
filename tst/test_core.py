@@ -370,6 +370,7 @@ def test_profile_export_import_round_trip(prof):
 
 def test_sample_profile_activates_and_links_a_workspace_under_examples(prof, tmp_path, monkeypatch):
     from nncq import profiles
+    monkeypatch.delenv("NNCQ_WORKSPACE_ORBITKIT", raising=False)
     demo = profiles.parse(profiles.EXAMPLES.parent / "profiles" / "_demo" / "profile.toml")    # the bundled demo
     assert demo.root == (profiles.EXAMPLES / "orbitkit").resolve()
     home = tmp_path / "nncq"
