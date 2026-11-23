@@ -337,6 +337,26 @@ def test_profile_links_its_workspace_and_drives_dsl_ignore_and_data_rules(prof, 
         st.close()
 
 
+def test_profile_vcs_field_and_detection(prof, tmp_path):
+    from nncq import profiles, repos, vcs
+    p = profiles.get("acme")
+    assert p.vcs == "" and repos.get("acme").vcs == "none"                   # not set: detected (plain folder)
+    f = p.path
+    f.write_text(f.read_text(encoding="utf-8").replace("[workspace]\n", "[workspace]\nvcs = 'p4'\n", 1), encoding="utf-8")
+    assert profiles.parse(f).vcs == "p4" and repos.get("acme").vcs == "p4"
+    assert vcs.for_root(prof, "p4").kind == "p4" and vcs.for_root(prof, "none").kind == "none"
+    f.write_text(f.read_text(encoding="utf-8").replace("vcs = 'p4'", "vcs = 'svn'"), encoding="utf-8")
+    with pytest.raises(ValueError):
+        profiles.parse(f)
+    g = tmp_path / "gitws"
+    (g / ".git").mkdir(parents=True)
+    assert vcs.detect(g) == "git" and vcs.detect(tmp_path / "acme") == "none"
+    import shutil
+    shutil.copytree(config.ROOT / "profiles" / profiles.TEMPLATE, profiles.DIR / profiles.TEMPLATE)
+    out = profiles.write("acme3", prof, [], [], vcs="git")
+    assert profiles.parse(out).vcs == "git"
+
+
 def test_profile_export_import_round_trip(prof):
     from nncq import profiles
     f = profiles.export("acme")

@@ -380,6 +380,7 @@ nncq's code knows no particular codebase. Everything specific to one lives in a 
 
 - **Where the workspace is** on this machine: candidate roots, marker files that must exist, optionally a substring of the git remote. The first candidate that passes wins; `NNCQ_WORKSPACE_<NAME>` overrides. The workspace must be outside the nncq folder.
 - **What to index:** code folders, extra ignores, extra file extensions and non-code formats.
+- **Version control** (`vcs = "git" | "p4" | "none"` in `[workspace]`, proposed by the wizard from `.git` / P4CONFIG / `p4 where`, detected at run time when absent): which buttons the dashboard's editor and file menu offer (git stage / revert, p4 edit / revert, Save checks a read-only p4 file out first; none: just Save).
 - **Definition languages** (`[[dsl]]`): brace-block IDL / schema / service files, chunked at declarations, with `name : Base` inheritance.
 - **Data cross-reference** (`[[xref]]`): a glob for data files plus regexes with named groups, `instance` (`type`: a code type the file instantiates) and `reference` (`ref`: another data file), with `type_suffix` and `label`. Only then do the data tools exist (`data_for_code`, `code_for_data`, `data_file`, `hot_data`; CLI `nncq data uses|code|file|top`).
 - **MCP notes:** vocabulary and conventions, appended to the server instructions agents see.

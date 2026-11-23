@@ -12,6 +12,7 @@ description = "What this codebase is (shown to agents in the MCP instructions)"
 roots = ["~/src/example", "D:/example"]
 markers = ["CMakeLists.txt"]        # paths that must exist under the root
 git_remote = ""                     # optional: substring the git origin URL must contain
+vcs = ""                            # git | p4 | none: which VCS buttons the dashboard editor shows ("" = detect)
 dirs = []                           # code folders under the root to index ([] = everything)
 ignore = []                         # extra gitignore-style globs (case-insensitive), e.g. "**/Prebuild/**"
 ignore_defaults = true              # also skip the built-in vendored / generated defaults (walk.py)

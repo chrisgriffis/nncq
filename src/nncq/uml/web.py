@@ -122,7 +122,7 @@ def _local(op: str, a: dict) -> dict:
     if op == "read":
         data = p.read_bytes()
         return {"path": rel, "abs": str(p), "text": data.decode("utf-8", "replace"),
-                "sha1": hashlib.sha1(data).hexdigest(), "vcs": vcs.for_root(r.root).status(rel),
+                "sha1": hashlib.sha1(data).hexdigest(), "vcs": vcs.for_root(r.root, r.vcs).status(rel),
                 "readonly": not os.access(p, os.W_OK)}
     if op == "save":
         cur = p.read_bytes()
@@ -136,9 +136,9 @@ def _local(op: str, a: dict) -> dict:
         p.write_bytes(text.encode("utf-8"))
         _reindex(r, rel)
         return {"ok": True, "path": rel, "sha1": hashlib.sha1(p.read_bytes()).hexdigest(),
-                "vcs": vcs.for_root(r.root).status(rel), "reindex": "started"}
+                "vcs": vcs.for_root(r.root, r.vcs).status(rel), "reindex": "started"}
     if op == "vcs":
-        v = vcs.for_root(r.root)
+        v = vcs.for_root(r.root, r.vcs)
         what = a.get("op", "status")
         if what not in ("status", "edit", "add", "stage", "revert"):
             return {"error": f"unknown vcs op {what!r}"}
@@ -523,7 +523,7 @@ $('#bmd').onclick=async()=>{if(!cur)return;const md=await text('markdown');ed=nu
 
 /* ---------- the shared code view (codeview.py): colouring, symbol links, editor ---------- */
 /*__CODEVIEW__*/
-NC.api=(u,b)=>api(u,{...b,repo});const hlc=NC.text,langOf=NC.langOf;
+NC.api=(u,b)=>api(u,{...b,repo});if(QS.get('debug')==='1'&&QS.get('vcs'))NC.vcs=QS.get('vcs');const hlc=NC.text,langOf=NC.langOf;
 NC.onPick=(l)=>{const p=l.sym?l.path:l.file;if(!p)return;source(p,l.sym?l.to_line:1);
  const x=l.sym&&synced()&&host();if(x&&x.modelPick)x.modelPick({h:location.hash,q:l.sym,path:l.path||''})};
 

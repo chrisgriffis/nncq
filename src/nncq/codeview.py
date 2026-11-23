@@ -132,7 +132,7 @@ const NC=(()=>{const E=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'
   return String(t).replace(/\r/g,'').split('\n').map((l,i)=>{const no=start+i,on=many?mark.has(no):no===mark;
    return `<span class="l${on?' hl':''}" data-ln="${no}"${!many&&on?' id="mk"':''}><span class="ln">${no}</span>${hl(l,lang,by[no])}</span>`}).join('')}
  const numbered=c=>{const rows=String(c).replace(/\r/g,'').split('\n');const m=/^(\d+): /.exec(rows[0]||'');return {start:m?+m[1]:1,text:rows.map(r=>r.replace(/^\d+: /,'')).join('\n')}};
- let api=null,onPick=null;
+ let api=null,onPick=null,vcsKind='';
  /* render into el now, then again with links once /api/code/links answers (cached per range) */
  const LC=new Map();
  async function fill(el,t,start,path,mark,o){el.innerHTML=code(t,start,path,mark);if(!api||!path)return;const n=String(t).split('\n').length,k=path+'|'+start+'|'+n;
@@ -158,24 +158,28 @@ const NC=(()=>{const E=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'
  /* plain-text editor: Save (Ctrl+S) via the loopback save op, git / p4, then the server re-indexes the file */
  async function editor(box,o){const L=(op,a)=>api('api/uml/local/'+op,{...a,repo:o.repo||''});const d=await L('read',{path:o.path});
   if(d.error){box.innerHTML=`<div class="err" style="padding:10px">${E(d.error)}</div>`;return}
-  let sha1=d.sha1,dirty=false;const v=d.vcs||{},isP4=v.vcs==='p4',isGit=v.vcs==='git';
-  const vst=(v,ro)=>`${E(v.vcs||'no vcs')}: ${E(v.state||'')}${ro?' · <span class="err">read-only'+(isP4?' (p4 edit to check out)':'')+'</span>':''}${v.error||v.note?' · '+E(v.error||v.note):''}`;
+  /* the buttons follow the repo's VCS (profile [workspace] vcs, else detected): git, p4, or none */
+  let sha1=d.sha1,dirty=false,ro=d.readonly;const v=d.vcs||{},kind=vcsKind||v.vcs||'none',isP4=kind==='p4',isGit=kind==='git';
+  const vst=(v,ro)=>kind==='none'?(ro?'<span class="err">read-only</span>':'no version control'):`${E(kind)}: ${E(v.state||'')}${ro?' · <span class="err">read-only'+(isP4?' (Save checks it out: p4 edit)':'')+'</span>':''}${v.error||v.note?' · '+E(v.error||v.note):''}`;
   box.innerHTML=`<div class="nce"><div class="nce-bar"><b class="mono">${E(o.path)}</b><span class="st">${vst(v,d.readonly)}</span><span class="sp"></span>
-   ${isP4?'<button data-v="edit">p4 edit</button><button data-v="add">p4 add</button><button data-v="revert">p4 revert</button>':''}${isGit?'<button data-v="stage">git stage</button><button data-v="revert">git revert</button>':''}
+   ${isP4?'<button data-v="edit" title="check the file out for edit">p4 edit</button><button data-v="revert" title="p4 revert: discard the opened changes">p4 revert</button>':''}${isGit?'<button data-v="stage">git stage</button><button data-v="revert" title="git checkout: discard local changes">git revert</button>':''}
    <button data-e="save" title="Ctrl+S">Save</button><button data-e="cancel" title="back to the view (Esc)">Cancel</button></div>
    <div class="nce-body"><pre class="nce-gut"></pre><textarea spellcheck="false"></textarea></div></div>`;
   const ta=box.querySelector('textarea'),gut=box.querySelector('.nce-gut'),st=box.querySelector('.st');ta.value=d.text;
   const nums=()=>{const n=ta.value.split('\n').length;if(gut.dataset.n!=n){gut.dataset.n=n;gut.textContent=Array.from({length:n},(_,i)=>i+1).join('\n')}};nums();
   ta.addEventListener('input',()=>{dirty=true;nums()});ta.addEventListener('scroll',()=>{gut.scrollTop=ta.scrollTop});
   const pos=d.text.split('\n').slice(0,Math.max(0,(o.line||1)-1)).join('\n').length;ta.focus();ta.setSelectionRange(pos,pos);ta.scrollTop=Math.max(0,((o.line||1)-8)*18);
-  const save=async()=>{const j=await L('save',{path:o.path,text:ta.value,sha1});if(j.error){st.innerHTML=`<span class="err">${E(j.error)}</span>`;return false}
-   sha1=j.sha1;dirty=false;LC.clear();st.innerHTML='saved · re-indexing · '+vst(j.vcs||{});o.onSaved&&o.onSaved();return true};
+  const save=async()=>{let pre='';
+   if(isP4&&ro){const c=await L('vcs',{path:o.path,op:'edit'});if(c.error){st.innerHTML=`<span class="err">p4 edit failed: ${E(c.error)}</span>`;return false}ro=false;pre='checked out (p4 edit) · '}
+   const j=await L('save',{path:o.path,text:ta.value,sha1});if(j.error){st.innerHTML=`<span class="err">${E(j.error)}</span>`;return false}
+   sha1=j.sha1;dirty=false;LC.clear();st.innerHTML=pre+'saved · re-indexing · '+vst(j.vcs||{});o.onSaved&&o.onSaved();return true};
   const close=()=>{if(dirty&&!confirm('Discard unsaved changes?'))return;o.onClose&&o.onClose()};
   ta.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){e.preventDefault();save()}else if(e.key==='Escape'){e.preventDefault();close()}
    else if(e.key==='Tab'){e.preventDefault();const a=ta.selectionStart;ta.setRangeText('\t',a,ta.selectionEnd,'end');dirty=true}});
   box.querySelector('.nce-bar').addEventListener('click',async e=>{const b=e.target.closest('button');if(!b)return;
    if(b.dataset.e==='save')return save();if(b.dataset.e==='cancel')return close();
-   const j=await L('vcs',{path:o.path,op:b.dataset.v});st.innerHTML=j.error?`<span class="err">${E(j.error)}</span>`:'ok · '+vst(j.status||j);
+   if(b.dataset.v==='revert'&&!confirm(`${kind} revert ${o.path}? Local changes are lost.`))return;
+   const j=await L('vcs',{path:o.path,op:b.dataset.v});st.innerHTML=j.error?`<span class="err">${E(j.error)}</span>`:'ok · '+vst(j.status||j);if(!j.error&&b.dataset.v==='edit')ro=false;
    if(!j.error&&b.dataset.v==='revert'){const r=await L('read',{path:o.path});if(!r.error){ta.value=r.text;sha1=r.sha1;dirty=false;nums()}}})}
- return {hl,text,code,fill,numbered,langOf,editor,pal:__PALETTE__,set api(f){api=f},set onPick(f){onPick=f}}})();
+ return {hl,text,code,fill,numbered,langOf,editor,pal:__PALETTE__,set api(f){api=f},set onPick(f){onPick=f},set vcs(k){vcsKind=k}}})();
 """

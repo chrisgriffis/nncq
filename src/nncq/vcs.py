@@ -177,9 +177,33 @@ def _up(root: Path):
     yield from p.parents
 
 
-def for_root(root: str | Path) -> NoVcs:
-    """The workspace's VCS. git: a .git above the root; p4: a P4CONFIG file above it, else `p4 where` succeeds."""
+KINDS = ("git", "p4", "none")
+_detected: dict[str, str] = {}
+
+
+def detect(root: str | Path) -> str:
+    """'git' | 'p4' | 'none' for a workspace (cached per root): what the init wizard proposes, and the fallback
+    when the profile does not say."""
+    key = os.path.normcase(str(Path(root)))
+    if key not in _detected:
+        _detected[key] = _detect(Path(root)).kind
+    return _detected[key]
+
+
+def for_root(root: str | Path, kind: str = "") -> NoVcs:
+    """The workspace's VCS: `kind` (the profile's vcs = git | p4 | none) when given, else detected."""
     root = Path(root)
+    if kind == "git":
+        return Git(root)
+    if kind == "p4":
+        return Perforce(root)
+    if kind == "none":
+        return NoVcs(root, "the profile says vcs = none")
+    return _detect(root)
+
+
+def _detect(root: Path) -> NoVcs:
+    """git: a .git above the root; p4: a P4CONFIG file above it, else `p4 where` succeeds."""
     try:
         if any((d / ".git").exists() for d in _up(root)):
             return Git(root)

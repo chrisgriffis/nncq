@@ -412,6 +412,7 @@ $('#s-search').addEventListener('keydown',e=>{if(e.altKey&&(e.key==='ArrowLeft'|
 /* ---------- code: the shared code view (codeview.py) with symbol links, and its editor ---------- */
 /*__CODEVIEW__*/
 NC.api=async(u,b)=>{const r=await fetch(u,{method:'POST',headers:{...H,'Content-Type':'application/json'},body:JSON.stringify({...b,...(multi&&sel?{repo:sel}:{})})});return r.json()};
+if(QS.get('debug')==='1'&&QS.get('vcs'))NC.vcs=QS.get('vcs');      /* test hook: ?debug=1&vcs=p4 */
 NC.onPick=(l)=>{if(l.sym)openSym(l.sym,l.path||'');else if(l.file){target('sym');showFile(l.file,1)}};
 const numbered=NC.numbered;
 
@@ -432,13 +433,19 @@ function setView(v){view=v;$('#right').classList.toggle('v-hits',v==='hits');set
  document.querySelectorAll('#vtab a').forEach(a=>a.classList.toggle('on',a.dataset.v===v));
  vtitle(v==='hits'?(ans&&fsel>=0?ans.files[fsel].p:''):(cur?cur.path:''))}
 function vtitle(t){$('#vtitle').innerHTML=t?`<a data-file="${esc(t)}" title="open / view in folder / copy path">&lrm;${esc(t)}</a>`:''}
+/* the repo's VCS (profile [workspace] vcs, else detected; from /api/status): which VCS actions to offer */
+const repoVcs=()=>QS.get('debug')==='1'&&QS.get('vcs')||((last&&last.repos||[]).find(r=>r.name===sel)||(last&&last.repos||[])[0]||{}).vcs||'none';
 function fileMenu(path,x,y){let m=$('#pmenu');if(!m){m=document.createElement('div');m.id='pmenu';document.body.appendChild(m)}
- m.innerHTML='<a data-op="open">Open in editor</a><a data-op="reveal">View in folder</a><a data-op="copy">Copy path</a>';
+ const vk=repoVcs();
+ m.innerHTML='<a data-op="open">Open in editor</a><a data-op="reveal">View in folder</a><a data-op="copy">Copy path</a>'
+  +(vk==='git'?'<a data-op="vcs:stage">git stage</a>':vk==='p4'?'<a data-op="vcs:edit">p4 edit (check out)</a>':'');
  m.style.display='block';m.style.left=Math.min(x,innerWidth-180)+'px';m.style.top=(y+6)+'px';
  m.onclick=async e=>{const op=(e.target.closest('[data-op]')||{}).dataset?.op;if(!op)return;e.stopPropagation();
   if(op==='copy'){navigator.clipboard.writeText(path);m.style.display='none';return}
-  try{const r=await fetch('api/uml/local/'+op,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({repo:sel,path})}).then(r=>r.json());
-   if(r.error){m.innerHTML='<div class="msg">'+esc(r.error)+'</div>';return}}catch(err){m.innerHTML='<div class="msg">'+esc(String(err))+'</div>';return}
+  const vop=op.startsWith('vcs:')?op.slice(4):'';
+  try{const r=await fetch('api/uml/local/'+(vop?'vcs':op),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({repo:sel,path,...(vop?{op:vop}:{})})}).then(r=>r.json());
+   if(r.error){m.innerHTML='<div class="msg">'+esc(r.error)+'</div>';return}
+   if(vop){m.innerHTML='<div class="msg">'+esc(`${repoVcs()} ${vop}: ok`+((r.status||{}).state?' · '+r.status.state:''))+'</div>';return}}catch(err){m.innerHTML='<div class="msg">'+esc(String(err))+'</div>';return}
   m.style.display='none'}}
 document.addEventListener('click',e=>{const a=e.target.closest('#vtitle [data-file]');const m=$('#pmenu');
  if(a){e.preventDefault();e.stopPropagation();fileMenu(a.dataset.file,e.clientX,e.clientY);return}
@@ -767,7 +774,7 @@ document.addEventListener('click',e=>{const s=e.target.closest('summary');if(s&&
  const nt=(performance.getEntriesByType('navigation')[0]||{}).type;
  if(nt!=='reload'&&nt!=='back_forward'){if(m0&&!s0)target('model',true);else if(s0&&!m0)target('sym',true)}
  skipFollow=!!m0;const h1=m0?'#'+m0:s0&&syncOn?dhash({s:s0,p:h0.get('p')||''}):'';frPend=null;
- fr.src='views?embed=1'+(tok?'&token='+encodeURIComponent(tok):'')+(QS.get('debug')==='1'?'&debug=1':'')+h1}
+ fr.src='views?embed=1'+(tok?'&token='+encodeURIComponent(tok):'')+(QS.get('debug')==='1'?'&debug=1':'')+(QS.get('vcs')?'&vcs='+encodeURIComponent(QS.get('vcs')):'')+h1}
 if(QS.get('debug')==='1')debugPanel();
 setView(new URLSearchParams(location.hash.slice(1)).get('v')||'hits');
 applyHash().finally(()=>{skipFollow=false});
