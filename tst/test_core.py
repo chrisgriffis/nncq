@@ -6,7 +6,7 @@ import json
 import numpy as np
 import pytest
 
-from nncq import answers, chunker, config, graph, health, indexer
+from nncq import answers, chunker, config, graph, health, indexer, search
 from nncq.repos import Repo
 from nncq.store import Store
 
@@ -415,3 +415,54 @@ def test_public_mode_is_read_only(monkeypatch):
     assert names and "ask" in names and "uml_view" in names and not names & server.PUBLIC_DROP
     assert asyncio.run(server.web_tool("uml_build", {}))["error"].startswith("not available")
     assert server.control("pause")["error"] and not server.worker.paused()
+
+SUITE_YAML = """suites:
+  - name: physics_smoke
+    entry: eng::stepWorld
+    src: engine/physics.cpp
+settings:
+  fast: true
+  body_type: eng::Body
+"""
+BUILD_XML = """<Project>
+  <Target Name="RunTests">
+    <Test name="Integrate">eng::integrate</Test>
+  </Target>
+</Project>
+"""
+CONFIG_JSON = '{"world": {"step": "eng::stepWorld", "file": "engine\\\\physics.cpp", "note": "a plain sentence"}}'
+
+
+def test_structured_data_is_opt_in_and_links_to_code(repo, monkeypatch):
+    (repo.root / "tests").mkdir()
+    (repo.root / "tests" / "suite.yaml").write_text(SUITE_YAML, encoding="utf-8")
+    (repo.root / "build.xml").write_text(BUILD_XML, encoding="utf-8")
+    (repo.root / "config.json").write_text(CONFIG_JSON, encoding="utf-8")
+    (repo.root / "scripts" / "load.lua").write_text('local cfg = load_yaml("tests/suite.yaml")\n', encoding="utf-8")
+    indexer.update(repo, log=lambda m: None)
+    st = _store(repo)
+    try:
+        assert not st.q("SELECT 1 FROM files WHERE lang IN ('xml','json','yaml')")      # off by default
+    finally:
+        st.close()
+    monkeypatch.setenv("NNCQ_TEXT_LANGS", "markdown,xml,json,yaml")
+    indexer.update(repo, log=lambda m: None)
+    st = _store(repo)
+    try:
+        outline = "\n".join(search.file_outline(st, "tests/suite.yaml")["symbols"])
+        for q in ("key suites", "item suites.physics_smoke", "key suites.physics_smoke.entry", "key settings.fast"):
+            assert q in outline
+        assert graph.find_defs(st, "RunTests")[0].kind == "element"
+        assert not graph.is_type("key") and not graph._defs_exact(st, "physics_smoke")      # never a call target
+        callers = graph.called_by(st, "stepWorld")["callers"]
+        assert callers[0].startswith("eng::mainLoop")                                       # code first
+        assert {c.split()[0] for c in callers if "[data ref]" in c} == {"suites.physics_smoke.entry", "world.step"}
+        assert any(c.startswith("Project.RunTests.Integrate") and "[data ref]" in c
+                   for c in graph.called_by(st, "integrate")["callers"])
+        assert [r["sym"] for r in graph.symbol_context(st, "eng::Body")["data_refs_list"]] == ["settings.body_type"]
+        assert graph.calls(st, "suites.physics_smoke.entry")["calls_list"][0]["sym"] == "eng::stepWorld"
+        assert set(graph.file_context(st, "engine/physics.cpp")["included_by"]["top"]) == {"config.json", "tests/suite.yaml"}
+        assert graph.file_context(st, "tests/suite.yaml")["included_by"]["top"] == ["scripts/load.lua"]
+        assert not st.q("SELECT 1 FROM edges WHERE kind='ref' AND label LIKE '%plain sentence%'")   # prose: no ref
+    finally:
+        st.close()

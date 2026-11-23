@@ -22,6 +22,7 @@ ignore_defaults = true              # also skip the built-in vendored / generate
 # Extra file extensions: ext -> language ("text" = line windows, or a tree-sitter language such as "cpp").
 extensions = {}
 # Non-code formats to index (default: markdown, cmake, make, dockerfile, proto, batch).
+# Add "xml", "json", "yaml" to parse structured data (build rules, test lists, config) into symbols and references.
 # text_langs = ["markdown", "cmake"]
 
 # Brace-block definition languages (C-like IDL / schema / service definition files): chunked at declarations,

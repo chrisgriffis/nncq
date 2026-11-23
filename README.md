@@ -89,6 +89,7 @@ nncq's code knows no particular codebase. Everything specific to one lives in a 
 
 - **Where the workspace is** on this machine: candidate roots, marker files that must exist, optionally a substring of the git remote. The first candidate that passes wins; `NNCQ_WORKSPACE_<NAME>` overrides. Workspaces live outside the nncq folder (the bundled demo under `demo/` excepted); a relative root is relative to the home folder.
 - **What to index:** code folders, extra ignores, extra file extensions and non-code formats.
+- **Structured data** (opt-in: add `xml`, `json`, `yaml` to `text_langs`, or to `NNCQ_TEXT_LANGS`): build rules, test lists and config parsed with tree-sitter. Keys and elements become symbols (outline, Find, `find_symbol`), named by their path (`build.targets.ThermalTest`; a list item by its `name`/`id`/`key` field). Values shaped like code names (`Foo::Bar`, `pkg.mod.Cls`, `ThermalTest`, `run_suite`) are references: the callers of that code list the data that names it, tagged `data ref`, from any language. Path-like values are file references (`file_context` includes / included by), as are string literals in code naming a data file. Not in UML views.
 - **Version control** (`vcs = "git" | "p4" | "none"`, proposed by the wizard, detected at run time when absent): which actions the dashboard's editor offers (git stage / revert; p4 edit / revert, Save checks a read-only p4 file out first; none: just Save).
 - **Definition languages** (`[[dsl]]`): brace-block IDL / schema / service files, chunked at declarations, with `name : Base` inheritance.
 - **Data cross-reference** (`[[xref]]`): a glob for data files plus regexes with named groups, `instance` (`type`: a code type the file instantiates) and `reference` (`ref`: another data file), with `type_suffix` and `label`. Only then do the data tools exist (`data_for_code`, `code_for_data`, `data_file`, `hot_data`; CLI `nncq data uses|code|file|top`).
@@ -471,6 +472,7 @@ Parsing runs at about 500 files/s per CPU core. **The trade-off is honest:** lin
 - **FTS:** identifiers are also indexed as sub-words, so `crc` matches `crcFailures_` and `Crc::check`. The symbol column is weighted above the body.
 - **Search:** BM25 top 100 and dense top 100 merged by reciprocal-rank fusion; the top 40 go through the cross-encoder. Without vectors it falls back to lexical search and says so.
 - **Data files** (`datarefs.py`, from a profile's `[[xref]]` rules) are not chunked or embedded: one ripgrep pass per rule records the instance types per file and the file→file references; code↔data joins go through type names.
+- **Structured data** (`structdata.py`, XML / JSON / YAML when kept): chunked along keys / elements; data symbols are never types and never call targets; values naming code become `ref` edges (name-based, any language).
 - **UML** (`uml/`): `extract.py` (facts during the parse), `buildinfo.py` (CMake, presets, Python packaging, without running anything), `model.py` (components, file dependencies), `views.py` (generators), `catalog.py` (stored views, compositions, staleness, provenance, exports), `render_mermaid.py` / `render_ascii.py`, `web.py` (the Model explorer).
 - **Storage layout:**
   ```
@@ -569,7 +571,7 @@ Over stdio, nncq runs **inside** the agent's MCP process and exits with it, stop
 | `NNCQ_GPU_BREAK_EVERY_S` / `NNCQ_GPU_BREAK_MS` / `NNCQ_GPU_RESERVE_MB` | `5` / `100` / `1024` | give the GPU up this often for this long; VRAM left for other apps |
 | `NNCQ_RERANK` / `NNCQ_RERANK_CANDIDATES` | `true` / `40` | cross-encoder reranking |
 | `NNCQ_INDEX_PROCS` | half the cores (max 8) | T0 parser processes |
-| `NNCQ_TEXT_LANGS` | `markdown,cmake,make,dockerfile,proto,batch` | non-code formats to index |
+| `NNCQ_TEXT_LANGS` | `markdown,cmake,make,dockerfile,proto,batch` | non-code formats to index; add `xml,json,yaml` to parse structured data into symbols and references |
 | `NNCQ_EXTRA_EXTENSIONS` / `NNCQ_IGNORE` | | e.g. `.foo,.bar=cpp`; extra ignore globs |
 | `NNCQ_MAX_RESPONSE_KB` / `NNCQ_CACHE_MINUTES` | `16` / `15` | trim and page larger answers; answer cache lifetime (0 = off) |
 
@@ -605,3 +607,4 @@ The README visuals are reproducible from the demo, against a running server (`de
 - **Next:** changelist stamping and range deltas, constructor and callback edges in the call graph, override links, Linux `init.sh` ([docs/ideas.md](docs/ideas.md)).
 - **Editor plugins** calling the same local server: symbol card, call tree, impact and diagrams for the symbol under the caret; "what data uses this" for profile data rules.
 - **Round-trip UML:** diagram edits turned into source patches (the model keeps the spans and declaration text it needs).
+- **TODO: ERD for structured data:** an entity-relationship view of XML / JSON / YAML (entities = elements / keys, relationships = the `ref` and file references) in the Model explorer; today structured data is in the symbol explorer only.

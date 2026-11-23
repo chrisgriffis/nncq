@@ -21,7 +21,7 @@ from nncq.store import Store
 from nncq.uml.render_mermaid import PALETTE
 
 _LINK_KINDS = ("call", "include", "import", "inherits", "composes", "aggregates", "associates", "depends",
-               "instantiates", "var")
+               "instantiates", "var", "ref")
 
 
 def links(st: Store, path: str, start: int = 1, end: int = 1 << 30, cap: int = 2000) -> dict:
@@ -55,6 +55,7 @@ def links(st: Store, path: str, start: int = 1, end: int = 1 << 30, cap: int = 2
                 res = {"file": hit[0]}
         else:
             defs = graph._defs_exact(st, graph.short(dst), fam) if kind == "call" else \
+                graph._defs_exact(st, graph.short(dst)) if kind == "ref" else \
                 [x for x in graph.find_defs(st, dst, kinds={"type"}) if graph.is_type(x.kind)
                  and (not fam or set(graph.lang_family(st, x.file_id)) & set(fam))]
             groups: dict[str, graph.Def] = {}

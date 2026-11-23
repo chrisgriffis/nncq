@@ -6,6 +6,7 @@ Three strategies, picked by language:
   dsl    C-like definition languages declared by a codebase profile ([[dsl]] in profile.toml): brace-matched
          blocks at the declaration keywords the profile lists (class/struct/enum/service/...). With a
          module_keyword, `module X;` qualifies the declarations that follow (X.Foo).
+  data   XML / JSON / YAML when kept (structdata.py): keys / elements as symbols, references to code names / files.
   text   everything else: line windows (markdown: by heading).
 
 Data files covered by a profile's [[xref]] rules are not chunked; datarefs.py cross-references them.
@@ -92,6 +93,10 @@ def _parser(lang: str):
 
 
 _PP_LANGS = {"c", "cpp", "hlsl", "csharp", "objc", "cuda"}
+# a string literal naming a data file ("tests/suite.yaml"): an include edge, code -> data
+_STR_NODES = {"string", "string_literal", "interpreted_string_literal", "raw_string_literal"}
+_STR_QUOTES = re.compile(r"^[A-Za-z@$]*[\"'`]+|[\"'`]+$")
+_DATA_FILE = re.compile(r"^[\w./\\-]*[\w-]\.(xml|json|ya?ml)$", re.I)
 _PP_COND = re.compile(rb"^[ \t]*#[ \t]*(if|ifdef|ifndef|elif|else|endif)\b(.*)$")
 _PP_ZERO = re.compile(rb"^(?:0|false)\b")
 _NOT_CR = re.compile(rb"[^\r]")
@@ -156,6 +161,9 @@ def process(path: str, data: bytes, lang: str, max_chars: int = 3000, dsl: dict 
             return _dsl(path, lines, lang, max_chars, dsl)
         if L.is_ast_lang(lang):
             return _Ast(path, data, lines, lang, max_chars, uml).run()
+        if lang in L.DATA_LANGS:
+            from nncq import structdata
+            return structdata.parse(path, data, lines, lang, max_chars)
     except Exception as e:  # a parser failure must never lose the file: fall back to windows
         r = _text(lines, lang, max_chars)
         r.error = f"{type(e).__name__}: {e}"
@@ -469,6 +477,12 @@ class _Ast:
                                              n.start_point[0] + 1, inc))
             elif self.x is not None:
                 self.x.on_node(n, encl, encl_kind)
+            if n.type in _STR_NODES and n.end_byte - n.start_byte < 300:
+                lit = _STR_QUOTES.sub("", _txt(n).strip())
+                if _DATA_FILE.match(lit):
+                    lit = lit.replace("\\", "/")
+                    self.r.edges.append(Edge(encl, lit.rsplit("/", 1)[-1].lower(), "include",
+                                             n.start_point[0] + 1, lit))
             for c in reversed(n.children):
                 if c.named_child_count or c.is_named:
                     stack.append((c, parents, encl, encl_kind))

@@ -574,7 +574,7 @@ async function expand(nd){if(nd.leaf)return;if(nd.kids){nd.open=!nd.open;drawTre
  nd.kids.forEach(mark);      /* also inside folder groups (Depends outline) */
  nd.loading=false;nd.open=true;drawTree()}
 /* the API's structured rows (callers_list / calls_list / definitions_list); the text forms are for agents */
-const sfx=c=>(c.times>1?`<span class="badge">×${c.times}</span>`:'')+(c.test?'<span class="badge k-test">test</span>':'')
+const sfx=c=>(c.times>1?`<span class="badge">×${c.times}</span>`:'')+(c.test?'<span class="badge k-test">test</span>':'')+(c.match==='data ref'?'<span class="badge bn">data ref</span>':'')
  +(c.by_name?'<span class="badge bn" title="matched by name only: may be another function with this name">by name</span>':c.match&&!['unique name','by name'].includes(c.match)?`<span class="badge">${esc(c.match)}</span>`:'');
 const loadCallers=async nd=>{const d=await T('called_by',{name:nd.sym,path:nd.dpath||'',limit:80});
  const out=d.callers_list?d.callers_list.map(c=>mk({sym:c.sym,path:c.path,line:c.line,dpath:c.path,extra:sfx(c),leaf:/^\(/.test(c.sym),noroot:/^\(/.test(c.sym),load:loadCallers}))
@@ -704,7 +704,7 @@ async function openSym(name,path,again,quiet){pendFile='';if(!nav&&!quiet)target
   $('#scard').innerHTML=`<a class="fh mono" data-fp="${esc(p)}" title="open this file in the Symbol explorer">${esc(p)}<span class="dim">:${a}</span></a><div class="t">${short(cur.sym)} <span class="kind k-${esc(d.kind||'')}">${esc(d.kind||'')}</span></div>
    ${d.parent?`<div class="dim" style="font-size:11px">in <span class="chip" data-s="${esc(d.parent)}">${esc(d.parent)}</span></div>`:''}
    ${d.signature?`<div class="sig">${esc(d.signature)}</div>`:''}<div class="chips">${facts}</div>
-   ${chips(d.bases,'bases')}${chips(d.derived,'derived')}${chips(d.callers_list||d.callers,'callers')}${chips(d.calls_list?d.calls_list.filter(c=>c.sym):(d.calls||[]).filter(s=>!/ambiguous|not in index/.test(s)),'calls')}`;
+   ${chips(d.bases,'bases')}${chips(d.derived,'derived')}${chips(d.callers_list||d.callers,'callers')}${chips(d.data_refs_list,'data refs')}${chips(d.calls_list?d.calls_list.filter(c=>c.sym):(d.calls||[]).filter(s=>!/ambiguous|not in index/.test(s)),'calls')}`;
   show(p,a,b);buildTree()}
  catch(e){$('#scard').innerHTML=`<span class="err">${esc(e.message)}</span>`}}
 
