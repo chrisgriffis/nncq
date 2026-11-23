@@ -180,7 +180,8 @@ pre.code.tall{max-height:none}
 .kind.k-class,.badge.k-class{background:#1b2a44;color:#7cc0ff}.kind.k-interface,.badge.k-interface,.kind.k-trait,.badge.k-trait{background:#2a1f44;color:#c9a8ff}
 .kind.k-enum,.badge.k-enum{background:#3a2d10;color:#f0c050}.kind.k-struct,.badge.k-struct,.kind.k-union,.badge.k-union,.kind.k-record,.badge.k-record{background:#13332e;color:#5fd4c0}
 .kind.k-function,.badge.k-function,.kind.k-method,.badge.k-method{background:#14301f;color:#6fdc9e}.kind.k-field,.badge.k-field,.kind.k-variable,.badge.k-variable,.kind.k-constant,.badge.k-constant,.kind.k-property,.badge.k-property{background:#2d2a18;color:#e0cc6e}
-.dmode{display:inline-flex;margin:2px 0 4px}#dgraph{height:calc(100% - 30px);min-height:160px;overflow:auto;position:relative;background:var(--panel2);border-radius:6px;cursor:grab}#dgraph svg{max-width:none}
+.dhead{display:flex;gap:8px;align-items:center;margin:2px 0 4px;font-size:11px}#dthumb{height:calc(100% - 32px);min-height:140px;display:flex;align-items:center;justify-content:center;background:var(--panel2);border:1px solid var(--line);border-radius:6px;cursor:zoom-in;overflow:hidden;padding:6px}
+#dthumb:hover{border-color:var(--acc)}#dthumb svg{pointer-events:none}
 .kind.k-file{background:#232a33;color:#b8c6d8}.kind.k-namespace,.badge.k-namespace,.kind.k-module,.badge.k-module{background:#262033;color:#c3a8f0}
 .badge.bn{font-style:italic;background:none;border:1px dashed #3d4658}.badge.k-test{background:#262033;color:#c3a8f0}.tn .badge+.badge{margin-left:-2px}
 .k{color:#c792ea}.s{color:#c3e88d}.c{color:#5f6b7a;font-style:italic}.n{color:#f78c6c}.pp{color:#89ddff}
@@ -247,7 +248,7 @@ ul.tree{list-style:none;margin:0;padding-left:16px}ul.tree.root{padding-left:0}
   <div class="vb" id="vsym" hidden>
    <form class="ph" id="sform" onsubmit="event.preventDefault();findSym($('#sq').value)">
     <input type="text" id="sq" placeholder="Symbol: name or ns::Class::method" autocomplete="off"><button>Find</button>
-    <div class="seg" id="tmode"><a data-m="callers">Callers</a><a data-m="callees">Callees</a><a data-m="outline">File outline</a><a data-m="deps" title="what this type depends on and what depends on it (a member: its owner type)">Type deps</a></div>
+    <div class="seg" id="tmode"><a data-m="outline">File outline</a><a data-m="callers">Callers</a><a data-m="callees">Callees</a><a data-m="depends" title="dependencies: of a type (a member: its owner type) or of a file (includes / imports), both ways">Depends</a></div>
     <div class="recent" id="srecent"></div></form>
    <div class="scard" id="scard"></div>
    <section class="pane idle" id="s-symbols" data-rz="symbols" data-rzmin="80"><div class="pb" id="tree"><div class="empty">Find a symbol, or click one in search hits.</div></div></section>
@@ -518,7 +519,7 @@ $('#vhits').addEventListener('click',async e=>{const s=e.target.closest('.sym[da
  const more=document.createElement('span');m.previousElementSibling.appendChild(more);NC.fill(more,c.text,c.start,d.path);m.remove()});
 
 /* ---------- symbol explorer ---------- */
-let tmode=(t=>t==='types'?'deps':t)(localStorage.getItem('nncq.tmode')||'callers'),cur=null,nodes=[],selNode=null;
+let tmode=(t=>t==='types'||t==='deps'?'depends':t)(localStorage.getItem('nncq.tmode')||'outline'),cur=null,nodes=[],selNode=null;
 const reDef=/^(\S+) \[(\w+)\] (.+):(\d+)-(\d+)\s*\n?\s*(.*)$/s,reCaller=/^(\S+)\s{2,}(.+?):(\d+)(?:\s+(.*))?$/,
  reCall=/^L(\d+) (\S+)(?: x(\d+))? (?:-> (.*)|\((.*)\))$/,reOut=/^(\s*)(\d+)-(\d+) (\S+) (\S+)\s+\|\s?(.*)$/;
 function short(sym){const p=String(sym).split(/::|\./);const l=p.pop();return (p.length?`<span class="q">${esc(p.slice(-1)[0])}::</span>`:'')+`<b>${esc(l)}</b>`}
@@ -528,12 +529,12 @@ function tnode(nd){const car=nd.leaf?'':nd.open?'▾':'▸';const lab=nd.label||
   ${nd.badge?`<span class="badge ${nd.bw?'w':'k-'+esc(nd.badge)}">${esc(nd.badge)}</span>`:''}${nd.extra||''}${nd.sym&&nd.path&&!nd.noroot?`<span class="rr" data-r="${nd.id}" title="explore this symbol">◎</span>`:''}<span class="f" title="${esc(nd.path||'')}">${nd.path?'&lrm;'+esc(nd.path)+(nd.line?':'+nd.line:''):''}</span></div>
   ${nd.open&&nd.kids?`<ul class="tree">${nd.kids.map(tnode).join('')||'<li class="dim" style="padding:2px 22px">none</li>'}</ul>`:''}</li>`}
 function drawTree(){const roots=nodes.filter(x=>x.root);$('#tree').innerHTML=roots.length?`<ul class="tree root">${roots.map(tnode).join('')}</ul>`:'<div class="empty">Find a symbol, or click one in search hits.</div>';
- if(tmode==='deps'&&roots.length&&DEPS.root)depsUi()}
+ if(tmode==='depends'&&roots.length&&DEPS.sum)depsUi()}
 function ancestors(nd){const s=new Set();for(let p=nd;p;p=p.parent!=null?nodes[p.parent]:null)s.add(p.sym);return s}
 async function expand(nd){if(nd.leaf)return;if(nd.kids){nd.open=!nd.open;drawTree();return}
  nd.loading=true;drawTree();
  try{nd.kids=await nd.load(nd)}catch(e){nd.kids=[mk({label:`<span class="err">${esc(e.message)}</span>`,leaf:true})]}
- nd.kids.forEach(c=>c.parent=nd.id);const anc=ancestors(nd);nd.kids.forEach(c=>{if(c.sym&&anc.has(c.sym)&&!c.leaf){c.leaf=true;c.badge='recursion';c.bw=true}});
+ nd.kids.forEach(c=>c.parent=nd.id);const anc=ancestors(nd);nd.kids.forEach(c=>{if(c.sym&&anc.has(c.sym)&&!c.leaf){c.leaf=true;c.badge=tmode==='depends'?'cycle ↺':'recursion';c.bw=true}});
  nd.loading=false;nd.open=true;drawTree()}
 /* the API's structured rows (callers_list / calls_list / definitions_list); the text forms are for agents */
 const sfx=c=>(c.times>1?`<span class="badge">×${c.times}</span>`:'')+(c.test?'<span class="badge k-test">test</span>':'')
@@ -562,53 +563,58 @@ async function outlineTree(path){const d=await T('file_outline',{path});const ro
   while(stack.length>dep)stack.pop();(stack.length?stack[stack.length-1].kids:roots).push(nd);if(stack.length)nd.parent=stack[stack.length-1].id;stack.push(nd)}
  for(const x of nodes)if(x.kids&&!x.kids.length&&x.badge){x.leaf=true;delete x.kids}
  return roots}
-/* ---------- Type deps: the type's dependency graph (type_deps), as a lazy tree (out / in, expand per node) or a graph ---------- */
-const DEPS={nodes:new Map(),edges:new Map(),root:'',view:localStorage.getItem('nncq.depview')||'tree'};
-const EKIND={inherits:'interface',composes:'class',aggregates:'struct',associates:'component',depends:'package',instantiates:'function',var:'config'};
+/* ---------- Depends: dependency graph of the selected type (a member: its owner type) or file (includes / imports).
+   A thumbnail of the generated 'depends' view (click: full graph in the Model explorer), or a rollup outline grouped
+   by folder, expandable per node (lazy, a cycle stops at ↺) ---------- */
+const DEPS={view:localStorage.getItem('nncq.depview')||'thumb',sum:null,key:''};
+const EKIND={inherits:'interface',composes:'class',aggregates:'struct',associates:'component',depends:'package',instantiates:'function',var:'config',include:'module',import:'module'};
 const ekb=k=>{const c=NC.pal[EKIND[k]]||NC.pal.block;return `<span class="badge" style="background:${c[0]};color:${c[1]}">${esc(k)}</span>`};
-function depsAdd(d){for(const x of d.nodes||[])if(!DEPS.nodes.has(x.id))DEPS.nodes.set(x.id,x);for(const e of d.edges||[])DEPS.edges.set(e.from+'|'+e.to+'|'+e.kind,e)}
-function depRows(d,qual,way){const by=new Map();for(const e of d.edges||[]){const o=way==='out'?(e.from===qual&&e.to):(e.to===qual&&e.from);if(!o)continue;
-  if(!by.has(o))by.set(o,[]);by.get(o).push(e)}
- const out=[...by.entries()].map(([q,es])=>{const x=(d.nodes||[]).find(y=>y.id===q)||{id:q,label:q};
-  return mk({sym:q,path:x.path,line:x.line,dpath:x.path,extra:es.map(e=>ekb(e.kind)).join('')+(es.reduce((a,e)=>a+(e.n||1),0)>1?`<span class="badge">×${es.reduce((a,e)=>a+(e.n||1),0)}</span>`:''),
-   badge:x.kind,load:depLoader(way)})});
- const more=(way==='out'?d.more_out:d.more_in)||{};if(more[qual])out.push(mk({label:`<span class="dim">+${more[qual]} more</span>`,leaf:true}));return out}
-const depLoader=way=>async nd=>{const d=await T('type_deps',{name:nd.sym,direction:way,depth:1,limit:40});depsAdd(d);return depRows(d,d.type||nd.sym,way)};
-async function depsTree(){DEPS.nodes.clear();DEPS.edges.clear();const d=await T('type_deps',{name:cur.sym,direction:'both',depth:1,limit:40});
- if(d.error)return [mk({label:`<span class="dim">${esc(cur.sym)}: ${esc(d.error)}</span>`,leaf:true})];depsAdd(d);DEPS.root=d.type;
- const own=d.type!==cur.sym?`<span class="dim"> · owner of ${short(cur.sym)}</span>`:'';
- const root=mk({sym:d.type,path:d.path,line:d.line,dpath:d.path,noroot:true,kids:[],open:true,label:`${short(d.type)} <span class="kind k-${esc(d.kind)}">${esc(d.kind)}</span>${own}`});
- const o=mk({label:'<span class="dim">depends on →</span>',kids:depRows(d,d.type,'out'),open:true}),i=mk({label:'<span class="dim">← used by</span>',kids:depRows(d,d.type,'in'),open:true});
+let curFile='';
+const depArgs=()=>cur?{name:cur.sym,mode:'type'}:{name:curFile,mode:'include'};
+function depRows(d,id,way){const by=new Map();for(const e of d.edges||[]){const o=way==='out'?(e.from===id&&e.to):(e.to===id&&e.from);if(!o)continue;if(!by.has(o))by.set(o,[]);by.get(o).push(e)}
+ const folders=new Map();
+ for(const [o,es] of by){const x=(d.nodes||[]).find(y=>y.id===o)||{id:o,label:o,path:''};const n=es.reduce((a,e)=>a+(e.n||1),0),cyc=es.some(e=>e.cycle);
+  const nd=mk({sym:x.id,label:d.mode==='include'?`<b>${esc(x.label)}</b>`:'',path:x.path,line:x.line,dpath:x.path,file:d.mode==='include',noroot:d.mode==='include',
+   extra:es.map(e=>ekb(e.kind)).join('')+(n>1?`<span class="badge">×${n}</span>`:''),badge:cyc?'cycle ↺':d.mode==='include'?'':x.kind,bw:cyc,leaf:cyc,load:cyc?null:depLoader(way,d.mode)});
+  const f=(x.path||'').split('/').slice(0,-1).join('/')||'(root)';if(!folders.has(f))folders.set(f,[]);folders.get(f).push(nd)}
+ const more=(way==='out'?d.more_out:d.more_in)||{},out=[];
+ for(const [f,ks] of folders){if(folders.size===1){out.push(...ks);break}const g=mk({label:`<span class="dim">${esc(f)}/</span> <span class="badge">${ks.length}</span>`,kids:ks,open:ks.length<=6});ks.forEach(k=>k.parent=g.id);out.push(g)}
+ if(more[id])out.push(mk({label:`<span class="dim">+${more[id]} more</span>`,leaf:true}));return out}
+const depLoader=(way,mode)=>async nd=>{const d=await T('depends',{name:nd.sym,mode,direction:way,depth:1,limit:40});d.mode=mode;return depRows(d,d.root||nd.sym,way)};
+async function depsTree(){const a=depArgs(),d=await T('depends',{...a,direction:'both',depth:1,limit:40});d.mode=a.mode;
+ if(d.error)return [mk({label:`<span class="dim">${esc(a.name)}: ${esc(d.error)}</span>`,leaf:true})];
+ const outs=(d.edges||[]).filter(e=>e.from===d.root).length,ins=(d.edges||[]).filter(e=>e.to===d.root).length;DEPS.sum={a,d,outs,ins};
+ const own=a.mode==='type'&&d.type!==cur.sym?`<span class="dim"> · owner of ${short(cur.sym)}</span>`:'';
+ const root=mk({sym:d.root,path:d.path||d.file,line:d.line||1,dpath:d.path||d.file,noroot:true,kids:[],open:true,
+  label:(a.mode==='type'?`${short(d.root)} <span class="kind k-${esc(d.kind)}">${esc(d.kind)}</span>`:`<b>${esc(base(d.root))}</b> <span class="kind k-file">file</span>`)+own});
+ const o=mk({label:`<span class="dim">${a.mode==='type'?'depends on':'includes'} →</span>`,kids:depRows(d,d.root,'out'),open:true}),
+  i=mk({label:`<span class="dim">← ${a.mode==='type'?'used by':'included by'}</span>`,kids:depRows(d,d.root,'in'),open:true});
  for(const g of [o,i]){g.parent=root.id;g.kids.forEach(c=>c.parent=g.id);if(!g.kids.length){g.leaf=true;g.label+=' <span class="dim">none</span>';delete g.kids}}
  root.kids=[o,i];return [root]}
-let MMD=null;
+let MMD=null,thumbN=0;
 function mermaidReady(){if(window.mermaid)return Promise.resolve();if(MMD)return MMD;MMD=new Promise((ok,no)=>{const s=document.createElement('script');s.src='vendor/mermaid.min.js'+(tok?'?token='+encodeURIComponent(tok):'');
-  s.onload=()=>{mermaid.initialize({startOnLoad:false,theme:'dark',securityLevel:'strict',flowchart:{htmlLabels:true},themeVariables:{darkMode:true,background:'#0b0d11',lineColor:'#8b95a7',fontSize:'12px'}});ok()};s.onerror=()=>no(new Error('Mermaid not available (nncq uml init)'));document.head.appendChild(s)});return MMD}
-let dgN=0;
-async function depsGraph(){const box=$('#dgraph');if(!box)return;const ns=[...DEPS.nodes.values()],ids=new Map(ns.map((x,i)=>[x.id,'n'+i]));
- if(!ns.length){box.innerHTML='<div class="empty">no dependencies</div>';return}
- const L=['flowchart LR'],q=t=>String(t).replace(/"/g,'#quot;');
- ns.forEach(x=>{L.push(`  ${ids.get(x.id)}["«${q(x.kind)}»<br/>${q(x.label)}"]`);L.push(`  class ${ids.get(x.id)} k_${NC.pal[x.kind]?x.kind:x.kind==='struct'||x.kind==='union'?'struct':x.kind==='interface'||x.kind==='trait'?'interface':x.kind==='enum'?'enum':'class'}${x.id===DEPS.root?',root':''}`)});
- const es=[...DEPS.edges.values()].filter(e=>ids.has(e.from)&&ids.has(e.to));
- es.forEach((e,i)=>{L.push(`  ${ids.get(e.from)} -->|"${e.kind}${e.n>1?' ×'+e.n:''}"| ${ids.get(e.to)}`);const c=NC.pal[EKIND[e.kind]]||NC.pal.block;L.push(`  linkStyle ${i} stroke:${c[1]},color:${c[1]}`)});
- for(const [k,[f,s]] of Object.entries(NC.pal))L.push(`  classDef k_${k} fill:${f},stroke:${s},color:#d7dae0`);L.push('  classDef root stroke-width:3px');
- box.innerHTML='<div class="empty"><span class="spin"></span></div>';
- try{await mermaidReady();const {svg}=await mermaid.render('dg'+(++dgN),L.join('\n'));box.innerHTML=svg;const el=box.querySelector('svg');NC.panzoom(box,el);
-  const back=new Map([...ids.entries()].map(([k,v])=>[v,k]));
-  el.querySelectorAll('g.node').forEach(g=>{const m=/-(n\d+)-/.exec(g.id);const x=m&&DEPS.nodes.get(back.get(m[1]));if(!x)return;g.style.cursor='pointer';
-   const t=document.createElementNS('http://www.w3.org/2000/svg','title');t.textContent=`${x.kind} ${x.id}\n${x.path}:${x.line}\nclick: show · double-click: explore`;g.appendChild(t);
-   g.addEventListener('click',ev=>{ev.stopPropagation();if(box.dataset.panned)return;const nd={sym:x.id,path:x.path,dpath:x.path,line:x.line};show(x.path,x.line);selSync(nd)});
-   g.addEventListener('dblclick',ev=>{ev.stopPropagation();openSym(x.id,x.path)})})}
+  s.onload=()=>{mermaid.initialize({startOnLoad:false,theme:'dark',securityLevel:'strict',flowchart:{htmlLabels:true},themeVariables:{darkMode:true,background:'#0b0d11',lineColor:'#8b95a7',fontSize:'12px'}});ok()};
+  s.onerror=()=>{MMD=null;no(new Error('Mermaid is not available (nncq uml init)'))};document.head.appendChild(s)});return MMD}
+/* the generated 'depends' view, scaled into a thumbnail; a click opens it in the Model explorer */
+async function depsThumb(){const box=$('#dthumb');if(!box)return;const a=depArgs();box.innerHTML='<div class="empty"><span class="spin"></span> generating…</div>';
+ try{const v=await T('uml_view',{kind:'depends',...(a.mode==='type'?{subject:a.name}:{path:a.name}),depth:2,format:'mermaid'});DEPS.key=v.key;
+  await mermaidReady();if(!box.isConnected)return;const {svg}=await mermaid.render('dt'+(++thumbN),v.mermaid);box.innerHTML=svg;const el=box.querySelector('svg');
+  el.style.maxWidth='100%';el.style.maxHeight='100%';el.style.width='100%';el.removeAttribute('height');box.title='open the full dependency graph in the Model explorer';
+  const cyc=/(\d+) cycle/.exec(v.mermaid);if(cyc)$('#dsum').insertAdjacentHTML('beforeend',` · <span class="badge w">${cyc[1]} cycle${cyc[1]>1?'s':''} ↺</span>`)}
  catch(e){box.innerHTML=`<div class="empty err">${esc(e.message||e)}</div>`}}
-function depsUi(){const h=`<div class="dmode seg"><a data-dv="tree" class="${DEPS.view==='tree'?'on':''}">tree</a><a data-dv="graph" class="${DEPS.view==='graph'?'on':''}" title="the loaded part as a graph: expand nodes in the tree to grow it">graph</a></div>`;
- $('#tree').insertAdjacentHTML('afterbegin',h);if(DEPS.view==='graph'){$('#tree').querySelector('ul.tree')&&($('#tree').querySelector('ul.tree').hidden=true);$('#tree').insertAdjacentHTML('beforeend','<div id="dgraph"></div>');depsGraph()}}
-async function buildTree(){nodes=[];selNode=null;if(!cur){drawTree();return}
+$('#tree').addEventListener('click',e=>{const t=e.target.closest('#dthumb');if(!t||!DEPS.key)return;e.stopPropagation();target('model',true);
+ mnav('#/uml/view/'+encodeURIComponent('view:'+DEPS.key)+'?view='+encodeURIComponent(DEPS.key),true)},true);
+function depsUi(){const s=DEPS.sum;if(!s)return;const t=$('#tree');
+ t.insertAdjacentHTML('afterbegin',`<div class="dhead"><span class="seg"><a data-dv="thumb" class="${DEPS.view==='thumb'?'on':''}">graph</a><a data-dv="outline" class="${DEPS.view==='outline'?'on':''}">outline</a></span>
+  <span class="dim" id="dsum">${s.a.mode==='type'?'type':'file'} · ${s.outs} out · ${s.ins} in${s.d.cycles?` · <span class="badge w">${s.d.cycles} cycle${s.d.cycles>1?'s':''} ↺</span>`:''}</span></div>`);
+ if(DEPS.view==='thumb'){const u=t.querySelector('ul.tree');if(u)u.hidden=true;t.insertAdjacentHTML('beforeend','<div id="dthumb"></div>');depsThumb()}}
+async function buildTree(){nodes=[];selNode=null;if(!cur&&!(tmode==='depends'&&curFile)){drawTree();return}
  $('#tree').innerHTML='<div class="empty"><span class="spin"></span></div>';
  try{if(tmode==='callers'||tmode==='callees'){const r=mk({root:true,sym:cur.sym,path:cur.path,line:cur.line,dpath:cur.path,noroot:true,load:tmode==='callers'?loadCallers:loadCallees});
    r.label=`${short(cur.sym)} <span class="dim">${tmode==='callers'?'is called by':'calls'}</span>`;drawTree();await expand(r)}
   else if(tmode==='outline'){(await outlineTree(cur.path)).forEach(r=>r.root=true);const hit=nodes.find(x=>x.sym===cur.sym);if(hit)selNode=hit.id;drawTree();
    const el=$('#tree .tn.cur');if(el)el.scrollIntoView({block:'nearest'})}
-  else{(await depsTree()).forEach(r=>r.root=true);drawTree();depsUi()}}
+  else{DEPS.sum=null;$('#s-symbols').classList.remove('idle');(await depsTree()).forEach(r=>r.root=true);drawTree()}}
  catch(e){$('#tree').innerHTML=`<div class="empty err">${esc(e.message)}</div>`}}
 function segs(){document.querySelectorAll('#tmode a').forEach(a=>a.classList.toggle('on',a.dataset.m===tmode))}
 $('#tmode').addEventListener('click',e=>{const a=e.target.closest('[data-m]');if(!a)return;tmode=a.dataset.m;localStorage.setItem('nncq.tmode',tmode);segs();buildTree()});
@@ -620,7 +626,7 @@ $('#tree').addEventListener('click',async e=>{const dv=e.target.closest('[data-d
  if(nd.resolve&&!nd.path){try{const x=defsOf(await T('find_symbol',{name:nd.sym,kind:'type'}))[0];if(x){Object.assign(nd,{path:x.path,line:x.start,end:x.end,dpath:x.path});drawTree();show(x.path,x.start,x.end);selSync(nd)}}catch(err){}return}
  selSync(nd);
  if(nd.callPath&&tmode==='callees')show(nd.callPath,nd.callLine);else if(nd.path)show(nd.path,nd.line,nd.end);});
-$('#tree').addEventListener('dblclick',e=>{const row=e.target.closest('.tn');if(!row)return;const nd=nodes[+row.dataset.id];if(nd.sym&&!nd.noroot)openSym(nd.sym,nd.dpath||nd.path)});
+$('#tree').addEventListener('dblclick',e=>{const row=e.target.closest('.tn');if(!row)return;const nd=nodes[+row.dataset.id];if(nd.file)return showFile(nd.path);if(nd.sym&&!nd.noroot)openSym(nd.sym,nd.dpath||nd.path)});
 async function show(path,line,end){setView('sym');closeEdit();$('#cpath').innerHTML=`<span class="mono">${esc(path)}</span><span>${line?':'+line:''}</span><span style="flex:1"></span><a class="ced" data-path="${esc(path)}" data-line="${line||1}" title="edit this file here (Ctrl+S saves, Esc cancels)">Edit</a>`;$('#sview').innerHTML='<span class="spin"></span>';
  try{const a=Math.max(1,(line||1)-15),b=end&&end-line<300?end+8:(line||1)+60;const d=await T('read_code',{path,start:a,end:b});const c=numbered(d.code);
   const box=$('#sview').parentElement,center=()=>{const mkr=$('#sview #mk');if(mkr)box.scrollTop=mkr.offsetTop-box.clientHeight/2};
@@ -629,8 +635,8 @@ async function show(path,line,end){setView('sym');closeEdit();$('#cpath').innerH
 /* edit mode for the symbol explorer's code: the shared editor in place of the view */
 /* Sync views: a row picked in a tree (callers, callees, outline, type tree) is a selection too: the model pane shows its
    default diagram, as one history entry; the tree itself keeps its root (double-click / ◎ re-roots) */
-function selSync(nd){if(!nd||!nd.sym||/^\(/.test(nd.sym)||nd.site||!(nd.dpath||nd.path))return;noteSym({s:nd.sym,p:nd.dpath||nd.path});if(!syncOn)return;
- const h=dhash({s:nd.sym,p:nd.dpath||nd.path}).slice(1);setHash({m:h},true);mrestore(h)}
+function selSync(nd){if(!nd||!nd.sym||/^\(/.test(nd.sym)||nd.site||!(nd.dpath||nd.path))return;const t=nd.file?{p:nd.path}:{s:nd.sym,p:nd.dpath||nd.path};
+ noteSym(t);if(!syncOn)return;const h=dhash(t).slice(1);setHash({m:h},true);mrestore(h)}
 function closeEdit(){const e=$('#sedit');if(e){e.remove();$('#sview').parentElement.hidden=false}}
 $('#cpath').addEventListener('click',e=>{const a=e.target.closest('.ced');if(!a)return;e.preventDefault();closeEdit();const pb=$('#sview').parentElement;pb.hidden=true;
  const box=document.createElement('div');box.id='sedit';box.style.cssText='flex:1;min-height:0;display:flex;flex-direction:column';pb.after(box);const path=a.dataset.path,line=+a.dataset.line;
@@ -650,7 +656,7 @@ async function openSym(name,path,again,quiet){if(!nav&&!quiet)target('sym');$('#
    $('#scard').innerHTML=`<div class="t">${esc(name)}</div><div class="dim">${defs.length?defs.length+' definitions: pick one':'not found'+(d.error?': '+esc(d.error):'')}</div>
     <div class="chips">${defs.map(m=>`<span class="chip" data-s="${esc(m[1])}" data-p="${esc(m[3])}" title="${esc(m[3])}:${m[4]}"><b>${esc(m[1])}</b> <span class="dim">${esc(m[2])} · ${esc(base(m[3]))}</span></span>`).join('')}</div>`;return}
   const at=String(d.defined_at[0]),m=/^(.+):(\d+)(?:-(\d+))?$/.exec(at),p=m?m[1]:at,a=m?+m[2]:1,b=m&&m[3]?+m[3]:a;
-  cur={sym:d.symbol||name,req:name,path:p,line:a,end:b,kind:d.kind,parent:d.parent||''};if(syncOn)$('#sq').value=cur.sym;$('#s-symbols').classList.remove('idle');setView('sym');
+  cur={sym:d.symbol||name,req:name,path:p,line:a,end:b,kind:d.kind,parent:d.parent||''};curFile='';if(syncOn)$('#sq').value=cur.sym;$('#s-symbols').classList.remove('idle');setView('sym');
   if(!nav&&!quiet)srecentAdd(cur.sym,p);else srecent();if(!quiet)follow({s:cur.sym,p});
   const facts=[d.call_sites_total&&`<span class="chip"><b>${esc(d.call_sites_total)}</b></span>`,d.mentioned_in_files!=null&&`<span class="chip">mentioned in <b>${n(d.mentioned_in_files)}</b> files</span>`,
    d.defined_at.length>1&&`<span class="chip">${d.defined_at.length} definitions</span>`].filter(Boolean).join('');
@@ -712,7 +718,7 @@ function setSync(v){if(v===syncOn)return syncUi();syncOn=v;askUi();localStorage.
  else setHash({sync:'0'})}
 $('#csync').addEventListener('change',e=>setSync(e.target.checked));
 function mrestore(m){const h='#'+(m||'/uml/default');if(frReady){const w=fr.contentWindow;if(w.location.hash!==h)w.location.replace(w.location.pathname+w.location.search+h)}else frPend=h}
-function showFile(path,line){cur=null;nodes=[];drawTree();$('#s-symbols').classList.add('idle');$('#sq').value='';
+function showFile(path,line){cur=null;curFile=path;nodes=[];drawTree();$('#s-symbols').classList.add('idle');$('#sq').value='';if(tmode==='depends')setTimeout(buildTree);
  $('#scard').innerHTML=`<div class="t">${esc(base(path))} <span class="kind k-file">file</span></div><div class="dim mono" style="font-size:11px">${esc(path)}</div>`;show(path,line||1);vtitle(path)}
 /* a code target for a Model explorer selection: {q, path, line} -> the symbol / file in the Symbol explorer, quietly */
 function syncCode(t){if(t.q)return openSym(t.q,t.path||'',true,true);if(t.path){setHash({s:'',p:'',sf:t.path});showFile(t.path,t.line)}}

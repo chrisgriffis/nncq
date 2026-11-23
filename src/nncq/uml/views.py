@@ -269,8 +269,10 @@ def class_view(st: Store, subject: str = "", under: str = "", depth: int = 1, me
                                    "('inherits','composes','aggregates','associates')", (t.qualname,)):
                 near.append(ctx.type_for(dst, t.path))
             if t.parent:                                  # a nested type: its enclosing type
-                near += [x for x in ctx.find(t.parent, kinds={"type"}) if x.kind in TYPE_KINDS
-                         and graph.norm(x.qualname) == graph.norm(t.parent)][:1]
+                fam = set(graph.lang_family(st, t.file_id))
+                near += [x for x in ctx.find(t.parent, kinds={"type"}) if x.kind in TYPE_KINDS      # same language:
+                         and graph.norm(x.qualname) == graph.norm(t.parent)                            # a C++ namespace
+                         and (not fam or fam & set(graph.lang_family(st, x.file_id)))][:1]              # is no Python class
             for (src,) in st.q("SELECT DISTINCT src FROM edges WHERE dst=? AND kind='inherits' LIMIT 12", (t.name,)):
                 near += [x for x in ctx.q("WHERE s.qualname=? AND s.kind IN (%s) LIMIT 1" % ",".join(
                     "?" * len(TYPE_KINDS)), (src, *TYPE_KINDS))]
@@ -869,7 +871,7 @@ def depends_view(st: Store, subject: str = "", path: str = "", depth: int = 2, m
     more = sum((g.get("more_out") or {}).values()) + sum((g.get("more_in") or {}).values())
     notes = ([{"text": f"{g['cycles']} cycle(s): dashed edges"}] if g.get("cycles") else []) + \
         ([{"text": f"+{more} more neighbours not shown (cap {max_nodes} per node)"}] if more else [])
-    model = {"version": MODEL_VERSION, "kind": "depends", "title": f"{'File' if files else 'Type'} deps: {root['label']}",
+    model = {"version": MODEL_VERSION, "kind": "depends", "title": f"Depends ({'file' if files else 'type'}): {root['label']}",
              "subject": g["root"], "layout": {"direction": "LR"}, "nodes": nodes, "edges": edges, "notes": notes,
              "groups": [{"id": "g_" + slug(k or "root"), "label": k or "(root)", "nodes": v} for k, v in groups.items()],
              "params": {"depth": depth, "mode": "include" if files else "type", "cycles": g.get("cycles", 0),

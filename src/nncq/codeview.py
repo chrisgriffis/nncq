@@ -177,14 +177,5 @@ const NC=(()=>{const E=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'
    if(b.dataset.e==='save')return save();if(b.dataset.e==='cancel')return close();
    const j=await L('vcs',{path:o.path,op:b.dataset.v});st.innerHTML=j.error?`<span class="err">${E(j.error)}</span>`:'ok · '+vst(j.status||j);
    if(!j.error&&b.dataset.v==='revert'){const r=await L('read',{path:o.path});if(!r.error){ta.value=r.text;sha1=r.sha1;dirty=false;nums()}}})}
- /* pan / zoom an SVG inside a scroll box: wheel zooms at the cursor (the SVG's own width: crisp), drag pans;
-    box.dataset.panned is set while a drag just happened, so click handlers can ignore it */
- function panzoom(box,svg){if(!svg)return;const vb=svg.viewBox&&svg.viewBox.baseVal,w0=vb&&vb.width||svg.getBBox().width;let z=Math.min(1,(box.clientWidth-16)/w0||1);
-  const set=v=>{z=Math.max(.1,Math.min(6,v));svg.style.width=(w0*z)+'px';svg.style.maxWidth='none';svg.removeAttribute('height')};set(z);
-  box.addEventListener('wheel',e=>{e.preventDefault();const r=box.getBoundingClientRect(),sr=svg.getBoundingClientRect(),px=(e.clientX-sr.left)/z,py=(e.clientY-sr.top)/z,z1=z*Math.pow(1.0015,-e.deltaY);
-   set(z1);const sr2=svg.getBoundingClientRect();box.scrollLeft+=sr2.left+px*z-e.clientX;box.scrollTop+=sr2.top+py*z-e.clientY},{passive:false});
-  let p=null;box.addEventListener('pointerdown',e=>{if(e.button)return;p={x:e.clientX,y:e.clientY,l:box.scrollLeft,t:box.scrollTop,m:false};delete box.dataset.panned});
-  box.addEventListener('pointermove',e=>{if(!p)return;const dx=e.clientX-p.x,dy=e.clientY-p.y;if(!p.m&&Math.hypot(dx,dy)<5)return;p.m=true;box.dataset.panned='1';box.scrollLeft=p.l-dx;box.scrollTop=p.t-dy});
-  const end=()=>{if(p&&p.m)setTimeout(()=>delete box.dataset.panned,0);p=null};box.addEventListener('pointerup',end);box.addEventListener('pointerleave',end)}
- return {hl,text,code,fill,numbered,langOf,editor,panzoom,pal:__PALETTE__,set api(f){api=f},set onPick(f){onPick=f}}})();
+ return {hl,text,code,fill,numbered,langOf,editor,pal:__PALETTE__,set api(f){api=f},set onPick(f){onPick=f}}})();
 """

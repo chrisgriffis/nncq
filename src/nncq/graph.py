@@ -815,8 +815,9 @@ def type_deps(store: Store, name: str, direction: str = "both", depth: int = 1, 
     if not defs:
         d0 = next(iter(find_defs(store, name)), None)
         if d0 is not None and d0.parent:
+            fam = set(lang_family(store, d0.file_id))
             defs = [d for d in find_defs(store, d0.parent, kinds={"type"}) if is_type(d.kind)
-                    and norm(d.qualname) == norm(d0.parent)]
+                    and norm(d.qualname) == norm(d0.parent) and (not fam or fam & set(lang_family(store, d.file_id)))]
     if not defs:
         return {**_not_found(store, name), "nodes": [], "edges": []}
     root = defs[0]
