@@ -115,19 +115,19 @@ RULES = """Rules:
   dashboard; links carry revisions, the page flags outdated exports), json for edits. ASCII only renders plain
   views (no compositions / embedded diagrams) and is capped ('+N more'): use markdown for the rest."""
 
-EXAMPLE_VIEW = {"key": "device-connect", "kind": "class", "title": "How devices connect",
-                "nodes": [{"id": "mgr", "ref": "sym:servicehost::ConnectionManager", "members": "auto"},
-                          {"id": "conn", "ref": "sym:AndroidConnection"},
-                          {"id": "usb", "type": "external", "label": "USB stack", "note": "libusb"}],
-                "edges": [{"from": "mgr", "to": "conn", "kind": "uses", "label": "opens"},
-                          {"from": "conn", "to": "usb", "kind": "depends"}], "auto_edges": True}
-EXAMPLE_COMPOSITION = {"id": "device-access", "name": "Device access", "description": "everything between CLI and device",
-                       "members": [{"id": "cli", "ref": "comp:servicehostCLI"},
-                                   {"id": "lib", "ref": "comp:servicehost"},
-                                   {"id": "farm", "bespoke": {"type": "block", "label": "Device farm",
-                                                               "description": "physical devices on USB hubs"}}],
-                       "connectors": [{"from": "cli", "to": "lib", "kind": "uses"},
-                                      {"from": "lib", "to": "farm", "kind": "flows-to", "label": "adb / usb"}]}
+EXAMPLE_VIEW = {"key": "downlink-path", "kind": "class", "title": "How telemetry gets decoded",
+                "nodes": [{"id": "pipe", "ref": "sym:telemetry::Pipeline", "members": "auto"},
+                          {"id": "dec", "ref": "sym:telemetry::IDecoder"},
+                          {"id": "sdr", "type": "external", "label": "SDR driver", "note": "vendor library"}],
+                "edges": [{"from": "pipe", "to": "dec", "kind": "uses", "label": "decodes with"},
+                          {"from": "dec", "to": "sdr", "kind": "depends"}], "auto_edges": True}
+EXAMPLE_COMPOSITION = {"id": "ground-segment", "name": "Ground segment", "description": "everything between the antenna and the archive",
+                       "members": [{"id": "app", "ref": "comp:groundd"},
+                                   {"id": "tlm", "ref": "comp:orbit_telemetry"},
+                                   {"id": "sat", "bespoke": {"type": "block", "label": "Satellite",
+                                                              "description": "spacecraft in low Earth orbit"}}],
+                       "connectors": [{"from": "app", "to": "tlm", "kind": "uses"},
+                                      {"from": "sat", "to": "app", "kind": "flows-to", "label": "UHF downlink"}]}
 
 
 def protocol() -> dict:

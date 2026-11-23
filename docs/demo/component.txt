@@ -1,0 +1,68 @@
+Components: workspace
+
++-------------------------+  +-------------------------+  +--------------------+  +-----------------------+
+| <<executable>>          |  | <<executable>>          |  | <<library STATIC>> |  | <<library STATIC>>    |
+| orbit_tests             |  | groundd                 |  | orbit_core         |  | orbit_link            |
++-------------------------+  +-------------------------+  +--------------------+  +-----------------------+
+| ( needs orbit_core      |  | ( needs orbit_core      |  | o Log.h (4)        |  | o Radio.h (3)         |
+| ( needs orbit_link      |  | ( needs orbit_link      |  | o Clock.h (3)      |  | o LoopbackRadio.h (2) |
+| ( needs orbit_sched     |  | ( needs orbit_sched     |  | o Crc.h (2)        |  | o SdrRadio.h (2)      |
+| ( needs orbit_telemetry |  | ( needs orbit_telemetry |  | o Frame.h (2)      |  | o Antenna.h (2)       |
++-------------------------+  +-------------------------+  | o RingBuffer.h (1) |  +-----------------------+
+                                                          +--------------------+  | ( needs orbit_core    |
+                                                                                  +-----------------------+
+
++-------------------------+  +----------------------+  +------------------------+  +-------------+
+| <<library STATIC>>      |  | <<library STATIC>>   |  | <<package>>            |  | <<script>>  |
+| orbit_sched             |  | orbit_telemetry      |  | orbitkit-tools         |  | orbit-tools |
++-------------------------+  +----------------------+  +------------------------+  +-------------+
+| o Scheduler.h (2)       |  | o Pipeline.h (3)     |  | ( needs orbitkit_tools |  | (no ports)  |
+| o Ephemeris.h (1)       |  | o CcsdsDecoder.h (1) |  +------------------------+  +-------------+
++-------------------------+  +----------------------+
+| ( needs orbit_core      |  | ( needs orbit_core   |
+| ( needs orbit_link      |  | ( needs orbit_link   |
+| ( needs orbit_telemetry |  +----------------------+
++-------------------------+
+
++-------------------+  +------------------------+
+| <<package>>       |  | <<script>>             |
+| orbitkit_tools    |  | cli.py                 |
++-------------------+  +------------------------+
+| o decoders.py (1) |  | ( links orbitkit_tools |
+| o passes.py (1)   |  +------------------------+
+| o __init__.py (1) |
++-------------------+
+
+Relations:
+  orbit_tests.r3 ---- orbit_core   Crc.h x2
+  orbit_tests.r4 ---- orbit_link   LoopbackRadio.h x2
+  orbit_tests.r5 ---- orbit_sched   Scheduler.h x1
+  orbit_tests.r6 ---- orbit_telemetry   CcsdsDecoder.h x2
+  orbit_tests.r6 ---- orbit_telemetry   Pipeline.h x1
+  groundd.r3 ---- orbit_core   Log.h x2
+  groundd.r3 ---- orbit_core   Clock.h x1
+  groundd.r4 ---- orbit_link   SdrRadio.h x1
+  groundd.r4 ---- orbit_link   Radio.h x1
+  groundd.r4 ---- orbit_link   LoopbackRadio.h x1
+  groundd.r4 ---- orbit_link   Antenna.h x1
+  groundd.r5 ---- orbit_sched   Scheduler.h x1
+  groundd.r5 ---- orbit_sched   Ephemeris.h x1
+  groundd.r6 ---- orbit_telemetry   Pipeline.h x1
+  orbit_link.r3 ---- orbit_core   Log.h x2
+  orbit_link.r3 ---- orbit_core   RingBuffer.h x1
+  orbit_link.r3 ---- orbit_core   Frame.h x1
+  orbit_sched.r3 ---- orbit_core   Clock.h x4
+  orbit_sched.r3 ---- orbit_core   Log.h x1
+  orbit_sched.r4 ---- orbit_link   Antenna.h x2
+  orbit_sched.r4 ---- orbit_link   SdrRadio.h x1
+  orbit_sched.r4 ---- orbit_link   Radio.h x1
+  orbit_sched.r6 ---- orbit_telemetry   Pipeline.h x1
+  orbit_telemetry.r3 ---- orbit_core   Log.h x2
+  orbit_telemetry.r3 ---- orbit_core   Frame.h x2
+  orbit_telemetry.r3 ---- orbit_core   Crc.h x2
+  orbit_telemetry.r3 ---- orbit_core   Clock.h x1
+  orbit_telemetry.r4 ---- orbit_link   Radio.h x1
+  orbitkit-tools.r9 ---- orbitkit_tools   decoders.py x1
+  orbitkit-tools.r9 ---- orbitkit_tools   passes.py x1
+  orbitkit-tools.r9 ---- orbitkit_tools   __init__.py x1
+  cli.py.r9 ---- orbitkit_tools   runs

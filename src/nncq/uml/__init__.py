@@ -13,4 +13,4 @@
 """
 from __future__ import annotations
 
-FACTS_VERSION = "1"     # bump when extract.py changes what it records: files are re-parsed once
+FACTS_VERSION = "2"     # bump when extract.py changes what it records: files are re-parsed once

@@ -104,6 +104,13 @@ def test_cpp_members_visibility_relations_and_stereotypes():
     assert chunker.process("Device.hpp", DEV_HPP.encode(), "cpp").symbols[0].visibility == ""   # uml off: unchanged
 
 
+def test_qualified_call_receiver_is_the_whole_qualifier():
+    src = "namespace app { void tick() { core::Crc::check(); ::log(); } }\n"
+    r = chunker.process("tick.cpp", src.encode(), "cpp", uml=True)
+    roles = {e.dst: e.role for e in r.edges if e.kind == "call" and e.src == "app::tick"}
+    assert roles["check"] == "core::Crc::"
+
+
 def test_python_fields_relations_and_imports():
     r = chunker.process("svc/service.py", PY.encode(), "python", uml=True)
     f = {x.name: x for x in r.symbols if x.kind == "field"}
@@ -136,6 +143,21 @@ def _st(r):
     return Store(r.db, cache_mb=8)
 
 
+def test_derived_types_stay_in_the_language_of_the_base(repo):
+    from nncq import graph
+    (repo.root / "py" / "svc" / "fake.py").write_text("class FakeDevice(IDevice):\n    pass\n", encoding="utf-8")
+    indexer.update(repo, log=lambda m: None)
+    st = _st(repo)
+    try:
+        h = graph.type_hierarchy(st, "dev::IDevice")
+        assert [d["type"] for d in h["derived"]] == ["dev::Device"] and h["derived_total"] == 1
+        assert graph.symbol_context(st, "dev::IDevice")["derived_total"] == 1
+        m, _, _ = views.class_view(st, "dev::IDevice")
+        assert "FakeDevice" not in {x["label"] for x in m["nodes"]} and "Device" in {x["label"] for x in m["nodes"]}
+    finally:
+        st.close()
+
+
 def test_model_components_and_generated_views(repo):
     st = _st(repo)
     try:
@@ -157,6 +179,7 @@ def test_model_components_and_generated_views(repo):
         assert ("lib/include/Device.hpp", "dev::Device") in deps
 
         m, _, _ = views.component_view(st)
+        assert m["title"] == "Components: workspace" and "path" not in m["params"]
         dev = next(x for x in m["nodes"] if x["label"] == "DevLib")
         cli = next(x for x in m["nodes"] if x["label"] == "DevCLI")
         assert any(p["name"] == "Device.hpp" and p["dir"] == "provided" for p in dev["ports"])

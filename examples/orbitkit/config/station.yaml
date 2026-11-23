@@ -1,0 +1,9 @@
+# groundd station configuration (key: value, one per line)
+name: hilltop
+latitude: 47.61
+longitude: 8.52
+altitude_m: 420
+radio: sdr
+protocol: ccsds
+archive_dir: /var/lib/orbitkit/archive
+udp_port: 52001

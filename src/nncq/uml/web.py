@@ -368,9 +368,14 @@ async function draw(){if(!cur)return;const o=$('#out');
  if(tab==='json'){o.innerHTML=`<pre>${hlc(JSON.stringify(cur.spec?{spec:cur.spec,model:cur.model}:cur.model,null,1),'json')}</pre>`;return}
  if(tab==='report'){o.innerHTML=`<pre>${hlc(JSON.stringify(cur.report||{status:'up to date'},null,1),'json')}</pre>`;return}
  if(tab==='ascii'||(tab==='diagram'&&!MERMAID)){o.innerHTML=`<pre>${esc(await text('ascii'))}</pre>`+(MERMAID?'':'<div class="dim" style="padding:8px 12px">Mermaid is not vendored (nncq uml init fetches it once): showing ASCII.</div>');nodeLinks();return}
- const src=await text('mermaid');if(tab==='mermaid'){o.innerHTML=`<pre>${hlc(src,'mermaid')}</pre>`;return}
+ const was=cur,src=await text('mermaid');if(cur!==was)return;          /* another diagram was picked meanwhile */
+ if(tab==='mermaid'){o.innerHTML=`<pre>${hlc(src,'mermaid')}</pre>`;return}
  if(!window.mermaid){o.innerHTML='<div class="dim" style="padding:20px">loading renderer…</div>';return}
- try{const {svg}=await mermaid.render('mm'+(++mm),src);o.innerHTML=svg;restoreView();wire();mini()}catch(e){o.innerHTML=`<div class="err" style="padding:12px">Mermaid: ${esc(e.message||e)}</div><pre>${esc(src)}</pre>`}}
+ const id='mm'+(++mm);
+ try{const {svg}=await mermaid.render(id,src);if(cur!==was)return;o.innerHTML=svg;restoreView();wire();mini()}
+ catch(e){unbomb(id);o.innerHTML=`<div class="err" style="padding:12px">Mermaid: ${esc(e.message||e)}</div><pre>${esc(src)}</pre>`}}
+/* a failed mermaid.render leaves its error graphic in <body>: remove it, the error is shown in place */
+function unbomb(id){const z=document.getElementById('d'+id);if(z)z.remove()}
 function zoomTo(z){zoom=z;const s=$('#out svg');if(s){const w=s.viewBox&&s.viewBox.baseVal?s.viewBox.baseVal.width:s.getBBox().width;s.style.width=(w*z)+'px';s.style.maxWidth='none';s.removeAttribute('height')}mmView()}
 /* ---------- overview: a scaled live copy of the diagram with the visible area; click / drag pans ---------- */
 let mmk=1;
@@ -540,8 +545,9 @@ function mdHtml(md){const out=[],ls=String(md).replace(/\r/g,'').split('\n');let
   const li=/^\s*[-*]\s+(.*)$/.exec(l);if(li){if(!list){out.push('<ul>');list=true}out.push(`<li>${mdInline(li[1])}</li>`);i++;continue}
   close();if(l.trim())out.push(`<p>${mdInline(l)}</p>`);i++}
  close();return out.join('\n')}
-async function mdMermaid(box){for(const d of box.querySelectorAll('.mmd[data-src]')){try{mermaid.initialize({...MCFG,securityLevel:'antiscript'});
-  const {svg}=await mermaid.render('pv'+(++mm),d.dataset.src);d.innerHTML=svg}catch(e){d.innerHTML=`<span class="err">Mermaid: ${esc(e.message||e)}</span>`}
+async function mdMermaid(box){for(const d of box.querySelectorAll('.mmd[data-src]')){const id='pv'+(++mm);
+  try{mermaid.initialize({...MCFG,securityLevel:'antiscript'});const {svg}=await mermaid.render(id,d.dataset.src);d.innerHTML=svg}
+  catch(e){unbomb(id);d.innerHTML=`<span class="err">Mermaid: ${esc(e.message||e)}</span>`}
   finally{mermaid.initialize(MCFG)}}}
 $('#bpv').onclick=async()=>{if(!cur)return;const md=await text('markdown');ed=null;
  modal('Preview: '+cur.key+'.md',md,'<button id="cp">Copy .md</button>','Rendered like a Markdown preview; links to this page open here, others in a new tab.',mdHtml(md));

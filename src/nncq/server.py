@@ -47,7 +47,8 @@ call_tree, call_trace, impact, type_hierarchy, depends, file_context, hotspots) 
 reading files. Graph links are by name (static, no build): ambiguity is reported. If a result has index_state, part of the index is still catching up:
 it says what, where and since when; keyword and graph results are still valid. Long answers are trimmed to
 stay readable: `paged` names each cut field and the more(cursor) call that returns the rest. Repeating a
-call is free (answers are cached until the index changes).
+call is free (answers are cached until the index changes). A `divergent` field lists cited files that changed on
+disk since they were indexed (re-indexing is queued): re-ask or expand before relying on those lines.
 Use it as an investigation, not a lookup: split the user's question into a few narrow asks (in parallel), follow
 the best hits with graph tools, expand only the refs your conclusion rests on, then answer the user directly
 and briefly, without narrating tool use; give path:line detail when it helps or is asked for. A weak strength

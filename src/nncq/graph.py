@@ -290,10 +290,11 @@ def bases_of(store: Store, quals: list[str]) -> list[tuple[str, str, int]]:
     return out
 
 
-def derived_of(store: Store, name: str, limit: int = 500) -> list[tuple[str, str, int]]:
-    """(qualname, path, line) of types that list `name` as a base."""
+def derived_of(store: Store, name: str, limit: int = 500, langs: list[str] | None = None) -> list[tuple[str, str, int]]:
+    """(qualname, path, line) of types that list `name` as a base (langs: only in these languages)."""
+    lw, la = _lang_sql(langs or [])
     return store.q("SELECT e.src, f.path, e.line FROM edges e JOIN files f ON f.id=e.file_id "
-                   "WHERE e.dst=? AND e.kind='inherits' LIMIT ?", (short(name), limit))
+                   f"WHERE e.dst=? AND e.kind='inherits'{lw} LIMIT ?", (short(name), *la, limit))
 
 
 def _type_quals(store: Store, name: str) -> list[str]:
@@ -316,12 +317,12 @@ def base_chains(store: Store, quals: list[str], depth: int = 10) -> list[list[st
     return chains
 
 
-def derived_closure(store: Store, name: str, depth: int = 8, cap: int = 5000) -> set[str]:
+def derived_closure(store: Store, name: str, depth: int = 8, cap: int = 5000, langs: list[str] | None = None) -> set[str]:
     seen, frontier = set(), {short(name)}
     for _ in range(depth):
         nxt = set()
         for n in frontier:
-            for src, _, _ in derived_of(store, n):
+            for src, _, _ in derived_of(store, n, langs=langs):
                 s = short(src)
                 if src not in seen:
                     seen.add(src)
@@ -365,10 +366,11 @@ def symbol_context(store: Store, name: str, path: str = "", limit: int = 12) -> 
             chains = base_chains(store, quals)
             if any(len(c) > 1 for c in chains):
                 out["base_chains"] = [" -> ".join(c) for c in chains[:6]]
-        d = derived_of(store, p.name)
+        fl = lang_family(store, p.file_id)
+        d = derived_of(store, p.name, langs=fl)
         if d:
             out["derived"] = [f"{q} {pth}:{ln}" for q, pth, ln in d[:limit]]
-            out["derived_total"] = len(derived_closure(store, p.name))
+            out["derived_total"] = len(derived_closure(store, p.name, langs=fl))
         members = store.q("SELECT name, kind FROM symbols WHERE parent IN (" + ",".join("?" * len(quals)) +
                           ") ORDER BY start_line", quals)
         if members:
@@ -771,9 +773,11 @@ def type_hierarchy(store: Store, name: str, depth: int = 6, limit: int = 60) -> 
     quals = typed or [name]
     up = [" -> ".join([quals[0]] + c) for c in base_chains(store, quals, depth)]
     lines, budget, derived = [quals[0]], [limit], []
+    at = next((x for x in find_defs(store, quals[0], kinds={"type"}) if is_type(x.kind)), None) if typed else None
+    fam = lang_family(store, at.file_id) if at else []      # a C++ base has no Python subclasses
 
     def down(n: str, d: int, ind: str, seen: set):
-        for src, path, line in sorted(derived_of(store, n), key=lambda r: r[0]):
+        for src, path, line in sorted(derived_of(store, n, langs=fam), key=lambda r: r[0]):
             if budget[0] <= 0:
                 return
             budget[0] -= 1
@@ -784,10 +788,9 @@ def type_hierarchy(store: Store, name: str, depth: int = 6, limit: int = 60) -> 
                 down(s, d + 1, ind + "  ", seen | {s})
 
     down(short(quals[0]), 0, "  ", {short(quals[0])})
-    at = next((x for x in find_defs(store, quals[0], kinds={"type"}) if is_type(x.kind)), None) if typed else None
     return {"type": quals[0], "is_type": bool(typed), **({"path": at.path, "line": at.start} if at else {}),
             "bases": up or ["(no bases)"], "derived_tree": "\n".join(lines), "derived": derived,
-            "derived_total": len(derived_closure(store, quals[0])), "truncated": budget[0] <= 0}
+            "derived_total": len(derived_closure(store, quals[0], langs=fam)), "truncated": budget[0] <= 0}
 
 
 DEP_KINDS = ("inherits", "composes", "aggregates", "associates", "depends", "instantiates", "var")

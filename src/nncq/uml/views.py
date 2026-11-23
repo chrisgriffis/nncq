@@ -273,7 +273,9 @@ def class_view(st: Store, subject: str = "", under: str = "", depth: int = 1, me
                 near += [x for x in ctx.find(t.parent, kinds={"type"}) if x.kind in TYPE_KINDS      # same language:
                          and graph.norm(x.qualname) == graph.norm(t.parent)                            # a C++ namespace
                          and (not fam or fam & set(graph.lang_family(st, x.file_id)))][:1]              # is no Python class
-            for (src,) in st.q("SELECT DISTINCT src FROM edges WHERE dst=? AND kind='inherits' LIMIT 12", (t.name,)):
+            lw, la = graph._lang_sql(graph.lang_family(st, t.file_id))       # derived types in the same language
+            for (src,) in st.q("SELECT DISTINCT e.src FROM edges e JOIN files f ON f.id=e.file_id WHERE e.dst=? "
+                               f"AND e.kind='inherits'{lw} LIMIT 12", (t.name, *la)):
                 near += [x for x in ctx.q("WHERE s.qualname=? AND s.kind IN (%s) LIMIT 1" % ",".join(
                     "?" * len(TYPE_KINDS)), (src, *TYPE_KINDS))]
             for n in near:
@@ -498,10 +500,10 @@ def component_view(st: Store, subject: str = "", under: str = "", externals: boo
     byid = {r[0]: r for r in rows}
     used: dict[int, Counter] = defaultdict(Counter)        # provider -> file -> consumer count
     pairs: dict[tuple[int, int], dict[str, int]] = defaultdict(dict)
-    for a, b, kind, fid, path, n in dep_rows:
+    for a, b, kind, fid, fp, n in dep_rows:
         if a in byid and b in byid:
-            used[b][path] += 1
-            pairs[(a, b)][path] = pairs[(a, b)].get(path, 0) + n
+            used[b][fp] += 1
+            pairs[(a, b)][fp] = pairs[(a, b)].get(fp, 0) + n
     nodes, edges = [], []
     port_of: dict[tuple[int, str], str] = {}
     nid = {}

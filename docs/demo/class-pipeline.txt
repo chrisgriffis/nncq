@@ -1,0 +1,32 @@
+Classes: orbitkit::telemetry::Pipeline
+
++------------------------------------------------+  +--------------+  +---------------+  +----------+
+| Pipeline                                       |  | <<abstract>> |  | <<interface>> |  | Clock    |
++------------------------------------------------+  | ISink        |  | IRadio        |  +----------+
+| - radio_ : link::IRadio&                       |  +--------------+  +---------------+
+| - decoder_ : std::unique_ptr<IDecoder>         |
+| - sinks_ : std::vector<std::shared_ptr<ISink>> |
+| - clock_ : core::Clock&                        |
+| - scratch_ : core::RawBuffer                   |
+| - stats_ : Stats                               |
++------------------------------------------------+
+| + Pipeline(radio, decoder, clock)              |
+| + addSink(sink) : void                         |
+| + run(frameBudget) : std::size_t               |
+| + reset() : void                               |
+| - dispatch(packet) : void                      |
+| - account(result, frame) : void                |
++------------------------------------------------+
+
++---------------+  +----------+
+| <<interface>> |  | Stats    |
+| IDecoder      |  +----------+
++---------------+
+
+Relations:
+  Pipeline ---> IRadio   radio_ [1]
+  Pipeline *--> IDecoder   decoder_ [1]
+  Pipeline o--> ISink   sinks_ [*]
+  Pipeline ---> Clock   clock_ [1]
+  Pipeline *--> Stats   stats_ [1]
+  Pipeline <>-- Stats   nested

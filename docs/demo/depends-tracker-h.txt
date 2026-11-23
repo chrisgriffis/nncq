@@ -1,0 +1,39 @@
+Depends (file): Tracker.h
+
+[libs/sched/include/orbitkit/sched]
+  - «module» Tracker.h  libs/sched/include/orbitkit/sched/Tracker.h
+  - «module» Scheduler.h  libs/sched/include/orbitkit/sched/Scheduler.h
+  - «module» Pass.h  libs/sched/include/orbitkit/sched/Pass.h
+  - «module» Ephemeris.h  libs/sched/include/orbitkit/sched/Ephemeris.h
+[libs/link/include/orbitkit/link]
+  - «module» Antenna.h  libs/link/include/orbitkit/link/Antenna.h
+  - «module» Radio.h  libs/link/include/orbitkit/link/Radio.h
+[libs/core/include/orbitkit/core]
+  - «module» Clock.h  libs/core/include/orbitkit/core/Clock.h
+[libs/sched/src]
+  - «module» Tracker.cpp  libs/sched/src/Tracker.cpp
+  - «module» Scheduler.cpp  libs/sched/src/Scheduler.cpp
+[libs/telemetry/include/orbitkit/telemetry]
+  - «module» Pipeline.h  libs/telemetry/include/orbitkit/telemetry/Pipeline.h
+[tests]
+  - «module» test_scheduler.cpp  tests/test_scheduler.cpp
+[apps/groundd]
+  - «module» Station.h  apps/groundd/Station.h
+Relations:
+  Tracker.h --include--> Antenna.h   include
+  Tracker.h --include--> Clock.h   include
+  Tracker.h --include--> Scheduler.h   include
+  Tracker.h --include--> Pass.h   include
+  Tracker.cpp --include--> Tracker.h   include
+  Scheduler.h --include--> Tracker.h   include
+  Scheduler.h --include--> Pipeline.h   include
+  Scheduler.h --include--> Radio.h   include
+  Scheduler.h --include--> Antenna.h   include
+  Scheduler.h --include--> Clock.h   include
+  Scheduler.h --include--> Pass.h   include
+  Pass.h --include--> Clock.h   include
+  Pass.h --include--> Ephemeris.h   include
+  test_scheduler.cpp --include--> Scheduler.h   include
+  Station.h --include--> Scheduler.h   include
+  Scheduler.cpp --include--> Scheduler.h   include
+Note: 2 cycle(s): dashed edges
