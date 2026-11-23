@@ -4,6 +4,9 @@
     demo/demo.sh             Linux / macOS
     python demo/run.py [--fresh] [--no-seed] [--no-browser]
 
+Before indexing it runs the asset step of `nncq init` (tree-sitter parsers, the pinned sha256-verified Mermaid build
+for the dashboard's diagrams), which only touches the network when they are missing.
+
 demo/ is an nncq home of its own: every nncq command below runs with `--home demo`, so the profile
 (demo/profiles/orbitkit), settings (demo/.env: lite mode, port 8766), index and logs (demo/cache) all stay in this
 folder and never touch the main install's profiles or indexes. Ctrl+C, or closing the window, stops the server.
@@ -56,6 +59,8 @@ def main() -> int:
             webbrowser.open(url)
         return 0
 
+    from nncq import init
+    init.assets()           # parsers + pinned Mermaid build (what `nncq init` fetches); no-op once present
     print(f"== indexing {HERE / REPO}")
     if subprocess.call(nncq("index", "--name", REPO, "--no-embed", *(["--fresh"] if a.fresh else []))):
         return 1

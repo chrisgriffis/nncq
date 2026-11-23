@@ -107,6 +107,13 @@ def _parsers() -> bool:
     return True
 
 
+def assets() -> None:
+    """Install-wide, non-interactive setup shared by every home: tree-sitter parsers and the pinned Mermaid build.
+    Idempotent (present = no network). nncq init runs it; so does the bundled demo (demo/run.py) on every start."""
+    _parsers()
+    _uml()
+
+
 def _split(s: str) -> list[str]:
     return [x.strip() for x in s.split(",") if x.strip()]
 
@@ -203,8 +210,7 @@ def main(a) -> int:
         ok = True
     else:
         ok = _models(a.seed_models)
-    _parsers()
-    _uml()
+    assets()
     r = _workspace(a)
     from nncq import agents
     targets = [t for t in (a.agents or "").split(",") if t.strip()] or (["copilot"] if a.copilot else None)
