@@ -189,7 +189,7 @@ pre.code.tall{max-height:none}
 #vsym>.scard{flex:none;max-height:34vh;overflow:auto}#vsym>.cpath{flex:none}#vsym>.pb{min-height:80px}
 #sform .recent{flex-basis:100%;margin-top:0}
 #right>.vb{flex:1;min-height:0;display:flex;flex-direction:column}#right>.vb[hidden]{display:none}
-.navb{display:flex}.navb a{padding:0 8px;font-size:18px;line-height:22px;color:var(--dim);cursor:pointer;border-radius:5px}.navb a:hover{color:var(--fg);background:#1b1f29}
+.navb{display:flex}.navb a.off{opacity:.3;pointer-events:none}.rrow{display:flex;align-items:flex-start;gap:6px;margin-top:6px}.rrow .recent{margin-top:1px}.rrow .navb a{line-height:18px}.navb a{padding:0 8px;font-size:18px;line-height:22px;color:var(--dim);cursor:pointer;border-radius:5px}.navb a:hover{color:var(--fg);background:#1b1f29}
 #vtitle a{color:var(--acc);cursor:pointer;text-decoration:none}#vtitle a:hover{text-decoration:underline}
 #pmenu{position:fixed;z-index:50;background:var(--panel,#151821);border:1px solid var(--line,#232733);border-radius:6px;padding:4px 0;font-size:12px;box-shadow:0 6px 20px #0008}#pmenu a{display:block;padding:5px 14px;cursor:pointer;white-space:nowrap}#pmenu a:hover{background:#ffffff14}#pmenu .msg{padding:5px 14px;color:var(--dim,#7d8490)}
 #vtitle{font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left;flex:1;min-width:0}
@@ -231,7 +231,7 @@ ul.tree{list-style:none;margin:0;padding-left:16px}ul.tree.root{padding-left:0}
    <button class="askb">Ask</button><div class="qwrap"><input type="text" id="q" placeholder="Ask about the code: how / where / why…, or an identifier   ( / )" autocomplete="off"><a id="qx" title="clear (Esc)">×</a></div>
    <div class="sside"><input type="text" id="qpath" placeholder="path filter">
    <select id="qk" title="hits"><option>5</option><option selected>8</option><option>12</option><option>20</option></select></div></form>
-  <div class="recent" id="recent"></div><div id="answer"></div>
+  <div class="rrow"><span class="navb" id="asknav"><a id="aback" title="previous ask (Alt+← in the Ask panel)">‹</a><a id="afwd" title="next ask (Alt+→ in the Ask panel)">›</a></span><div class="recent" id="recent"></div></div><div id="answer"></div>
  </section>
 
  <section class="fill"><div id="console" data-rz="console" data-rzmin="60"></div></section>
@@ -382,7 +382,18 @@ function T(name,args){const body=JSON.stringify({...args,...(multi&&sel?{repo:se
 /* navigation: a new ask or symbol is a history entry; picking a file/tab updates the current one */
 let nav=false;
 function setHash(o,push){const p=new URLSearchParams(location.hash.slice(1));for(const [a,b] of Object.entries(o))b!=null&&b!==''?p.set(a,b):p.delete(a);
- const u='#'+p.toString();if(u===(location.hash||'#'))return;history[push&&!nav?'pushState':'replaceState'](null,'',u)}
+ const u='#'+p.toString();if(u===(location.hash||'#'))return;history[push&&!nav?'pushState':'replaceState'](null,'',u);askTrack()}
+/* ‹ › of the Ask panel: its own history of asks (question, path filter, hits, picked file). Sync views on: the
+   page's single history instead, like the explorers */
+const AH={list:[],i:-1,jump:null};
+const askState=()=>{const p=new URLSearchParams(location.hash.slice(1));const q=p.get('q')||'';return q?JSON.stringify([q,p.get('qp')||'',p.get('k')||'',+(p.get('f')||0)]):''};
+function askTrack(){if(nav)return;const k=askState();if(k){if(AH.jump!=null&&AH.list[AH.jump]===k)AH.i=AH.jump;else if(AH.list[AH.i]===k){}else if(AH.list[AH.i-1]===k)AH.i--;
+  else if(AH.list[AH.i+1]===k)AH.i++;else{AH.list=AH.list.slice(0,AH.i+1);AH.list.push(k);AH.i=AH.list.length-1;if(AH.list.length>100){AH.list.shift();AH.i--}}}
+ AH.jump=null;askUi()}
+function askUi(){const b=$('#aback'),f=$('#afwd');if(!b)return;let g=false;try{g=syncOn}catch(e){}b.classList.toggle('off',!g&&AH.i<=0);f.classList.toggle('off',!g&&AH.i>=AH.list.length-1)}
+function askStep(d){if(syncOn){history.go(d);return}const j=AH.i+d;if(j<0||j>=AH.list.length)return;const [q,qp,k,f]=JSON.parse(AH.list[j]);AH.jump=j;
+ const p=new URLSearchParams(location.hash.slice(1));p.set('q',q);qp?p.set('qp',qp):p.delete('qp');k?p.set('k',k):p.delete('k');f?p.set('f',f):p.delete('f');
+ history.replaceState(null,'','#'+p.toString());applyHash()}
 async function applyHash(){nav=true;try{const p=new URLSearchParams(location.hash.slice(1));
   const q=p.get('q')||'',qp=p.get('qp')||'',kk=p.get('k')||'8';
   if(!q){if(ans||$('#q').value)home(true)}
@@ -391,8 +402,10 @@ async function applyHash(){nav=true;try{const p=new URLSearchParams(location.has
   if(syncOn&&p.has('m')){restoringM=true;mrestore(p.get('m'))}        /* sync views: one history for both panes */
   const s=p.get('s')||'',sf=p.get('sf')||'';if(s&&(!cur||cur.req!==s))await openSym(s,p.get('p')||'');else if(!s&&sf&&(cur||$('#cpath').textContent.indexOf(sf)<0))showFile(sf);
   const v=p.get('v');if(v&&v!==view)setView(v);
-  if(syncOn)$('#sq').value=cur?cur.sym:''}finally{nav=false;restoringM=false}}     /* sync views: the field shows the selection */
+  if(syncOn)$('#sq').value=cur?cur.sym:''}finally{nav=false;restoringM=false;askTrack()}}     /* sync views: the field shows the selection */
 window.addEventListener('popstate',applyHash);
+$('#aback').onclick=()=>askStep(-1);$('#afwd').onclick=()=>askStep(1);
+$('#s-search').addEventListener('keydown',e=>{if(e.altKey&&(e.key==='ArrowLeft'||e.key==='ArrowRight')){e.preventDefault();e.stopPropagation();askStep(e.key==='ArrowLeft'?-1:1)}});
 
 /* ---------- code: the shared code view (codeview.py) with symbol links, and its editor ---------- */
 /*__CODEVIEW__*/
@@ -664,7 +677,7 @@ let restoringM=false;
 /* Sync views: one shared setting (this header, the Model explorer's header, localStorage, the URL) */
 let syncOn=(()=>{const h=new URLSearchParams(location.hash.slice(1));return h.has('sync')?h.get('sync')==='1':localStorage.getItem('nncq.sync')==='1'})();
 function syncUi(){$('#csync').checked=syncOn;try{const c=fr.contentDocument&&fr.contentDocument.querySelector('#csync');if(c)c.checked=syncOn}catch(e){}}
-function setSync(v){if(v===syncOn)return syncUi();syncOn=v;localStorage.setItem('nncq.sync',v?'1':'0');syncUi();
+function setSync(v){if(v===syncOn)return syncUi();syncOn=v;askUi();localStorage.setItem('nncq.sync',v?'1':'0');syncUi();
  if(v){const t=curTarget();const m=t&&!mpinned()?dhash(t).slice(1):'';setHash({sync:'1',...(m?{m}:{})},true);if(m)mrestore(m)}   /* one entry */
  else setHash({sync:''})}
 $('#csync').addEventListener('change',e=>setSync(e.target.checked));
