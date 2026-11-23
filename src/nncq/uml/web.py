@@ -244,7 +244,6 @@ pre.code .hl{background:#2b2a14;display:block}pre.code span.l{display:block;padd
 .emb{display:none!important}body.embed .emb{display:inline-block!important}body.embed .noemb{display:none!important}
 #mstate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:0 1 auto}header>*{flex:none}header>#mstate{flex:0 1 auto}
 body.embed header{padding:6px 10px;gap:8px}body.embed header b{font-size:13px}
-#bpin{filter:grayscale(1);opacity:.45;padding:1px 6px}#bpin.on{filter:none;opacity:1;border-color:var(--acc);background:#1d2a44}
 .hb{padding:1px 8px;color:var(--dim)}.navb{display:flex}.navb a{padding:0 7px;font-size:18px;line-height:22px;color:var(--dim);cursor:pointer;border-radius:5px;user-select:none}
 .navb a:hover{color:var(--fg);background:#1b1f29}.navb a.off{opacity:.3;pointer-events:none}.syncb{align-items:center;gap:4px;font-size:11px;color:var(--dim);white-space:nowrap;cursor:pointer}.syncb input{margin:0 4px 0 0;padding:0;accent-color:var(--acc);vertical-align:-2px}.syncb:has(input:checked){color:var(--acc)}.hb:hover{color:var(--fg)}
 .spin{display:inline-block;width:11px;height:11px;border:2px solid #262b36;border-top-color:var(--acc);border-radius:50%;animation:sp .7s linear infinite;vertical-align:-2px}@keyframes sp{to{transform:rotate(360deg)}}
@@ -269,7 +268,6 @@ pre .k,.mdv .k{color:#c792ea}pre .s,.mdv .s{color:#c3e88d}pre .c,.mdv .c{color:#
 <div id="notice"></div>
 <header><b><span class="noemb">nncq · model explorer</span><span class="emb">Model explorer</span></b><span class="navb"><a id="nback" title="back (Alt+←)">‹</a><a id="nfwd" title="forward (Alt+→)">›</a></span><a href="./" class="dim noemb">← dashboard</a>
  <label class="emb syncb" title="Sync views (shared with the Symbol explorer): diagram selections reveal their code there, symbol / file selections show their default diagram here, one Back / Forward history for both"><input type="checkbox" id="csync">Sync views</label>
- <button id="bpin" class="emb" title="pin: keep this diagram when the Symbol explorer moves (unpinned, the Model explorer follows it)">📌</button>
  <select id="repo" title="index"></select><span id="mstate" class="dim"></span><span class="sp"></span>
  <button id="bbuild" title="Re-derive the UML model from the index (only stale/changed parts); cached views regenerate on next open">⟳ Refresh</button>
  <a id="bsolo" class="emb hb" href="views" target="_blank" title="open the Model explorer on its own page">↗</a><button id="bcol" class="emb hb" title="collapse the Model explorer">–</button></header>
@@ -318,9 +316,6 @@ async function init(){try{const r=await fetch('api/status',{headers:H});const d=
   $('#mstate').textContent=u.built_at?`model ${u.built_at} · ${u.components} components · ${u.views} stored${u.stale_views?` · ${u.stale_views} stale`:''}`:(u.note||'UML model not built');}catch(e){}
  await list();route()}
 $('#repo').onchange=e=>{repo=e.target.value;localStorage.setItem('nncq.repo',repo);init()};
-const pinned=()=>localStorage.getItem('nncq.mpin')==='1';
-function pinUi(){$('#bpin').classList.toggle('on',pinned())}
-$('#bpin').onclick=()=>{localStorage.setItem('nncq.mpin',pinned()?'0':'1');pinUi()};pinUi();
 $('#bcol').onclick=()=>{const h=host();if(h)h.collapse('model')};
 $('#csync').checked=synced();$('#csync').onchange=e=>{const h=host();if(h&&h.setSync)h.setSync(e.target.checked);navUi()};
 $('#bsolo').onclick=()=>{$('#bsolo').href='views'+(tok?'?token='+encodeURIComponent(tok):'')+location.hash};
@@ -354,7 +349,7 @@ const kindBadge=v=>isFile(v)?'<span class="b k-file" title="file composition (ge
    made here also selects the matching code in the Symbol explorer (syncNext) */
 let syncNext=false;
 function synced(){const x=host();return !!(x&&x.syncOn&&x.syncOn())}
-function navTo(h){const x=host();if(synced()&&x.modelNav){syncNext=true;x.modelNav(h)}else location.hash=h}
+function navTo(h){const x=host();syncNext=true;if(synced()&&x.modelNav)x.modelNav(h);else location.hash=h}
 function go(key,q){navTo('#/uml/view/'+encodeURIComponent(key.startsWith('composition:')?key:'view:'+key)+(q||''))}
 const viewElem=()=>cur.key.startsWith('composition:')?cur.key:'view:'+cur.key;
 function codeOf(n){const r=n.ref||{};if(r.q)return {q:r.q,path:r.path||''};if(r.path&&n.type!=='package'&&!/\/$/.test(r.path))return {path:r.path,line:r.line||1};return null}
@@ -433,7 +428,9 @@ function wire(){const svg=$('#out svg');if(!svg)return;
  /* component pins -> the port (its file, or the component it needs) */
  svg.querySelectorAll('[id]').forEach(el=>{const m=/(?:^|-)n_([A-Za-z0-9_]+?)(?:-\d+)?$/.exec(el.id);if(!m)return;const owner=cur.model.nodes.find(x=>(x.ports||[]).some(p=>p.id===m[1]));
   if(owner)on(el,()=>pickPort(owner.id,m[1],true))})}
-function selSync(extra,code){const x=synced()&&host();if(x&&x.modelPick)x.modelPick({h:'#/uml/view/'+encodeURIComponent(viewElem())+'?view='+encodeURIComponent(cur.key)+extra,...(code||{})})}
+/* a user selection here: always noted by the dashboard (last selection), synced to the Symbol explorer only with Sync views on */
+function selSync(extra,code){const x=host();if(!x)return;const h='#/uml/view/'+encodeURIComponent(viewElem())+'?view='+encodeURIComponent(cur.key)+extra;
+ if(x.noteModel)x.noteModel({h,code:code||null});if(synced()&&x.modelPick)x.modelPick({h,...(code||{})})}
 const symx=(q,p)=>q?`<a class="chip" data-symx="${esc(q)}" data-symp="${esc(p||'')}" href="./#s=${encodeURIComponent(q)}&p=${encodeURIComponent(p||'')}&v=sym" title="open ${esc(q)} in the Symbol explorer">Symbol explorer</a>`:'';
 const at=r=>r&&r.path?`${esc(r.path)}:${r.line||1}`:'';
 function pickMsg(id,user,site){const m=(cur.model.messages||[]).find(x=>x.id===id);if(!m)return;const t=m.target||{},nm=i=>(cur.model.nodes.find(x=>x.id===i)||{}).label||i;
@@ -463,7 +460,7 @@ function hl(id){document.querySelectorAll('#out .hl').forEach(x=>x.classList.rem
 function loc(n){const r=n.ref||{};return r.path?{path:r.path,line:r.line||1,abs:r.abs,end:r.end}:null}
 function elemId(n){if(n.element)return n.element;const r=n.ref||{};if(r.q)return 'sym:'+r.q;if(r.component)return 'comp:'+r.component;if(n.type==='package'&&r.path)return 'pkg:'+r.path;return ''}
 async function pick(id,user){const n=cur.model.nodes.find(x=>x.id===id);if(!n)return;selN=id;hl(id);const l=loc(n),el=elemId(n);
- const x=user&&synced()&&host();if(x&&x.modelPick)x.modelPick({h:'#/uml/view/'+encodeURIComponent(viewElem())+'?view='+encodeURIComponent(cur.key)+'&n='+encodeURIComponent(id),...(codeOf(n)||{})});
+ if(user)selSync('&n='+encodeURIComponent(id),codeOf(n));
  const rels=(cur.model.edges||[]).filter(e=>e.from===id||e.to===id).map(e=>{const o=e.from===id?e.to:e.from;const on=cur.model.nodes.find(x=>x.id===o);
   return `<span class="chip" data-go="${esc(o)}">${e.from===id?'→':'←'} ${esc(e.kind)} <b>${esc(on?on.label:o)}</b>${e.label?' · '+esc(e.label):''}</span>`}).join('');
  const msgs=(cur.model.messages||[]).filter(m=>m.from===id||m.to===id).slice(0,30).map(m=>`<span class="chip" data-msg="${esc(m.id)}">${m.from===id?'→':'←'} ${esc(m.label||m.kind)}</span>`).join('');
@@ -582,7 +579,8 @@ async function route(){const h=host();if(h&&h.modelHash)h.modelHash(location.has
  const same=key&&cur&&cur.key===key&&!p.get('v'),sync=syncNext;syncNext=false;
  const d=key?(same?cur:await open(key)):null;let stale=false;
  if(d&&p.get('msg'))pickMsg(p.get('msg'));else if(d&&p.get('n')&&p.get('mem'))pickMember(p.get('n'),p.get('mem'));
- else if(d&&p.get('n')){if(d.model.nodes.some(x=>x.id===p.get('n')))pick(p.get('n'))}else if(d&&!same&&sync){const t=viewCode(),x=host();if(t&&x&&x.syncCode)x.syncCode(t)}
+ else if(d&&p.get('n')){if(d.model.nodes.some(x=>x.id===p.get('n')))pick(p.get('n'))}
+ else if(d&&!same&&sync){const t=viewCode(),x=host();if(x&&x.noteModel)x.noteModel({h:location.hash,code:t});if(t&&synced()&&x&&x.syncCode)x.syncCode(t)}
  if(!d){stale=true;if(el.startsWith('view:')||el.startsWith('composition:'))await open(el.replace(/^view:/,''))}
  else{if(p.get('v')&&p.get('v')!==d.rev)stale=true;
   if(m[1]!=='view'){const n=d.model.nodes.find(x=>elemId(x)===el);if(n){pick(n.id);if(p.get('h')&&d.node_revs&&d.node_revs[n.id]!==p.get('h'))stale=true}
