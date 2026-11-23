@@ -49,7 +49,7 @@ def _spawn_worker(r) -> str:
         return f"embedding worker already running (pid {ws['pid']})"
     if config.settings().embed_tier <= 0:
         return "embedding disabled (NNCQ_EMBED_TIER=0)"
-    p = sysutil.spawn([sys.executable, "-m", "nncq", "work", "--repo", r.name],
+    p = sysutil.spawn([sys.executable, "-m", "nncq", *config.home_args(), "work", "--repo", r.name],
                       config.LOG_DIR / f"worker-{r.name}.log", detach=True)
     return f"embedding worker started in the background (pid {p.pid}); `nncq status`, `nncq pause`"
 
@@ -107,7 +107,7 @@ def cmd_start(a):
     if s:
         print(f"already running ({s.get('mode', 'http')}, pid {s['pid']}): MCP {s['url'] or 'stdio'}, dashboard {s.get('dashboard', '-')}")
         return 0
-    p = sysutil.spawn([sys.executable, "-m", "nncq", "serve"], config.LOG_DIR / "server.log", detach=True)
+    p = sysutil.spawn([sys.executable, "-m", "nncq", *config.home_args(), "serve"], config.LOG_DIR / "server.log", detach=True)
     for _ in range(60):
         time.sleep(0.5)
         s = _server()
@@ -257,7 +257,7 @@ def cmd_profile(a):
     if a.action == "show":
         p = profiles.get(a.name)
         if p is None:
-            raise SystemExit(f"no profile {a.name!r} in {profiles.DIR}")
+            raise SystemExit(f"no profile {a.name!r} in {config.PROFILES_DIR}")
         print(p.path.read_text(encoding="utf-8"))
         print(f"# workspace on this machine: {p.root or 'not found'}")
         return 0
@@ -286,15 +286,16 @@ def cmd_mcp_config(a):
     hdr = {"Authorization": f"Bearer {s.token}"} if s.token else None
     exe = str(Path(sys.executable).parent / ("nncq.exe" if sys.platform == "win32" else "nncq"))
     http = {"type": "http", "url": url, "tools": ["*"], **({"headers": hdr} if hdr else {})}
-    stdio = {"type": "local", "command": exe, "args": ["serve", "--stdio"], "tools": ["*"]}
+    args = [*config.home_args(), "serve", "--stdio"]
+    stdio = {"type": "local", "command": exe, "args": args, "tools": ["*"]}
     print("# Copilot CLI (recommended): ~/.copilot/mcp-config.json  (or: nncq init --copilot)")
     print("# Copilot starts nncq over stdio; nncq, its embedding worker and the dashboard exit with Copilot.")
     _p({"mcpServers": {"nncq": stdio}})
     print("\n# VS Code: .vscode/mcp.json")
-    _p({"servers": {"nncq": {"type": "stdio", "command": exe, "args": ["serve", "--stdio"]}}})
-    print("\n# Claude Code:  claude mcp add --scope user nncq -- " + exe + " serve --stdio")
+    _p({"servers": {"nncq": {"type": "stdio", "command": exe, "args": args}}})
+    print("\n# Claude Code:  claude mcp add --scope user nncq -- " + " ".join([exe, *args]))
     print("\n# Visual Studio (Copilot agent mode): %USERPROFILE%\\.mcp.json")
-    _p({"servers": {"nncq": {"type": "stdio", "command": exe, "args": ["serve", "--stdio"]}}})
+    _p({"servers": {"nncq": {"type": "stdio", "command": exe, "args": args}}})
     print("\n# Or let nncq do it, MCP server plus the nncq-user skill:  nncq agents")
     print(f"\n# Dashboard: open http://127.0.0.1:{s.port}/ while an MCP client has nncq running (starts on first visit)")
     print("\n# Shared HTTP server instead (run `nncq start` yourself; several clients can attach):")
@@ -353,6 +354,8 @@ def _doctor_models(line):
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="nncq", description="Local code index for AI agents (no network).")
+    ap.add_argument("--home", default="", help="nncq home: its profiles/, cache/db, logs and .env (default: the nncq "
+                                               "folder; the bundled demo is demo/)")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("init", help="first-time setup: .env, models, parsers, workspace, Copilot config")
@@ -459,6 +462,11 @@ def main(argv: list[str] | None = None) -> int:
     uml_cli.add_parser(sub)
 
     a = ap.parse_args(argv)
+    if a.home:
+        home = Path(a.home).expanduser()
+        if not home.is_dir():
+            raise SystemExit(f"--home {a.home}: not a directory")
+        config.use_home(home)
     for f in (sys.stdout, sys.stderr):
         if hasattr(f, "reconfigure"):
             f.reconfigure(encoding="utf-8", errors="replace")

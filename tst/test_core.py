@@ -297,8 +297,7 @@ label = 'scene'
 def prof(tmp_path, monkeypatch):
     from nncq import profiles
     monkeypatch.setattr(config, "DATA_DIR", tmp_path / "db")
-    monkeypatch.setattr(profiles, "DIR", tmp_path / "profiles")
-    monkeypatch.setattr(profiles, "ARCHIVE_DIR", tmp_path / "archive")
+    monkeypatch.setattr(config, "PROFILES_DIR", tmp_path / "profiles")
     monkeypatch.setenv("NNCQ_INDEX_PROCS", "1")
     monkeypatch.setenv("NNCQ_DATA", "true")
     ws = tmp_path / "acme"
@@ -310,7 +309,7 @@ def prof(tmp_path, monkeypatch):
     (ws / "vendor" / "lib.cpp").write_text("void vendored() {}\n", encoding="utf-8")
     (ws / "a.scene").write_text('<node type="DoorData" ref="b"/>\n', encoding="utf-8")
     (ws / "b.scene").write_text('<node type="DoorData"/>\n', encoding="utf-8")
-    d = profiles.DIR / "acme"
+    d = config.PROFILES_DIR / "acme"
     d.mkdir(parents=True)
     (d / "profile.toml").write_text(PROFILE.format(root=ws.as_posix()), encoding="utf-8")
     return ws
@@ -351,8 +350,6 @@ def test_profile_vcs_field_and_detection(prof, tmp_path):
     g = tmp_path / "gitws"
     (g / ".git").mkdir(parents=True)
     assert vcs.detect(g) == "git" and vcs.detect(tmp_path / "acme") == "none"
-    import shutil
-    shutil.copytree(config.ROOT / "profiles" / profiles.TEMPLATE, profiles.DIR / profiles.TEMPLATE)
     out = profiles.write("acme3", prof, [], [], vcs="git")
     assert profiles.parse(out).vcs == "git"
 
@@ -360,7 +357,7 @@ def test_profile_vcs_field_and_detection(prof, tmp_path):
 def test_profile_export_import_round_trip(prof):
     from nncq import profiles
     f = profiles.export("acme")
-    assert f.parent == profiles.ARCHIVE_DIR and f.suffix == profiles.ARCHIVE_EXT
+    assert f.parent == config.PROFILES_DIR / "archive" and f.suffix == profiles.ARCHIVE_EXT
     with pytest.raises(ValueError):
         profiles.import_(f)
     dst = profiles.import_(f, "acme2")
@@ -368,26 +365,24 @@ def test_profile_export_import_round_trip(prof):
     assert "name = 'acme2'" in (dst / "profile.toml").read_text(encoding="utf-8")
 
 
-def test_sample_profile_activates_and_links_a_workspace_under_examples(prof, tmp_path, monkeypatch):
-    from nncq import profiles
+def test_demo_is_a_self_contained_home(tmp_path, monkeypatch):
+    from nncq import profiles, repos
     monkeypatch.delenv("NNCQ_WORKSPACE_ORBITKIT", raising=False)
-    demo = profiles.parse(profiles.EXAMPLES.parent / "profiles" / "_demo" / "profile.toml")    # the bundled demo
-    assert demo.root == (profiles.EXAMPLES / "orbitkit").resolve()
-    home = tmp_path / "nncq"
-    (home / "examples" / "demo").mkdir(parents=True)
-    (home / "examples" / "demo" / "CMakeLists.txt").write_text("", encoding="utf-8")
-    (home / "src").mkdir()
-    monkeypatch.setattr(config, "ROOT", home)
-    monkeypatch.setattr(profiles, "EXAMPLES", home / "examples")
-    (profiles.DIR / "_demo").mkdir(parents=True)
-    (profiles.DIR / "_demo" / "profile.toml").write_text(
-        "name = 'demo'\n[workspace]\nroots = ['examples/demo']\nmarkers = ['CMakeLists.txt']\n", encoding="utf-8")
-    assert profiles.is_sample("_demo") and not profiles.is_sample(profiles.TEMPLATE)
-    assert "demo" not in profiles.load_all()
-    p = profiles.activate("_demo")
-    assert p.path == profiles.DIR / "demo" / "profile.toml" and "demo" in profiles.load_all()
-    assert p.root == (home / "examples" / "demo").resolve()
-    assert "overlaps" in p.accepts(home / "src") and "overlaps" in p.accepts(home)
+    monkeypatch.delenv("NNCQ_PORT", raising=False)
+    monkeypatch.delenv("NNCQ_MODE", raising=False)
+    try:
+        config.use_home(config.DEMO)
+        assert config.home_args() == ["--home", str(config.DEMO.resolve())]
+        assert config.PROFILES_DIR == config.DEMO / "profiles" and config.DATA_DIR == config.DEMO / "cache" / "db"
+        assert config.settings().lite and config.settings().port == 8766           # from demo/.env
+        r = repos.get()
+        assert r.name == "orbitkit" and r.root == (config.DEMO / "orbitkit").resolve()   # relative to the home
+        assert r.db == config.DEMO / "cache" / "db" / "orbitkit" / "index.db"
+        assert "overlaps" in r.profile.accepts(config.DEMO)              # only workspaces below demo/ are allowed
+        assert profiles.archive_dir() == config.DEMO / "profiles" / "archive"
+    finally:
+        config.use_home(config.ROOT)
+    assert config.home_args() == [] and "orbitkit" not in profiles.load_all()
 
 
 def test_results_citing_files_changed_on_disk_are_flagged(repo):

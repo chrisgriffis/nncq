@@ -1,17 +1,17 @@
-"""Codebase profiles: everything specific to one codebase lives in profiles/<name>/profile.toml (git-ignored;
-profiles/_template is the documented, shared example). The core stays codebase-agnostic.
+"""Codebase profiles: everything specific to one codebase lives in <home>/profiles/<name>/profile.toml (git-ignored
+in the nncq folder; profiles/_template is the documented, shared example). The core stays codebase-agnostic.
 
 A profile says
   - how to find its workspace on this machine ([workspace]: candidate roots checked against markers / git remote,
     or NNCQ_WORKSPACE_<NAME>). Workspaces live anywhere outside the nncq folder, never inside it (the bundled
-    demo under examples/ excepted; a relative root is relative to the nncq folder).
+    demo under demo/ excepted; a relative root is relative to the home folder, config.HOME).
   - which folders to index and what to ignore
   - extra file extensions, brace-block definition languages ([[dsl]])
   - data cross-reference rules ([[xref]]): regexes over data files naming the types they instantiate and the
     files they reference (see datarefs.py)
   - notes appended to the MCP server instructions ([mcp])
-Each profile is one index: cache/db/<name>/index.db. Folders starting with _ are shared samples: _template (documented
-example) and _demo (the bundled demo workspace, activated by `nncq init --profile _demo`).
+Each profile is one index: <home>/cache/db/<name>/index.db. Folders starting with _ (the template) and profiles/archive
+(exported profiles) are not profiles. The bundled demo is its own home, demo/, with its own profiles/ folder.
 """
 from __future__ import annotations
 
@@ -26,9 +26,9 @@ from pathlib import Path
 
 from nncq import config
 
-DIR = config.ROOT / "profiles"
 TEMPLATE = "_template"
-EXAMPLES = config.ROOT / "examples"     # bundled demo workspaces: the one place inside nncq a workspace may live
+TEMPLATE_FILE = config.ROOT / "profiles" / TEMPLATE / "profile.toml"   # shared by every home
+
 
 DSL_KEYWORDS = ["class", "struct", "enum", "interface", "valuetype", "component", "service", "type", "method",
                 "namespace", "delegate", "event", "union", "flags", "module", "function", "entity", "contract"]
@@ -103,7 +103,7 @@ class Profile:
     @cached_property
     def root(self) -> Path | None:
         """This machine's workspace: NNCQ_WORKSPACE_<NAME>, else the first candidate root that is accepted.
-        A relative candidate is relative to the nncq folder (the bundled demo: examples/<name>)."""
+        A relative candidate is relative to the home folder (the bundled demo: demo/orbitkit)."""
         env = os.environ.get("NNCQ_WORKSPACE_" + re.sub(r"\W", "_", self.name).upper(), "")
         for c in ([env] if env else []) + self.roots:
             p = candidate(c)
@@ -130,16 +130,16 @@ class Profile:
 
 def candidate(c: str) -> Path:
     p = Path(os.path.expandvars(c)).expanduser()
-    return p if p.is_absolute() else config.ROOT / p
+    return p if p.is_absolute() else config.HOME / p
 
 
 def nested(root: Path) -> bool:
-    """root overlaps the nncq folder (bundled demos under examples/ excepted)."""
+    """root overlaps the nncq folder (the bundled demo under demo/ excepted)."""
     try:
         a, b = root.resolve(), config.ROOT.resolve()
     except OSError:
         return False
-    if EXAMPLES.resolve() in a.parents:
+    if config.DEMO.resolve() in a.parents:
         return False
     return a == b or b in a.parents or a in b.parents
 
@@ -189,11 +189,10 @@ def parse(path: Path) -> Profile:
 
 
 def load_all() -> dict[str, Profile]:
-    """Active profiles. Folders starting with _ are shared samples (the template, the bundled demo): inactive until
-    activate() copies one to profiles/<its name>/."""
+    """The current home's profiles (profiles/<name>/profile.toml; _template and archive/ are not profiles)."""
     out = {}
-    if DIR.is_dir():
-        for f in sorted(DIR.glob("*/profile.toml")):
+    if config.PROFILES_DIR.is_dir():
+        for f in sorted(config.PROFILES_DIR.glob("*/profile.toml")):
             if f.parent.name.startswith(("_", ".")):
                 continue
             p = parse(f)
@@ -203,22 +202,6 @@ def load_all() -> dict[str, Profile]:
 
 def get(name: str) -> Profile | None:
     return load_all().get(name)
-
-
-def is_sample(name: str) -> bool:
-    return name.startswith("_") and name != TEMPLATE and (DIR / name / "profile.toml").is_file()
-
-
-def activate(sample: str) -> Profile:
-    """profiles/_demo -> profiles/<name>/ (git-ignored like any profile); an existing active copy is kept."""
-    src = parse(DIR / sample / "profile.toml")
-    if src.name.startswith("_"):
-        raise ValueError(f"{src.path}: a sample profile needs a name that does not start with _")
-    dst = DIR / src.name / "profile.toml"
-    if not dst.exists():
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        dst.write_text(src.path.read_text(encoding="utf-8"), encoding="utf-8")
-    return parse(dst)
 
 
 # ---------------------------------------------------------------- writing (nncq init / nncq profile new)
@@ -236,8 +219,8 @@ def write(name: str, root: Path, dirs: list[str], ignore: list[str], description
     """Create profiles/<name>/profile.toml from the template, filled in for this workspace."""
     if nested(root):
         raise ValueError(f"{root} overlaps the nncq folder; pick a workspace outside {config.ROOT}")
-    dst = DIR / name / "profile.toml"
-    tmpl = (DIR / TEMPLATE / "profile.toml").read_text(encoding="utf-8")
+    dst = config.PROFILES_DIR / name / "profile.toml"
+    tmpl = TEMPLATE_FILE.read_text(encoding="utf-8")
     head, _, rest = tmpl.partition("# ---- end of [workspace]")
     ws = (f"name = {_q(name)}\ndescription = {_q(description)}\n\n[workspace]\n"
           f"roots = {_list([str(root).replace(chr(92), '/')])}\n"
@@ -283,18 +266,22 @@ def suggest(root: Path) -> dict:
 
 # ---------------------------------------------------------------- archive (nncq profile export / import)
 
-ARCHIVE_DIR = config.ROOT / "archive"
 ARCHIVE_EXT = ".nncqprofile"
 
 
+def archive_dir() -> Path:
+    """<home>/profiles/archive: tracked, contents git-ignored. Not a profile (no profile.toml)."""
+    return config.PROFILES_DIR / "archive"
+
+
 def export(name: str, dest: Path | None = None) -> Path:
-    """profiles/<name>/ -> one compressed file (zip, deflate level 9) in archive/ by default."""
+    """profiles/<name>/ -> one compressed file (zip, deflate level 9) in profiles/archive/ by default."""
     import time
     import zipfile
-    src = DIR / name
+    src = config.PROFILES_DIR / name
     if not (src / "profile.toml").is_file():
-        raise ValueError(f"no profile {name!r} under {DIR}")
-    dest = Path(dest) if dest else ARCHIVE_DIR / f"{name}-{time.strftime('%Y%m%d-%H%M%S')}{ARCHIVE_EXT}"
+        raise ValueError(f"no profile {name!r} under {config.PROFILES_DIR}")
+    dest = Path(dest) if dest else archive_dir() / f"{name}-{time.strftime('%Y%m%d-%H%M%S')}{ARCHIVE_EXT}"
     if dest.is_dir():
         dest = dest / f"{name}{ARCHIVE_EXT}"
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -314,7 +301,7 @@ def import_(archive: Path, name: str = "", force: bool = False) -> Path:
         meta = json.loads(z.read("nncq-profile.json"))
         old = meta["name"]
         name = name or old
-        dst = DIR / name
+        dst = config.PROFILES_DIR / name
         if (dst / "profile.toml").exists() and not force:
             raise ValueError(f"profile {name!r} exists ({dst}); pass --force to overwrite")
         for info in z.infolist():

@@ -12,7 +12,7 @@ nncq is a local code index for you and your coding agent. Search gives you lines
 - **Lite or full**: lite runs anywhere (keywords + graph + model, ~150 MB, no GPU); full adds NVIDIA-GPU embeddings and a reranker for questions that share no words with the code.
 
 <a href="docs/img/hero.png"><img src="docs/img/hero.png" alt="The three panes on the bundled demo: an answered question with how it was read and the files it found; the Symbol explorer on FramedDecoder::decode with its card, file outline and code; the Model explorer showing the sequence diagram generated for it" width="100%"></a>
-<sub>The three panes on the bundled demo (`examples/orbitkit`, a fictional satellite ground-station toolkit, lite mode): a question answered on the left, the symbol it led to in the middle, its generated sequence diagram on the right.</sub>
+<sub>The three panes on the bundled demo (`demo/orbitkit`, a fictional satellite ground-station toolkit, lite mode): a question answered on the left, the symbol it led to in the middle, its generated sequence diagram on the right.</sub>
 
 > **Status:** indexing (tree-sitter + profile-declared DSLs, data cross-reference), hybrid search, the graph tools, the UML / SysML model and Model explorer, codebase profiles, the MCP server, the dashboard and the CLI are in and tested; developed against a 4,000-file slice of a large C++ workspace and the bundled demo. Not yet: Linux `init.sh`, editor plugins.
 
@@ -44,16 +44,11 @@ git clone <this repo> nncq; cd nncq
 
 ### Try it on the bundled demo
 
-`examples/orbitkit` is a small, fictional, original codebase made for this: a satellite ground-station toolkit with four C++ libraries, a daemon, tests, Debug / Release configurations and presets, an aarch64 toolchain, a Python tools package, docs, an inheritance hierarchy three levels deep, composition and aggregation, a call chain from `main` to a CRC check, and a deliberate include cycle. Every screenshot in this README is of it.
+`demo/orbitkit` is a small, fictional, original codebase made for this: a satellite ground-station toolkit with four C++ libraries, a daemon, tests, Debug / Release configurations and presets, an aarch64 toolchain, a Python tools package, docs, an inheritance hierarchy three levels deep, composition and aggregation, a call chain from `main` to a CRC check, and a deliberate include cycle. Every screenshot in this README is of it.
 
-```powershell
-.venv\Scripts\nncq init --yes --profile _demo         # activates profiles/_demo as profiles/orbitkit
-.venv\Scripts\nncq index --name orbitkit                # a second or two
-.venv\Scripts\nncq start                                # dashboard: http://127.0.0.1:8765/
-.venv\Scripts\python tools\demo_model.py                # optional: the diagrams and agent-made items shown below
-```
+Double-click `demo\demo.cmd` (Linux / macOS: `demo/demo.sh`). The first run installs nncq into `.venv` in lite mode (no torch, no GPU, about 150 MB); every run indexes the demo (a second or two), starts the server and opens the dashboard on http://127.0.0.1:8766/. Close the window to stop it.
 
-`profiles/_demo` is a shared sample (tracked, inactive until activated): its workspace root is relative to the nncq folder, and `examples/` is the one place inside nncq a workspace may live. `tools/demo_model.py` talks to the server over MCP exactly like an agent: it generates a set of diagrams and upserts one view and one composition with provenance (`copilot-cli`, `claude-opus-5.5`), so the `mcp-agent` badge has something to show.
+`demo/` is a self-contained nncq home: its own profile (`demo/profiles/orbitkit`), settings (`demo/.env`: lite, port 8766), index and logs (`demo/cache`). It never touches your profiles or indexes and runs next to a real server on 8765. Any nncq command works on it with `--home demo`, e.g. `.venv\Scripts\nncq --home demo graph trace Crc::check --from main`. On the first run `demo/seed_model.py` talks to the server over MCP exactly like an agent: it generates a set of diagrams and upserts one view and one composition with provenance (`copilot-cli`, `claude-opus-5.5`), so the `mcp-agent` badge has something to show. See [demo/README.md](demo/README.md).
 
 ### Index your own code
 
@@ -80,9 +75,9 @@ Lite is the coworker default: the graph tools, the model and the data cross-refe
 
 ### Codebase profiles
 
-nncq's code knows no particular codebase. Everything specific to one lives in a profile, `profiles/<name>/profile.toml`: one profile, one workspace, one index. `profiles/*` is git-ignored except the shared samples (folders starting with `_`: the documented [template](profiles/_template/profile.toml) and the [demo](profiles/_demo/profile.toml)), so a profile can name private repos, paths and file formats while this repo stays shareable. A profile declares:
+nncq's code knows no particular codebase. Everything specific to one lives in a profile, `profiles/<name>/profile.toml`: one profile, one workspace, one index. `profiles/*` is git-ignored except the documented [template](profiles/_template/profile.toml) (the demo's profile lives in its own home: [demo/profiles/orbitkit](demo/profiles/orbitkit/profile.toml)), so a profile can name private repos, paths and file formats while this repo stays shareable. A profile declares:
 
-- **Where the workspace is** on this machine: candidate roots, marker files that must exist, optionally a substring of the git remote. The first candidate that passes wins; `NNCQ_WORKSPACE_<NAME>` overrides. Workspaces live outside the nncq folder (bundled demos under `examples/` excepted).
+- **Where the workspace is** on this machine: candidate roots, marker files that must exist, optionally a substring of the git remote. The first candidate that passes wins; `NNCQ_WORKSPACE_<NAME>` overrides. Workspaces live outside the nncq folder (the bundled demo under `demo/` excepted); a relative root is relative to the home folder.
 - **What to index:** code folders, extra ignores, extra file extensions and non-code formats.
 - **Version control** (`vcs = "git" | "p4" | "none"`, proposed by the wizard, detected at run time when absent): which actions the dashboard's editor offers (git stage / revert; p4 edit / revert, Save checks a read-only p4 file out first; none: just Save).
 - **Definition languages** (`[[dsl]]`): brace-block IDL / schema / service files, chunked at declarations, with `name : Base` inheritance.
@@ -93,11 +88,11 @@ nncq's code knows no particular codebase. Everything specific to one lives in a 
 nncq profile list                       # profiles, and the workspace each found on this machine
 nncq profile new myapp D:\src\myapp     # wizard (nncq init runs it too: pick or create a profile)
 nncq profile show myapp
-nncq profile export myapp               # one compressed archive\myapp-<time>.nncqprofile
-nncq profile import archive\myapp-<time>.nncqprofile [--as name] [--force]
+nncq profile export myapp               # one compressed profiles\archive\myapp-<time>.nncqprofile
+nncq profile import profiles\archive\myapp-<time>.nncqprofile [--as name] [--force]
 ```
 
-`archive/` is tracked but its contents are git-ignored: export there, copy the file to another machine, import, and the profile finds its workspace again through its linking rules. An LLM agent running `nncq init`, or asked to write a profile from the template, can fill in the DSL and xref rules from a plain description of the codebase.
+`profiles/archive/` is tracked but its contents are git-ignored: export there, copy the file to another machine, import, and the profile finds its workspace again through its linking rules. An LLM agent running `nncq init`, or asked to write a profile from the template, can fill in the DSL and xref rules from a plain description of the codebase.
 
 ### Agent setup: `nncq agents`
 
@@ -293,7 +288,7 @@ A grouped list of stored diagrams with colour-coded kind and origin badges (`aut
 
 ## Exports: Markdown, Mermaid, ASCII
 
-`uml_view(format=markdown)`, **Generate .md** and **Preview .md** produce a pure Mermaid block (every node a link to its dashboard page) plus a list of the elements, with view and element revisions in the links: a page opened from an outdated export says so. Agent-made items end with a provenance footer. Below, two exports from the demo, unedited (the links point at a local dashboard, so they only work on a machine running nncq; full files in [docs/demo](docs/demo)).
+`uml_view(format=markdown)`, **Generate .md** and **Preview .md** produce a pure Mermaid block (every node a link to its dashboard page) plus a list of the elements, with view and element revisions in the links: a page opened from an outdated export says so. Agent-made items end with a provenance footer. Below, two exports from the demo, unedited (the links point at a local dashboard, so they only work on a machine running nncq; full files in [demo/docs](demo/docs)).
 
 The default diagram for `main` (`uml_view(subject="main", path="apps/groundd/main.cpp", depth=2)`):
 
@@ -471,12 +466,15 @@ Parsing runs at about 500 files/s per CPU core. **The trade-off is honest:** lin
   ```
   init.ps1, pyproject.toml   repo root (launch + packaging only)
   src/nncq/                  all code (src/nncq/uml: the model)
-  profiles/_template, _demo  shared sample profiles (others: git-ignored)
-  examples/orbitkit/         the bundled demo workspace
-  tools/                     screenshot, demo-model and banner scripts
-  docs/                      design notes, images, demo exports
+  profiles/_template         the documented sample profile (others: git-ignored)
+  profiles/archive/          exported profiles (contents git-ignored)
+  demo/                      the bundled demo, a self-contained home: demo.cmd / demo.sh, orbitkit/ (code),
+                             profiles/, docs/ (exports), .env, cache/ (its index; git-ignored)
+  tools/                     screenshot and banner scripts
+  docs/                      design notes, images
   .venv/  .env  cache/       python env, your settings, models / parsers / indexes / logs (git-ignored)
-  cache/db/<repo>/index.db   one index per workspace
+  cache/db/<repo>/index.db   one index per workspace (a home: profiles/ + cache/db + cache/logs + .env;
+                             default the nncq folder, `nncq --home <dir>` for another)
   ```
 
 ### Why each tool is used
@@ -572,11 +570,11 @@ Every option, with comments: [`.env.example`](.env.example).
 .venv\Scripts\nncq doctor                  # installation check
 ```
 
-The README visuals are reproducible from the demo, against a running server:
+The README visuals are reproducible from the demo, against a running server (`demo\demo.cmd`):
 
 ```powershell
-.venv\Scripts\python tools\demo_model.py --url http://127.0.0.1:8765/mcp   # diagrams + agent-made items, exports in cache\demo-out
-.venv\Scripts\python tools\screens.py --url http://127.0.0.1:8765          # headless Edge / Chrome over DevTools -> docs\img\*.png, sync.gif
+.venv\Scripts\python demo\seed_model.py                                    # diagrams + agent-made items, exports in demo\cache\seed-out
+.venv\Scripts\python tools\screens.py --url http://127.0.0.1:8766          # headless Edge / Chrome over DevTools -> docs\img\*.png, sync.gif
 .venv\Scripts\python tools\banner.py                                       # docs\img\banner.svg from docs\img\hero.png
 ```
 

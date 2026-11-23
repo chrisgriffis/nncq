@@ -1,10 +1,14 @@
-"""Paths and settings. Everything the tool writes lives under ROOT/cache (git-ignored):
-    cache/models/hf   Nemotron weights + their remote code     cache/db     indexes and state
-    cache/tools       pip cache, tree-sitter parsers, torch     cache/logs   server / worker logs
+"""Paths and settings.
 
-Settings come from the process environment, then ROOT/.env (written by `nncq init`), then defaults.
-Importing this module also points every model / parser cache into the repo and switches the
-Hugging Face stack offline, so nothing reaches the network after `nncq init` has fetched the models.
+Two folders:
+  ROOT   the nncq install: .venv, cache/models/hf (Nemotron weights), cache/tools (pip cache, parsers, torch).
+  HOME   one nncq instance: profiles/ (+ profiles/archive), cache/db (indexes, state), cache/logs, .env.
+         Default: ROOT. `nncq --home <dir> ...` picks another one; the bundled demo is ROOT/demo, a complete home
+         of its own (its workspace, profile, settings and index all live in that folder).
+
+Settings come from the process environment, then HOME/.env, then ROOT/.env (written by `nncq init`), then defaults.
+Importing this module also points every model / parser cache into the install and switches the Hugging Face stack
+offline, so nothing reaches the network after `nncq init` has fetched the models.
 """
 from __future__ import annotations
 
@@ -13,21 +17,20 @@ from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]   # repo root (package lives in src/nncq)
-ENV_FILE = ROOT / ".env"
-CACHE = ROOT / "cache"
-DATA_DIR = CACHE / "db"
-LOG_DIR = CACHE / "logs"
-TOOLS_DIR = CACHE / "tools"
-MODELS_DIR = CACHE / "models"
+DEMO = ROOT / "demo"                         # the bundled demo home: the one place inside nncq a workspace may live
+TOOLS_DIR = ROOT / "cache" / "tools"
+MODELS_DIR = ROOT / "cache" / "models"
 HF_HOME = MODELS_DIR / "hf"
 TS_CACHE = TOOLS_DIR / "tree-sitter"
-CONTROL_FILE = DATA_DIR / "control.json"
-QUERY_BUSY_FILE = DATA_DIR / "query.busy"     # mtime = last GPU use by a search; the worker yields to it
-SERVER_FILE = DATA_DIR / "server.json"
-REPOS_FILE = DATA_DIR / "repos.json"
+
+# per-home paths: set by use_home()
+HOME = ROOT
+ENV_FILE = PROFILES_DIR = CACHE = DATA_DIR = LOG_DIR = CONTROL_FILE = QUERY_BUSY_FILE = SERVER_FILE = REPOS_FILE = ROOT
 
 
-def read_env_file(path: Path = ENV_FILE) -> dict[str, str]:
+def read_env_file(path: Path | None = None) -> dict[str, str]:
+    """KEY=value lines of path (default: this home's .env)."""
+    path = path or ENV_FILE
     out: dict[str, str] = {}
     if not path.exists():
         return out
@@ -45,9 +48,39 @@ def read_env_file(path: Path = ENV_FILE) -> dict[str, str]:
     return out
 
 
-for _k, _v in read_env_file().items():
-    if _v != "":
-        os.environ.setdefault(_k, _v)
+_from_files: set[str] = set()       # keys this module put into os.environ from .env files (the process env wins)
+
+
+def use_home(home: Path) -> None:
+    """Point every per-instance path at home and reload the .env layering (HOME/.env over ROOT/.env)."""
+    global HOME, ENV_FILE, PROFILES_DIR, CACHE, DATA_DIR, LOG_DIR, CONTROL_FILE, QUERY_BUSY_FILE, SERVER_FILE, \
+        REPOS_FILE
+    HOME = Path(home).resolve()
+    ENV_FILE = HOME / ".env"
+    PROFILES_DIR = HOME / "profiles"
+    CACHE = HOME / "cache"
+    DATA_DIR = CACHE / "db"
+    LOG_DIR = CACHE / "logs"
+    CONTROL_FILE = DATA_DIR / "control.json"
+    QUERY_BUSY_FILE = DATA_DIR / "query.busy"     # mtime = last GPU use by a search; the worker yields to it
+    SERVER_FILE = DATA_DIR / "server.json"
+    REPOS_FILE = DATA_DIR / "repos.json"
+    for k in _from_files:
+        os.environ.pop(k, None)
+    _from_files.clear()
+    for f in dict.fromkeys((ENV_FILE, ROOT / ".env")):
+        for k, v in read_env_file(f).items():
+            if v != "" and k not in os.environ:
+                os.environ[k] = v
+                _from_files.add(k)
+
+
+def home_args() -> list[str]:
+    """`--home <dir>` for child nncq processes (worker, server) when this one runs on a non-default home."""
+    return [] if HOME == ROOT.resolve() else ["--home", str(HOME)]
+
+
+use_home(ROOT)
 
 os.environ.setdefault("HF_HOME", str(HF_HOME))
 os.environ.setdefault("HF_HUB_OFFLINE", "1")

@@ -17,6 +17,8 @@
 .PARAMETER Python      Base interpreter for the venv (3.11-3.13). Default: py -3.12, else python on PATH.
 .PARAMETER SeedModels  A Hugging Face hub cache dir that already holds the Nemotron models: copy, don't download.
 .PARAMETER Yes         Accept defaults for every prompt (non-interactive).
+.PARAMETER EnvOnly     Only create .venv and install nncq; skip `nncq init` (no .env, models, workspace or agents).
+                      demo\demo.cmd uses this on first run.
 #>
 param(
   [switch]$Lite,
@@ -24,7 +26,8 @@ param(
   [string]$Agents = "",
   [string]$Python = "",
   [string]$SeedModels = "",
-  [switch]$Yes
+  [switch]$Yes,
+  [switch]$EnvOnly
 )
 $ErrorActionPreference = "Stop"
 $Root = $PSScriptRoot
@@ -71,6 +74,7 @@ if ($Lite) {
 
 Write-Host "== installing nncq"
 & $Py -m pip install -e $Extras --quiet; if ($LASTEXITCODE) { throw "nncq install failed" }
+if ($EnvOnly) { exit 0 }
 
 $initArgs = @("-m", "nncq", "init")
 if ($Lite) { $initArgs += "--lite" }
