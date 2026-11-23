@@ -71,6 +71,7 @@ class Profile:
     roots: list[str] = field(default_factory=list)
     markers: list[str] = field(default_factory=list)
     git_remote: str = ""
+    vcs: str = ""                   # git | p4 | none ("" = detect at run time, vcs.detect)
     dirs: list[str] = field(default_factory=list)
     ignore: list[str] = field(default_factory=list)
     ignore_defaults: bool = True
@@ -150,6 +151,9 @@ def parse(path: Path) -> Profile:
     name = d.get("name") or path.parent.name
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", name):
         raise ValueError(f"{path}: profile name {name!r} must be letters, digits, _ . -")
+    vc = str(ws.get("vcs", "") or "").strip().lower()
+    if vc and vc not in ("git", "p4", "none"):
+        raise ValueError(f"{path}: [workspace] vcs = {vc!r}: use git, p4 or none (or leave it out to detect)")
     dsls = [Dsl(x["lang"], tuple(_ext(e) for e in x.get("extensions", [])),
                 tuple(x.get("keywords", DSL_KEYWORDS)), tuple(x.get("containers", DSL_CONTAINERS)),
                 x.get("module_keyword", "")) for x in d.get("dsl", [])]
@@ -165,7 +169,7 @@ def parse(path: Path) -> Profile:
         xrefs.append(xr)
     return Profile(
         name=name, path=path, description=d.get("description", ""),
-        roots=list(ws.get("roots", [])), markers=list(ws.get("markers", [])), git_remote=ws.get("git_remote", ""),
+        roots=list(ws.get("roots", [])), markers=list(ws.get("markers", [])), git_remote=ws.get("git_remote", ""), vcs=vc,
         dirs=[x.strip("/\\").replace("\\", "/") for x in ws.get("dirs", [])],
         ignore=list(ws.get("ignore", [])), ignore_defaults=bool(ws.get("ignore_defaults", True)),
         extensions={_ext(k): v or "text" for k, v in ix.get("extensions", {}).items()},
@@ -198,7 +202,7 @@ def _list(xs) -> str:
 
 
 def write(name: str, root: Path, dirs: list[str], ignore: list[str], description: str = "",
-          markers: list[str] | None = None, remote: str = "") -> Path:
+          markers: list[str] | None = None, remote: str = "", vcs: str = "") -> Path:
     """Create profiles/<name>/profile.toml from the template, filled in for this workspace."""
     if nested(root):
         raise ValueError(f"{root} overlaps the nncq folder; pick a workspace outside {config.ROOT}")
@@ -209,6 +213,7 @@ def write(name: str, root: Path, dirs: list[str], ignore: list[str], description
           f"roots = {_list([str(root).replace(chr(92), '/')])}\n"
           f"markers = {_list(markers or [])}\n"
           f"git_remote = {_q(remote)}\n"
+          f"vcs = {_q(vcs)}\n"
           f"dirs = {_list(dirs)}\n"
           f"ignore = {_list(ignore)}\n"
           "ignore_defaults = true\n")

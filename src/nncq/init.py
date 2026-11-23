@@ -158,9 +158,19 @@ def profile_wizard(name: str, path: str, ask: bool, dirs: str | None = None) -> 
         dirs = (input(f"  Code folders, comma-separated (empty = everything) [{dv}]: ").strip() or dv) if ask else dv
     ig = ",".join(f"{s}/**" for s in sg["skipped"])
     ig = (input(f"  Ignore (globs, comma-separated) [{ig}]: ").strip() or ig) if ask else ig
-    dst = profiles.write(name, root.resolve(), _split(dirs), _split(ig), markers=sg["markers"], remote=sg["remote"])
+    from nncq import vcs as vcs_mod
+    vc = vcs_mod.detect(root.resolve())
+    if ask:
+        while True:
+            a = (input(f"  Version control (git / p4 / none) [{vc}]: ").strip().lower() or vc)
+            if a in vcs_mod.KINDS:
+                vc = a
+                break
+            print("    git, p4 or none")
+    dst = profiles.write(name, root.resolve(), _split(dirs), _split(ig), markers=sg["markers"], remote=sg["remote"],
+                         vcs=vc)
     print(f"== profile '{name}' written: {dst}\n   workspace {root.resolve()}"
-          + (f" [{dirs}]" if dirs else " (everything)") + (f", ignoring {ig}" if ig else "")
+          + (f" [{dirs}]" if dirs else " (everything)") + (f", ignoring {ig}" if ig else "") + f", vcs {vc}"
           + "\n   add file types, DSLs and [[xref]] data rules there (documented in profiles/_template/profile.toml)")
     return repos.get(name)
 

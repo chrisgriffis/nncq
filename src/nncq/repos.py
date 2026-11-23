@@ -30,6 +30,13 @@ class Repo:
         return {"root": str(self.root), "dirs": self.dirs}
 
     @property
+    def vcs(self) -> str:
+        """git | p4 | none: the profile's [workspace] vcs, else detected from the workspace."""
+        from nncq import vcs
+        v = getattr(self.profile, "vcs", "") if self.profile else ""
+        return v or vcs.detect(self.root)
+
+    @property
     def xrefs(self) -> list:
         return list(self.profile.xrefs) if self.profile else []
 

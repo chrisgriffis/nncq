@@ -719,7 +719,7 @@ def _repo_snapshot(r: repos.Repo) -> dict:
                 st["index_state"] = hs
         hit = _repo_cache[r.name] = (time.time(), st)
     st = dict(hit[1])
-    out = {"name": r.name, "status": st, "paused": worker.paused()}
+    out = {"name": r.name, "status": st, "paused": worker.paused(), "vcs": r.vcs}
     ws = worker.read_status(r)
     if ws:
         out["embedding"] = {k: v for k, v in ws.items() if k != "repo"}
