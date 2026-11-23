@@ -46,6 +46,8 @@ git clone <this repo> nncq; cd nncq
 
 `demo/orbitkit` is a small, fictional, original codebase made for this: a satellite ground-station toolkit with four C++ libraries, a daemon, tests, Debug / Release configurations and presets, an aarch64 toolchain, a Python tools package, docs, an inheritance hierarchy three levels deep, composition and aggregation, a call chain from `main` to a CRC check, and a deliberate include cycle. Every screenshot in this README is of it.
 
+A read-only copy runs at **https://chrisgriffis.rocks** (the `Dockerfile`, redeployed from master by `.github/workflows/deploy.yml`); its MCP endpoint is `https://chrisgriffis.rocks/mcp`.
+
 Double-click `demo\demo.cmd` (Linux / macOS: `demo/demo.sh`). The first run installs nncq into `.venv` in lite mode (no torch, no GPU, about 150 MB); every run indexes the demo (a second or two), starts the server and opens the dashboard on http://127.0.0.1:8766/. Close the window to stop it.
 
 `demo/` is a self-contained nncq home: its own profile (`demo/profiles/orbitkit`), settings (`demo/.env`: lite, port 8766), index and logs (`demo/cache`). It never touches your profiles or indexes and runs next to a real server on 8765. Any nncq command works on it with `--home demo`, e.g. `.venv\Scripts\nncq --home demo graph trace Crc::check --from main`. On the first run `demo/seed_model.py` talks to the server over MCP exactly like an agent: it generates a set of diagrams and upserts one view and one composition with provenance (`copilot-cli`, `claude-opus-5.5`), so the `mcp-agent` badge has something to show. See [demo/README.md](demo/README.md).
@@ -529,7 +531,7 @@ Over stdio, nncq runs **inside** the agent's MCP process and exits with it, stop
 ## Local only and air-gapped
 
 - The network is used **only during `init`**: pip packages, a one-time download of the pinned model revisions (full mode) and one pinned, sha256-verified Mermaid build. After that the Hugging Face stack is forced offline and models load from the repo folder.
-- No cloud APIs, no telemetry, no external services. The server binds to `127.0.0.1`; a non-loopback bind is refused unless `NNCQ_TOKEN` is set. File actions in the dashboard (reveal, open, edit, VCS) work on a loopback host only, on an explicit click.
+- No cloud APIs, no telemetry, no external services. The server binds to `127.0.0.1`; a non-loopback bind is refused unless `NNCQ_TOKEN` is set (or `NNCQ_PUBLIC=1`, the read-only mode the hosted demo uses). File actions in the dashboard (reveal, open, edit, VCS) work on a loopback host only, on an explicit click.
 - For a machine with no internet, copy the models with `init.ps1 -SeedModels <hub dir>`; pip still needs a wheel cache or mirror.
 - Everything lives inside the clone (`.venv/`, `cache/`, `.env`): deleting the folder uninstalls it. No shared server, on purpose: nncq adds no new place your code or index goes.
 
@@ -545,6 +547,8 @@ Over stdio, nncq runs **inside** the agent's MCP process and exits with it, stop
 | Variable | Default | Meaning |
 |---|---|---|
 | `NNCQ_HOST` / `NNCQ_PORT` / `NNCQ_TOKEN` | `127.0.0.1` / `8765` / | bind address and port; token required for non-loopback |
+| `NNCQ_PUBLIC` | `false` | read-only public demo: no token needed off loopback; indexing, model writes, pause / resume and file actions are off |
+| `NNCQ_START` | | dashboard hash a bare URL opens on (the demo sets its tour start) |
 | `NNCQ_MODE` | `full` | `lite`: keyword + graph + model only, no torch, models or GPU |
 | `NNCQ_UML` | `true` | build the UML / SysML model at index time (else on demand: `nncq uml init`) |
 | `NNCQ_DATA` | `true` | maintain the data cross-reference (profiles with `[[xref]]` rules) |

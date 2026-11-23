@@ -562,6 +562,9 @@ def build(stdio: bool = False) -> FastMCP:
         return await _run(f)
 
     uml_tools.register(mcp, _run, _with, _job, _owned)
+    if s.public:
+        for name in PUBLIC_DROP:
+            mcp.remove_tool(name)
     return mcp
 
 
@@ -575,9 +578,12 @@ WEB_TOOLS = {"ask", "expand", "search_code", "grep_code", "find_symbol", "file_o
 WEB_TOOLS |= uml_tools.WEB_TOOLS
 
 
+PUBLIC_DROP = {"update_index", "index_repo", "uml_upsert", "uml_delete", "uml_build"}   # writes: gone in public mode
+
+
 async def web_tool(name: str, args: dict) -> dict:
     """The dashboard's search / symbol pages call the same (read-only) MCP tools agents use."""
-    if name not in WEB_TOOLS or _mcp is None:
+    if name not in WEB_TOOLS or _mcp is None or (name in PUBLIC_DROP and config.settings().public):
         return {"error": f"not available from the web page: {name}"}
     tok = _from_web.set(True)
     try:
@@ -766,14 +772,17 @@ def snapshot() -> dict:
             out_repos.append(_repo_snapshot(r))
         except Exception as e:
             out_repos.append({"name": r.name, "status": {"root": str(r.root), "indexed": False}, "error": str(e)})
-    return {"server": {"pid": os.getpid(), "mode": _info["mode"], "owner": _owner.is_set(),
+    return {"public": config.settings().public,
+            "server": {"pid": os.getpid(), "mode": _info["mode"], "owner": _owner.is_set(),
                        "uptime_s": round(time.time() - _info["started"]), "mcp_url": _info["mcp_url"]},
             "paused": worker.paused(), "repos": out_repos, "gpu": _gpu(), "models": models, "process": proc,
-            "tools": _tool_stats, "calls": list(_calls), "events": list(_events)[-80:],
+            "tools": _tool_stats, "calls": [] if config.settings().public else list(_calls), "events": list(_events)[-80:],
             "history": {k: list(v) for k, v in _hist.items()}, "history_24h": _hist_buckets()}
 
 
 def control(action: str, repo: str = "") -> dict:
+    if config.settings().public:
+        return {"error": "read-only public demo"}
     if action == "pause":
         worker.set_paused(True)
         _log("embedding paused from the dashboard")
@@ -941,8 +950,8 @@ def _serve_stdio(mcp: FastMCP) -> None:
 
 def serve(stdio: bool = False) -> None:
     s = config.settings()
-    if not config.is_loopback(s.host) and not s.token:
-        raise SystemExit("NNCQ_TOKEN is required when NNCQ_HOST is not loopback")
+    if not config.is_loopback(s.host) and not s.token and not s.public:
+        raise SystemExit("NNCQ_TOKEN is required when NNCQ_HOST is not loopback (or NNCQ_PUBLIC=1 for a read-only demo)")
     _info["mode"] = "stdio" if stdio else "http"
     mcp = build(stdio)
     if stdio:

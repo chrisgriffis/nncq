@@ -136,6 +136,8 @@ class Settings:
     cache_minutes: float    # identical tool calls within this window are answered from memory; 0 = off
     lite: bool              # NNCQ_MODE=lite: no torch, no models, no GPU (keyword + graph + data xref only)
     uml: bool               # build the UML/SysML model at index time (else on demand: nncq uml init / uml_build)
+    public: bool            # NNCQ_PUBLIC: read-only public demo (no token, no write tools, no pause/resume)
+    start: str              # NNCQ_START: dashboard hash a bare URL opens on (e.g. the hosted demo's tour start)
 
 
 def mode() -> str:
@@ -176,6 +178,8 @@ def settings() -> Settings:
         cache_minutes=_float("NNCQ_CACHE_MINUTES", 15.0),
         lite=lite,
         uml=_bool("NNCQ_UML", True),
+        public=_bool("NNCQ_PUBLIC", False),
+        start=e("NNCQ_START", ""),
     )
 
 
