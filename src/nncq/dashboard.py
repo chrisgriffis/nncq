@@ -541,7 +541,9 @@ function ancestors(nd){const s=new Set();for(let p=nd;p;p=p.parent!=null?nodes[p
 async function expand(nd){if(nd.leaf)return;if(nd.kids){nd.open=!nd.open;drawTree();return}
  nd.loading=true;drawTree();
  try{nd.kids=await nd.load(nd)}catch(e){nd.kids=[mk({label:`<span class="err">${esc(e.message)}</span>`,leaf:true})]}
- nd.kids.forEach(c=>c.parent=nd.id);const anc=ancestors(nd);nd.kids.forEach(c=>{if(c.sym&&anc.has(c.sym)&&!c.leaf){c.leaf=true;c.badge=tmode==='depends'?'cycle ↺':'recursion';c.bw=true}});
+ nd.kids.forEach(c=>c.parent=nd.id);const anc=ancestors(nd);
+ const mark=c=>{if(c.sym&&anc.has(c.sym)&&!c.leaf){c.leaf=true;c.badge=tmode==='depends'?'cycle ↺':'recursion';c.bw=true}else if(!c.sym&&c.kids)c.kids.forEach(mark)};
+ nd.kids.forEach(mark);      /* also inside folder groups (Depends outline) */
  nd.loading=false;nd.open=true;drawTree()}
 /* the API's structured rows (callers_list / calls_list / definitions_list); the text forms are for agents */
 const sfx=c=>(c.times>1?`<span class="badge">×${c.times}</span>`:'')+(c.test?'<span class="badge k-test">test</span>':'')
@@ -608,7 +610,7 @@ async function depsThumb(){const box=$('#dthumb');if(!box)return;const a=depArgs
   await mermaidReady();if(!box.isConnected)return;const {svg}=await mermaid.render('dt'+(++thumbN),v.mermaid);box.innerHTML=svg;const el=box.querySelector('svg');
   el.style.maxWidth='100%';el.style.maxHeight='100%';el.style.width='100%';el.removeAttribute('height');box.title='open the full dependency graph in the Model explorer';
   const cyc=/(\d+) cycle/.exec(v.mermaid);if(cyc)$('#dsum').insertAdjacentHTML('beforeend',` · <span class="badge w">${cyc[1]} cycle${cyc[1]>1?'s':''} ↺</span>`)}
- catch(e){box.innerHTML=`<div class="empty err">${esc(e.message||e)}</div>`}}
+ catch(e){const z=document.getElementById('ddt'+thumbN);if(z)z.remove();box.innerHTML=`<div class="empty err">${esc(e.message||e)}</div>`}}
 $('#tree').addEventListener('click',e=>{const t=e.target.closest('#dthumb');if(!t||!DEPS.key)return;e.stopPropagation();target('model',true);
  mnav('#/uml/view/'+encodeURIComponent('view:'+DEPS.key)+'?view='+encodeURIComponent(DEPS.key),true)},true);
 function depsUi(){const s=DEPS.sum;if(!s)return;const t=$('#tree');
