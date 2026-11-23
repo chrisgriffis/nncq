@@ -48,7 +48,9 @@ def routes(tool) -> list[Route]:
 
     async def page(request: Request):
         from nncq.codeview import codeview_js
-        return HTMLResponse(PAGE.replace("__MERMAID__", "1" if vendor.path() else "0").replace("/*__CODEVIEW__*/", codeview_js()))
+        from nncq.dashboard import NO_STORE
+        return HTMLResponse(PAGE.replace("__MERMAID__", "1" if vendor.path() else "0").replace("/*__CODEVIEW__*/", codeview_js()),
+                            headers=NO_STORE)
 
     async def code_links(request: Request):
         """POST /api/code/links {repo, path, start, end}: symbol links for those lines (codeview.links)."""

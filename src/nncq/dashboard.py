@@ -14,6 +14,8 @@ from starlette.routing import Route
 
 from nncq import config
 
+NO_STORE = {"Cache-Control": "no-store"}    # pages embed the server's code: a restarted server must never show a stale page
+
 
 def routes(snapshot, control, tool=None) -> list[Route]:
     """snapshot() -> dict for /api/status; control(action, repo) -> dict for POST /api/<action>;
@@ -25,7 +27,7 @@ def routes(snapshot, control, tool=None) -> list[Route]:
         if start.startswith("#"):       # NNCQ_START: the view a bare URL opens on (the hosted demo)
             js = f"<script>if(!location.hash)history.replaceState(null,'',location.pathname+location.search+{json.dumps(start)})</script>"
             html = html.replace("<style>", js + "<style>", 1)
-        return HTMLResponse(html)
+        return HTMLResponse(html, headers=NO_STORE)
 
     async def status(request: Request):
         import anyio
