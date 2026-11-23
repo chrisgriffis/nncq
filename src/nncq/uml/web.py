@@ -304,7 +304,7 @@ async function api(path,body){const r=await fetch(path,{method:'POST',headers:{.
 async function T(name,args){const j=await api('api/tool/'+name,{...args,...(repo?{repo}:{})});if(j&&j.error)throw new Error(j.error+(j.fix?' — '+j.fix:''));return j}
 const L=(op,a)=>api('api/uml/local/'+op,{...a,repo});
 function notice(t){const n=$('#notice');n.textContent=t;n.style.display='block';setTimeout(()=>document.addEventListener('click',()=>n.style.display='none',{once:true,capture:true}),50)}
-const MCFG={startOnLoad:false,theme:'dark',securityLevel:'strict',maxTextSize:500000,flowchart:{htmlLabels:true},
+const MCFG={startOnLoad:false,theme:'dark',securityLevel:'strict',maxTextSize:500000,maxEdges:5000,flowchart:{htmlLabels:true},
  themeVariables:{darkMode:true,background:'#0b0d11',primaryColor:'#1b2a44',primaryTextColor:'#d7dae0',primaryBorderColor:'#5aa9ff',lineColor:'#8b95a7',
   secondaryColor:'#14301f',tertiaryColor:'#151821',clusterBkg:'#ffffff07',clusterBorder:'#3d4658',fontFamily:'Segoe UI, system-ui, sans-serif',fontSize:'13px',
   noteBkgColor:'#2b2a14',noteTextColor:'#e8e2b0',actorBkg:'#14301f',actorBorder:'#4cc38a',signalColor:'#8b95a7',signalTextColor:'#d7dae0'}};

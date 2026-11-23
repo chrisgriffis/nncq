@@ -453,6 +453,9 @@ def object_view(st: Store, subject: str = "", under: str = "", max_nodes: int = 
 
 # ------------------------------------------------------------------ component (SysML)
 
+MAX_OVERVIEW_SCRIPTS = 20       # a workspace / folder component overview drops script components beyond this
+
+
 def _comp_rows(st: Store, under: str, subject: str) -> list[tuple]:
     rows = st.q("SELECT c.id, c.name, c.kind, c.dir, c.source, c.line, c.info, "
                 "(SELECT COUNT(*) FROM comp_files cf WHERE cf.comp_id=c.id) FROM components c "
@@ -498,6 +501,13 @@ def component_view(st: Store, subject: str = "", under: str = "", externals: boo
                                 "(SELECT COUNT(*) FROM comp_files cf WHERE cf.comp_id=c.id) FROM components c")
                 if r[0] in keep and (externals or r[2] != "external")]
     byid = {r[0]: r for r in rows}
+    hidden = 0
+    if not sid:
+        scripts = [r for r in rows if r[2] == "script"]
+        if len(scripts) > MAX_OVERVIEW_SCRIPTS:      # runnable .py files: hundreds in a big repo swamp the overview
+            hidden = len(scripts)
+            rows = [r for r in rows if r[2] != "script"]
+            byid = {r[0]: r for r in rows}
     used: dict[int, Counter] = defaultdict(Counter)        # provider -> file -> consumer count
     pairs: dict[tuple[int, int], dict[str, int]] = defaultdict(dict)
     for a, b, kind, fid, fp, n in dep_rows:
@@ -572,6 +582,8 @@ def component_view(st: Store, subject: str = "", under: str = "", externals: boo
     model = {"version": MODEL_VERSION, "kind": "component",
              "title": f"Components: {subject or path or under or 'workspace'}", "subject": subject or path or under,
              "layout": {"direction": "LR"}, "nodes": nodes, "edges": edges,
+             **({"notes": [{"text": f"{hidden} scripts not shown: open a folder (under) or a component to see them"}]}
+                if hidden else {}),
              "params": {"under": under, "externals": externals, "max_ports": max_ports, **({"path": path} if path else {})}}
     return model, ctx.deps, ctx.scopes
 

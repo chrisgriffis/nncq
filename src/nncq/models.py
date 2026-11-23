@@ -84,6 +84,23 @@ MAX_TOKENS = 2048          # per text; chunks are ~3000 chars, so this rarely tr
 RERANK_MAX_CHARS = 6000
 
 
+def preload() -> float:
+    """Import the ML stack (torch, transformers, sentence-transformers -> sklearn -> scipy and their native BLAS /
+    OpenMP DLLs) on the calling thread. The server calls this before it starts any other thread: on Windows, a first
+    import of these DLLs on a tool-call thread, while other threads were starting rg / nvidia-smi, deadlocked the
+    server (loader lock). Returns the seconds it took; a no-op in lite mode or without the gpu extra."""
+    if config.settings().lite:
+        return 0.0
+    t = time.time()
+    try:
+        import torch  # noqa: F401
+        import transformers  # noqa: F401
+        import sentence_transformers  # noqa: F401
+    except ImportError:
+        pass
+    return time.time() - t
+
+
 def gpu_dtype():
     """NNCQ_DTYPE: bf16 (default) or fp32. Only applies on CUDA; CPU always runs fp32."""
     import torch

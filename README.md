@@ -96,13 +96,13 @@ nncq's code knows no particular codebase. Everything specific to one lives in a 
 
 ```powershell
 nncq profile list                       # profiles, and the workspace each found on this machine
-nncq profile new myapp D:\src\myapp     # wizard (nncq init runs it too: pick or create a profile)
+nncq profile new myapp D:\src\myapp     # wizard (nncq init runs it too: pick, import or create a profile)
 nncq profile show myapp
 nncq profile export myapp               # one compressed profiles\archive\myapp-<time>.nncqprofile
 nncq profile import profiles\archive\myapp-<time>.nncqprofile [--as name] [--force]
 ```
 
-`profiles/archive/` is tracked but its contents are git-ignored: export there, copy the file to another machine, import, and the profile finds its workspace again through its linking rules. An LLM agent running `nncq init`, or asked to write a profile from the template, can fill in the DSL and xref rules from a plain description of the codebase.
+`profiles/archive/` is tracked but its contents are git-ignored: export there, copy the file to another machine, import, and the profile finds its workspace again through its linking rules. `nncq init` offers the exported files in `profiles/archive/` (or any `.nncqprofile` path) for import; when an imported profile does not find its workspace on this machine, init asks for the path and remembers it in the profile. Paths can be pasted with quotes (Explorer's "Copy as path"). An LLM agent running `nncq init`, or asked to write a profile from the template, can fill in the DSL and xref rules from a plain description of the codebase.
 
 ### Agent setup: `nncq agents`
 

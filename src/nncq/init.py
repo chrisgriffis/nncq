@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -118,22 +119,68 @@ def _split(s: str) -> list[str]:
     return [x.strip() for x in s.split(",") if x.strip()]
 
 
+def _path(s: str) -> Path | None:
+    """A typed or pasted path; surrounding quotes (Explorer's "Copy as path") and whitespace are dropped."""
+    s = (s or "").strip().strip("\"'").strip()
+    return Path(os.path.expandvars(s)).expanduser() if s else None
+
+
+def _new_root(root: Path) -> str:
+    """'' if root can be a new profile's workspace, else why not."""
+    from nncq import profiles
+    if not root.is_dir():
+        return f"not a directory: {root}"
+    if profiles.nested(root):
+        return f"{root} overlaps {config.ROOT}: workspaces live outside the nncq folder"
+    return ""
+
+
+def _ask_dir(prompt: str, check) -> Path | None:
+    """Ask until check(path) passes ('') or the answer is empty (skip)."""
+    while True:
+        root = _path(input(prompt))
+        if root is None:
+            return None
+        why = check(root)
+        if not why:
+            return root
+        print(f"    {why}  (Enter to skip)")
+
+
+def _ask_name(dv: str) -> str:
+    from nncq import profiles
+    while True:
+        n = input(f"  Profile name, the label for this codebase [{dv}]: ").strip() or dv
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+", n):
+            print("    letters, digits, _ . - only")
+        elif profiles.get(n) is not None:
+            print(f"    profile '{n}' exists; pick another name")
+        else:
+            return n
+
+
 def profile_wizard(name: str, path: str, ask: bool, dirs: str | None = None) -> "object | None":
     """Link a codebase profile to its workspace on this machine, creating the profile when there is none.
     A new profile gets the workspace part (roots, markers, git remote, dirs, ignores) filled in; DSLs, extra
     extensions and [[xref]] data rules are edited in profiles/<name>/profile.toml (the template documents them)."""
     from nncq import profiles, repos
     p = profiles.get(name) if name else None
-    root = Path(os.path.expandvars(path)).expanduser() if path else None
+    root = _path(path)
     if p is not None:
         if root is not None:
             why = p.accepts(root)
             if why:
                 print(f"!! {root} is not the '{p.name}' workspace: {why}")
-                return None
+                root = _ask_dir(f"  Where is the '{p.name}' workspace on this machine? [skip]: ", p.accepts) if ask else None
+                if root is None:
+                    return None
+        elif p.root is None and ask:
+            print(f"   profile '{p.name}': workspace not found on this machine (looked in {', '.join(p.roots) or 'nowhere'})")
+            root = _ask_dir(f"  Where is the '{p.name}' workspace on this machine? [skip]: ", p.accepts)
+        if root is not None:
             if p.root is None or p.root != root.resolve():
                 profiles.add_root(p, root.resolve())
-                print(f"   remembered {root} in {p.path}")
+                print(f"   remembered {root.resolve()} in {p.path}")
             p = profiles.get(p.name)
         if p.root is None:
             print(f"!! profile '{p.name}': workspace not found on this machine. Pass its path "
@@ -144,22 +191,22 @@ def profile_wizard(name: str, path: str, ask: bool, dirs: str | None = None) -> 
         r = repos.get(p.name)
         print(f"== workspace: profile '{p.name}' -> {r.root}" + (f" [{', '.join(r.dirs)}]" if r.dirs else ""))
         return r
+    if root is not None and _new_root(root):
+        print(f"!! {_new_root(root)}")
+        root = None
+        if not ask:
+            return None
     if root is None and ask:
-        root = Path(input("  Workspace root to index (outside this folder) [skip]: ").strip() or ".").expanduser()
-        root = None if str(root) == "." else root
+        root = _ask_dir("  Workspace root to index (outside this folder) [skip]: ", _new_root)
     if root is None:
         print("== workspace: none (later: nncq profile new <name> <path>)")
         return None
-    if not root.is_dir():
-        print(f"!! not a directory: {root}")
-        return None
-    if profiles.nested(root):
-        print(f"!! {root} overlaps {config.ROOT}: workspaces live outside the nncq folder")
-        return None
     sg = profiles.suggest(root)
     name = name or repos.default_name(root)
+    desc = ""
     if ask:
-        name = input(f"  Profile name [{name}]: ").strip() or name
+        name = _ask_name(name)
+        desc = input("  Description, one line (optional) []: ").strip()
     dv = ",".join(sg["dirs"])
     if dirs is None:
         dirs = (input(f"  Code folders, comma-separated (empty = everything) [{dv}]: ").strip() or dv) if ask else dv
@@ -174,26 +221,53 @@ def profile_wizard(name: str, path: str, ask: bool, dirs: str | None = None) -> 
                 vc = a
                 break
             print("    git, p4 or none")
-    dst = profiles.write(name, root.resolve(), _split(dirs), _split(ig), markers=sg["markers"], remote=sg["remote"],
-                         vcs=vc)
+    dst = profiles.write(name, root.resolve(), _split(dirs), _split(ig), description=desc, markers=sg["markers"],
+                         remote=sg["remote"], vcs=vc)
     print(f"== profile '{name}' written: {dst}\n   workspace {root.resolve()}"
           + (f" [{dirs}]" if dirs else " (everything)") + (f", ignoring {ig}" if ig else "") + f", vcs {vc}"
           + "\n   add file types, DSLs and [[xref]] data rules there (documented in profiles/_template/profile.toml)")
     return repos.get(name)
 
 
+def _pick_profile(found: dict) -> str:
+    """Ask for an existing profile, 'new', or an exported profile file to import; returns the profile name or ''."""
+    from nncq import profiles
+    archives = sorted(profiles.archive_dir().glob("*" + profiles.ARCHIVE_EXT)) if profiles.archive_dir().is_dir() else []
+    if found:
+        print("== profiles: " + ", ".join(f"{n} ({p.root or 'workspace not found'})" for n, p in found.items()))
+    if archives:
+        print("== exported profiles you can import: " + ", ".join(str(f) for f in archives))
+    dv = next((n for n, p in found.items() if p.root), "") or "new"
+    while True:
+        ans = input(f"  Profile to use, 'new', or a {profiles.ARCHIVE_EXT} file to import [{dv}]: ").strip() or dv
+        if ans == "new":
+            return ""
+        if ans in found:
+            return ans
+        f = _path(ans)
+        if f is not None and (f.is_file() or ans.lower().endswith(profiles.ARCHIVE_EXT)):
+            try:
+                dst = profiles.import_(f)
+            except (OSError, ValueError, KeyError) as e:
+                print(f"    cannot import {f}: {e}")
+                continue
+            print(f"   imported {dst}")
+            return dst.name
+        print(f"    no profile '{ans}'" + (f"; choose {', '.join(found)}, " if found else "; type ")
+              + f"'new' or a {profiles.ARCHIVE_EXT} file")
+
+
 def _workspace(a) -> "object | None":
-    """Pick or create the codebase profile to index (read-only: nncq never writes into the workspace)."""
+    """Pick, import or create the codebase profile to index (read-only: nncq never writes into the workspace)."""
     from nncq import profiles
     ask = not a.yes and sys.stdin.isatty()
     name = a.profile or a.name
     if not name and not a.workspace:
         found = profiles.load_all()
-        if found:
-            print("== profiles: " + ", ".join(f"{n} ({p.root or 'workspace not found'})" for n, p in found.items()))
-            dv = next((n for n, p in found.items() if p.root), "")
-            name = (input(f"  Profile to use, or 'new' [{dv or 'new'}]: ").strip() or dv or "new") if ask else dv
-            name = "" if name == "new" else name
+        if ask:
+            name = _pick_profile(found)
+        else:
+            name = next((n for n, p in found.items() if p.root), "")
     return profile_wizard(name, a.workspace, ask, a.dirs)
 
 

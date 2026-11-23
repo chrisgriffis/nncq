@@ -630,7 +630,7 @@ async function depsTree(){const a=depArgs(),d=await T('depends',{...a,direction:
  root.kids=[o,i];return [root]}
 let MMD=null,thumbN=0;
 function mermaidReady(){if(window.mermaid)return Promise.resolve();if(MMD)return MMD;MMD=new Promise((ok,no)=>{const s=document.createElement('script');s.src='vendor/mermaid.min.js'+(tok?'?token='+encodeURIComponent(tok):'');
-  s.onload=()=>{mermaid.initialize({startOnLoad:false,theme:'dark',securityLevel:'strict',flowchart:{htmlLabels:true},themeVariables:{darkMode:true,background:'#0b0d11',lineColor:'#8b95a7',fontSize:'12px'}});ok()};
+  s.onload=()=>{mermaid.initialize({startOnLoad:false,theme:'dark',securityLevel:'strict',maxTextSize:500000,maxEdges:5000,flowchart:{htmlLabels:true},themeVariables:{darkMode:true,background:'#0b0d11',lineColor:'#8b95a7',fontSize:'12px'}});ok()};
   s.onerror=()=>{MMD=null;no(new Error('Mermaid is not available (nncq uml init)'))};document.head.appendChild(s)});return MMD}
 /* the generated 'depends' view, scaled into a thumbnail; a click opens it in the Model explorer */
 async function depsThumb(){const box=$('#dthumb');if(!box)return;const a=depArgs();box.innerHTML='<div class="empty"><span class="spin"></span> generating…</div>';

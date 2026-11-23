@@ -246,6 +246,22 @@ def test_file_scoped_and_default_views(repo):
         st.close()
 
 
+def test_component_overview_hides_scripts_beyond_the_cap(repo, monkeypatch):
+    st = _st(repo)
+    try:
+        with st.tx() as db:
+            for i in range(3):
+                db.execute("INSERT INTO components(name, kind, dir, source, line, info) VALUES(?,?,?,?,?,?)",
+                           (f"t{i}.py", "script", "py", f"py/t{i}.py", 0, "{}"))
+        monkeypatch.setattr(views, "MAX_OVERVIEW_SCRIPTS", 2)
+        m, _, _ = views.component_view(st)
+        assert "t0.py" not in {x["label"] for x in m["nodes"]} and "DevLib" in {x["label"] for x in m["nodes"]}
+        assert m["notes"][0]["text"].startswith("3 scripts not shown")
+        assert "t0.py" in {x["label"] for x in views.component_view(st, subject="t0.py")[0]["nodes"]}
+    finally:
+        st.close()
+
+
 def test_type_hierarchy_has_structured_derived_list(repo):
     from nncq import graph
     st = _st(repo)
