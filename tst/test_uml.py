@@ -157,6 +157,7 @@ def test_model_components_and_generated_views(repo):
         assert ("lib/include/Device.hpp", "dev::Device") in deps
 
         m, _, _ = views.component_view(st)
+        assert m["title"] == "Components: workspace" and "path" not in m["params"]
         dev = next(x for x in m["nodes"] if x["label"] == "DevLib")
         cli = next(x for x in m["nodes"] if x["label"] == "DevCLI")
         assert any(p["name"] == "Device.hpp" and p["dir"] == "provided" for p in dev["ports"])

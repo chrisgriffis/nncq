@@ -498,10 +498,10 @@ def component_view(st: Store, subject: str = "", under: str = "", externals: boo
     byid = {r[0]: r for r in rows}
     used: dict[int, Counter] = defaultdict(Counter)        # provider -> file -> consumer count
     pairs: dict[tuple[int, int], dict[str, int]] = defaultdict(dict)
-    for a, b, kind, fid, path, n in dep_rows:
+    for a, b, kind, fid, fp, n in dep_rows:
         if a in byid and b in byid:
-            used[b][path] += 1
-            pairs[(a, b)][path] = pairs[(a, b)].get(path, 0) + n
+            used[b][fp] += 1
+            pairs[(a, b)][fp] = pairs[(a, b)].get(fp, 0) + n
     nodes, edges = [], []
     port_of: dict[tuple[int, str], str] = {}
     nid = {}
