@@ -43,7 +43,7 @@ INSTRUCTIONS = """Local code index (nothing leaves this machine). Start with ask
 generated map (how the question was read, what the hits cover, one line of facts per hit, how hits call each
 other) with refs; then expand(refs) for exact code or structure. search_code gives raw code blocks;
 use find_symbol / file_outline / read_code to zoom in; the graph tools (symbol_context, called_by, calls,
-call_tree, call_trace, impact, type_hierarchy, file_context, hotspots) answer structural questions without
+call_tree, call_trace, impact, type_hierarchy, depends, file_context, hotspots) answer structural questions without
 reading files. Graph links are by name (static, no build): ambiguity is reported. If a result has index_state, part of the index is still catching up:
 it says what, where and since when; keyword and graph results are still valid. Long answers are trimmed to
 stay readable: `paged` names each cut field and the more(cursor) call that returns the rest. Repeating a
@@ -433,6 +433,17 @@ def build(stdio: bool = False) -> FastMCP:
         return await _run(_with, repo, lambda r, st: graph.impact(st, name, depth))
 
     @mcp.tool()
+    async def depends(name: str, direction: str = "both", depth: int = 1, limit: int = 40, mode: str = "type",
+                        repo: str = "") -> dict:
+        """Dependency graph around a type (mode=type; a member: its owner type) or a file (mode=include; name = path).
+        Nodes + edges {from, to, kind, n, path, line}: type kinds inherits / composes / aggregates / associates /
+        depends (member, parameter, return types) / instantiates / var; file kinds include / import.
+        direction: out (what it depends on) | in (what depends on it) | both; depth = hops (1-3), limit = per node
+        ('+N' in more_out / more_in). An edge back onto its own path is a cycle: cycle: true, not expanded; cycles = count."""
+        fn = graph.file_deps if mode in ("include", "file", "import") else graph.type_deps
+        return await _run(_with, repo, lambda r, st: fn(st, name, direction, max(1, min(depth, 3)), max(1, min(limit, 200))))
+
+    @mcp.tool()
     async def type_hierarchy(name: str, repo: str = "") -> dict:
         """Base chain(s) up and derived-type tree down for a class/struct/interface (or DSL) type."""
         return await _run(_with, repo, lambda r, st: graph.type_hierarchy(st, name))
@@ -559,7 +570,7 @@ _gpu_cache: dict = {"at": 0.0}
 _mcp: FastMCP | None = None
 WEB_TOOLS = {"ask", "expand", "search_code", "grep_code", "find_symbol", "file_outline", "find_references", "read_code",
              "symbol_context", "calls", "called_by", "call_tree", "call_trace", "impact", "type_hierarchy",
-             "file_context", "hotspots", "data_for_code", "code_for_data", "data_file", "hot_data"}
+             "depends", "file_context", "hotspots", "data_for_code", "code_for_data", "data_file", "hot_data"}
 WEB_TOOLS |= uml_tools.WEB_TOOLS
 
 

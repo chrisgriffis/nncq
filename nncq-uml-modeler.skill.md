@@ -18,7 +18,7 @@ Authoritative schema, element-id scheme, rules, examples: call `uml_protocol`. T
 - `uml_view(key=..., format=json)`: model with stable ids, source spans, absolute paths.
 
 ## Generate
-`uml_view(kind, subject, under, depth, path, format)`. kind: class | object | component | package | deployment | sequence. subject: type | component | entry function. `path` = a file: class -> the types it declares or defines members of; component -> its build target(s). Stored and reused; regenerated when its sources change.
+`uml_view(kind, subject, under, depth, path, format)`. kind: class | object | component | package | deployment | sequence | depends (dependency graph: subject = a type, or `path` = a file for its includes / imports; cycles drawn dashed). subject: type | component | entry function. `path` = a file: class -> the types it declares or defines members of; component -> its build target(s). Stored and reused; regenerated when its sources change.
 - No kind = the default diagram for a target: type -> class view, function -> sequence, folder (`path`) -> packages, nothing -> component overview, any file (`path`) -> its **file composition**.
 - File composition: key `composition:file:<path>` (also `uml_view(key="file:<path>")`), origin auto, made on demand only. Groups: per namespace types (with members) / functions (+ key calls) / globals, related types, includes, included-by, component, the file's sub-diagrams. Rebuilt when stale (parts first); never hand-edit it: to customize, upsert a copy under your own id. ASCII refuses it (use markdown).
 

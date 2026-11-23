@@ -47,8 +47,8 @@ def routes(tool) -> list[Route]:
     """tool(name, args) -> awaitable dict: the server's web_tool (same tools agents use)."""
 
     async def page(request: Request):
-        from nncq.codeview import CODEVIEW_JS
-        return HTMLResponse(PAGE.replace("__MERMAID__", "1" if vendor.path() else "0").replace("/*__CODEVIEW__*/", CODEVIEW_JS))
+        from nncq.codeview import codeview_js
+        return HTMLResponse(PAGE.replace("__MERMAID__", "1" if vendor.path() else "0").replace("/*__CODEVIEW__*/", codeview_js()))
 
     async def code_links(request: Request):
         """POST /api/code/links {repo, path, start, end}: symbol links for those lines (codeview.links)."""
@@ -249,6 +249,7 @@ body.embed header{padding:6px 10px;gap:8px}body.embed header b{font-size:13px}
 .spin{display:inline-block;width:11px;height:11px;border:2px solid #262b36;border-top-color:var(--acc);border-radius:50%;animation:sp .7s linear infinite;vertical-align:-2px}@keyframes sp{to{transform:rotate(360deg)}}
 .cw{position:relative;display:flex;flex:1;min-width:0}.cw>input{flex:1;min-width:0;padding-right:26px!important}
 .cx{position:absolute;right:6px;top:50%;transform:translateY(-50%);color:var(--dim);cursor:pointer;font-size:16px;line-height:1;display:none;padding:0 4px;user-select:none}.cx:hover{color:var(--fg)}
+#htip{position:fixed;z-index:60;display:none;background:#151821;border:1px solid var(--line);border-radius:7px;padding:7px 10px;font-size:11px;line-height:1.5;max-width:270px;box-shadow:0 6px 20px #0008;pointer-events:none}#htip div{margin-top:3px}
 .hint{margin-top:8px;font-size:11px;color:var(--dim)}.hint .mono{font-size:11px;color:#9fb3cc}
 #mmbox{position:relative;height:170px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;overflow:hidden;cursor:grab}
 #mmbox svg{position:absolute;left:0;top:0;pointer-events:none;max-width:none}#mmv{position:absolute;border:1.5px solid var(--acc);background:#5aa9ff1f;border-radius:2px;pointer-events:none}
@@ -265,7 +266,7 @@ pre .k,.mdv .k{color:#c792ea}pre .s,.mdv .s{color:#c3e88d}pre .c,.mdv .c{color:#
 @media (max-width:760px){main{grid-template-columns:minmax(150px,30%) minmax(0,1fr);grid-template-rows:minmax(0,1fr) minmax(120px,36%)}
  main>.col:last-child{grid-column:1/-1;border-left:0;border-top:1px solid var(--line)}}
 </style></head><body>
-<div id="notice"></div>
+<div id="notice"></div><div id="htip"></div>
 <header><b><span class="noemb">nncq · model explorer</span><span class="emb">Model explorer</span></b><span class="navb"><a id="nback" title="back (Alt+←)">‹</a><a id="nfwd" title="forward (Alt+→)">›</a></span><a href="./" class="dim noemb">← dashboard</a>
  <label class="emb syncb" title="Sync views (shared with the Symbol explorer): diagram selections reveal their code there, symbol / file selections show their default diagram here, one Back / Forward history for both"><input type="checkbox" id="csync">Sync views</label>
  <select id="repo" title="index"></select><span id="mstate" class="dim"></span><span class="sp"></span>
@@ -415,7 +416,9 @@ function nodeOf(raw){if(!cur)return null;const id=raw.replace(/^n_/,'');const ns
  if(!n)n=ns.find(x=>(x.ports||[]).some(p=>p.id===id));return n}
 function wire(){const svg=$('#out svg');if(!svg)return;
  svg.querySelectorAll('[id]').forEach(el=>{const m=/(?:^|-)(n_[A-Za-z0-9_]+?)(?:-\d+)?$/.exec(el.id);if(!m)return;const n=nodeOf(m[1]);if(!n)return;
-  el.setAttribute('data-n',n.id);el.addEventListener('click',ev=>{ev.stopPropagation();pick(n.id,true)})});
+  el.setAttribute('data-n',n.id);el.addEventListener('click',ev=>{ev.stopPropagation();pick(n.id,true)});
+  if(/^(class|interface|struct|enum|union|record|trait)$/.test(n.type||'')&&(n.ref||{}).q){
+   el.addEventListener('mouseenter',ev=>{clearTimeout(htT);htT=setTimeout(()=>hierTip(n,ev.clientX,ev.clientY),350)});el.addEventListener('mouseleave',()=>{clearTimeout(htT);$('#htip').style.display='none'})}});
  const on=(el,f)=>{el.classList.add('lnk');el.addEventListener('click',ev=>{ev.stopPropagation();f(ev)})};
  /* sequence: participants -> their type / module, message labels -> the called method (alt-click: the call site) */
  if(cur.kind==='sequence'){svg.querySelectorAll('text.actor').forEach(t=>{const n=cur.model.nodes.find(x=>x.label===t.textContent.trim());if(n)on(t.parentElement||t,()=>pick(n.id,true))});
@@ -429,6 +432,13 @@ function wire(){const svg=$('#out svg');if(!svg)return;
  svg.querySelectorAll('[id]').forEach(el=>{const m=/(?:^|-)n_([A-Za-z0-9_]+?)(?:-\d+)?$/.exec(el.id);if(!m)return;const owner=cur.model.nodes.find(x=>(x.ports||[]).some(p=>p.id===m[1]));
   if(owner)on(el,()=>pickPort(owner.id,m[1],true))})}
 /* a user selection here: always noted by the dashboard (last selection), synced to the Symbol explorer only with Sync views on */
+/* hovering a type in a diagram: its inheritance (bases up, derived down, capped), fetched once per type */
+const HC=new Map();let htT=null;
+async function hierTip(n,x,y){const q=n.ref.q;if(!HC.has(q))HC.set(q,T('type_hierarchy',{name:q}).catch(e=>({error:e.message})));const d=await HC.get(q);const tip=$('#htip');
+ const bases=(d.bases||[]).filter(b=>!/^\(/.test(b)).map(b=>b.split(' -> ').slice(1).join(' → ')),der=d.derived||[];
+ tip.innerHTML=`<b>${esc(n.label)}</b>${bases.length?`<div><span class="dim">bases</span> ${bases.slice(0,4).map(esc).join('<br>')}</div>`:'<div class="dim">no bases</div>'}
+  ${der.length?`<div><span class="dim">derived (${d.derived_total||der.length})</span>${der.slice(0,12).map(x=>`<div style="padding-left:${(x.depth-1)*10}px">${esc(String(x.type).split(/::|\./).pop())}</div>`).join('')}${der.length>12?`<div class="dim">+${(d.derived_total||der.length)-12} more</div>`:''}</div>`:'<div class="dim">no derived types</div>'}`;
+ tip.style.display='block';tip.style.left=Math.min(x+14,innerWidth-280)+'px';tip.style.top=Math.min(y+14,innerHeight-tip.offsetHeight-8)+'px'}
 function selSync(extra,code){const x=host();if(!x)return;const h='#/uml/view/'+encodeURIComponent(viewElem())+'?view='+encodeURIComponent(cur.key)+extra;
  if(x.noteModel)x.noteModel({h,code:code||null});if(synced()&&x.modelPick)x.modelPick({h,...(code||{})})}
 const symx=(q,p)=>q?`<a class="chip" data-symx="${esc(q)}" data-symp="${esc(p||'')}" href="./#s=${encodeURIComponent(q)}&p=${encodeURIComponent(p||'')}&v=sym" title="open ${esc(q)} in the Symbol explorer">Symbol explorer</a>`:'';

@@ -790,6 +790,169 @@ def type_hierarchy(store: Store, name: str, depth: int = 6, limit: int = 60) -> 
             "derived_total": len(derived_closure(store, quals[0])), "truncated": budget[0] <= 0}
 
 
+DEP_KINDS = ("inherits", "composes", "aggregates", "associates", "depends", "instantiates", "var")
+
+
+def _type_near(store: Store, name: str, near: str, fam: list[str]) -> Def | None:
+    """The type definition a short type name in `near` most likely means: same language family, nearest folder."""
+    ts = [d for d in _defs_exact(store, short(name), fam) if is_type(d.kind)]
+    if len(ts) <= 1:
+        return ts[0] if ts else None
+    for depth in (4, 3, 2, 1):
+        pre = "/".join(near.split("/")[:depth])
+        hit = [t for t in ts if pre and t.path.startswith(pre)]
+        if hit:
+            return hit[0]
+    return ts[0]
+
+
+def type_deps(store: Store, name: str, direction: str = "both", depth: int = 1, limit: int = 40) -> dict:
+    """Type dependency graph around a type (a member's owner type when given a member): every relation the index
+    records between types (inheritance, composition / aggregation / association, member / parameter / return types,
+    instantiation, held variables), outgoing ("this depends on") and incoming ("depends on this"), as nodes + edges
+    {from, to, kind, n, path, line, cycle}; capped per node (more_out / more_in), cycles marked (see _dep_walk)."""
+    defs = [d for d in find_defs(store, name, kinds={"type"}) if is_type(d.kind)]
+    if not defs:
+        d0 = next(iter(find_defs(store, name)), None)
+        if d0 is not None and d0.parent:
+            fam = set(lang_family(store, d0.file_id))
+            defs = [d for d in find_defs(store, d0.parent, kinds={"type"}) if is_type(d.kind)
+                    and norm(d.qualname) == norm(d0.parent) and (not fam or fam & set(lang_family(store, d.file_id)))]
+    if not defs:
+        return {**_not_found(store, name), "nodes": [], "edges": []}
+    root = defs[0]
+    ph = ",".join("?" * len(DEP_KINDS))
+
+    def out_of(t: Def) -> list[tuple]:
+        fam = lang_family(store, t.file_id)
+        rows = store.q(f"SELECT e.dst, e.kind, COUNT(*), MIN(e.line), f.path FROM edges e JOIN files f ON f.id=e.file_id "
+                       f"WHERE e.kind IN ({ph}) AND (e.src=? OR e.src IN (SELECT qualname FROM symbols WHERE parent=?)) "
+                       f"GROUP BY e.dst, e.kind", (*DEP_KINDS, t.qualname, t.qualname))
+        out = []
+        for dst, kind, n, line, path in rows:
+            d = _type_near(store, dst, path, fam)
+            if d is not None and d.qualname != t.qualname:
+                out.append((d, kind, n, path, line))
+        return out
+
+    def in_of(t: Def) -> list[tuple]:
+        fam = lang_family(store, t.file_id)
+        lw, la = _lang_sql(fam)
+        rows = store.q(f"SELECT e.src, e.kind, COUNT(*), MIN(e.line), f.path FROM edges e JOIN files f ON f.id=e.file_id "
+                       f"WHERE e.kind IN ({ph}) AND e.dst=?{lw} GROUP BY e.src, e.kind LIMIT 2000",
+                       (*DEP_KINDS, t.name, *la))
+        agg: dict[tuple, list] = {}
+        means: dict[str, Def | None] = {}
+        for src, kind, n, line, path in rows:
+            if path not in means:
+                means[path] = _type_near(store, t.name, path, fam)
+            if means[path] is not None and norm(means[path].qualname) != norm(t.qualname):
+                continue                                 # that name means another type over there
+            s = next(iter(store.q("SELECT s.id, s.name, s.qualname, s.kind, s.parent, s.start_line, s.end_line, "
+                                  "s.signature, f.path, s.file_id FROM symbols s JOIN files f ON f.id=s.file_id "
+                                  "WHERE s.qualname=? AND f.path=? LIMIT 1", (src, path))), None)
+            if s is None:
+                continue
+            d = Def(*s)
+            if not is_type(d.kind) and d.parent:
+                owner = [x for x in find_defs(store, d.parent, kinds={"type"}) if is_type(x.kind)
+                         and norm(x.qualname) == norm(d.parent)]
+                d = owner[0] if owner else d
+            if d.qualname == t.qualname:
+                continue
+            k = (d.qualname, kind)
+            if k in agg:
+                agg[k][2] += n
+            else:
+                agg[k] = [d, kind, n, path, line]
+        return [tuple(v) for v in agg.values()]
+
+    defs_by: dict[str, Def] = {root.qualname: root}
+
+    def neighbors(q: str, way: str) -> list[tuple]:
+        t = defs_by[q]
+        out = []
+        for d, kind, n, path, line in (out_of(t) if way == "out" else in_of(t)):
+            defs_by.setdefault(d.qualname, d)
+            out.append((d.qualname, kind, n, path, line, {"id": d.qualname, "label": d.name, "kind": d.kind,
+                                                          "path": d.path, "line": d.start}))
+        return out
+    g = _dep_walk(root.qualname, {"id": root.qualname, "label": root.name, "kind": root.kind, "path": root.path,
+                                  "line": root.start}, neighbors, direction, depth, limit)
+    return {"type": root.qualname, "kind": root.kind, "path": root.path, "line": root.start, **g}
+
+
+def _dep_walk(root: str, root_info: dict, neighbors, direction: str, depth: int, limit: int) -> dict:
+    """Breadth-first dependency walk shared by type_deps / file_deps. A node found going out keeps going out, one found
+    coming in keeps coming in (both from the root). An edge back to a node on its own path is a cycle: marked
+    (edge cycle: true), counted, never expanded. Per node at most `limit` neighbours each way (more_out / more_in)."""
+    nodes = {root: {**root_info, "depth": 0}}
+    edges: dict[tuple, dict] = {}
+    more = {"out": {}, "in": {}}
+    cycles = 0
+    path_of = {(root, "out"): frozenset([root]), (root, "in"): frozenset([root])}
+    frontier = [(root, 0, w) for w in (("out", "in") if direction == "both" else (direction,))]
+    while frontier:
+        t, lvl, way = frontier.pop(0)
+        grouped: dict[str, list] = {}
+        for row in neighbors(t, way):
+            grouped.setdefault(row[0], []).append(row)
+        keep = sorted(grouped.values(), key=lambda xs: -sum(x[2] for x in xs))
+        if len(keep) > limit:
+            more[way][t] = len(keep) - limit
+        anc = path_of[(t, way)]
+        for xs in keep[:limit]:
+            o = xs[0][0]
+            cyc = o in anc
+            nodes.setdefault(o, {**xs[0][5], "depth": lvl + 1})
+            for _, kind, n, path, line, _info in xs:
+                a, b = (t, o) if way == "out" else (o, t)
+                edges.setdefault((a, b, kind), {"from": a, "to": b, "kind": kind, "n": n, "path": path, "line": line,
+                                                **({"cycle": True} if cyc else {})})
+            if cyc:
+                cycles += 1
+                nodes[o]["cycle"] = True if o != root else nodes[o].get("cycle", False)
+            elif (o, way) not in path_of:
+                path_of[(o, way)] = anc | {o}
+                if lvl + 1 < depth:
+                    frontier.append((o, lvl + 1, way))
+    return {"root": root, "direction": direction, "depth": depth, "nodes": list(nodes.values()),
+            "edges": list(edges.values()), "cycles": cycles,
+            **({"more_out": more["out"]} if more["out"] else {}), **({"more_in": more["in"]} if more["in"] else {})}
+
+
+def file_deps(store: Store, path: str, direction: str = "both", depth: int = 1, limit: int = 40) -> dict:
+    """Include / import dependency graph around a file: what it includes (out), who includes it (in), transitively by
+    depth, with the same caps and cycle marking as type_deps. Nodes {id: path, label, kind: file, folder, component}."""
+    f = resolve_file(store, path)
+    if f is None:
+        return {"error": f"no indexed file matches {path!r}", "nodes": [], "edges": []}
+    if isinstance(f, list):
+        return {"error": f"{path!r} is ambiguous", "candidates": f, "nodes": [], "edges": []}
+    fid, fpath = f
+    ids: dict[str, int] = {fpath: fid}
+    comp = {}
+
+    def info(pth: str) -> dict:
+        if pth not in comp:
+            r = store.q("SELECT c.name FROM comp_files cf JOIN files f ON f.id=cf.file_id JOIN components c "
+                        "ON c.id=cf.comp_id WHERE f.path=?", (pth,))
+            comp[pth] = r[0][0] if r else ""
+        return {"id": pth, "label": pth.rsplit("/", 1)[-1], "kind": "file", "path": pth, "line": 1,
+                "folder": pth.rsplit("/", 1)[0] if "/" in pth else "", "component": comp[pth]}
+
+    def neighbors(pth: str, way: str) -> list[tuple]:
+        a, b = ("src_id", "dst_id") if way == "out" else ("dst_id", "src_id")
+        out = []
+        for oid, opath, kind, n in store.q(f"SELECT f.id, f.path, d.kind, d.n FROM file_deps d JOIN files f ON f.id=d.{b} "
+                                            f"WHERE d.{a}=?", (ids[pth],)):
+            ids.setdefault(opath, oid)
+            out.append((opath, kind, n or 1, pth if way == "out" else opath, 0, info(opath)))
+        return out
+    g = _dep_walk(fpath, info(fpath), neighbors, direction, depth, limit)
+    return {"file": fpath, **g}
+
+
 def resolve_file(store: Store, path: str) -> tuple[int, str] | list[str] | None:
     p = path.replace("\\", "/").strip().lstrip("./")
     r = store.q("SELECT id, path FROM files WHERE path=? COLLATE NOCASE", (p,))

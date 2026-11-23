@@ -109,7 +109,7 @@ def _diff(old: dict, new: dict) -> dict:
     return {k: v for k, v in out.items() if v}
 
 
-GEN_VERSION = 3             # bump when generators change their output: stored auto views of older ones regenerate
+GEN_VERSION = 5             # bump when generators change their output: stored auto views of older ones regenerate
 
 
 def auto(st: Store, kind: str, subject: str = "", **opts) -> dict:

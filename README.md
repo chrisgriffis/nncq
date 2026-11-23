@@ -54,7 +54,7 @@ Also: [Modes: full and lite](#modes-full-and-lite) | [Codebase profiles](#codeba
 | `find_symbol` | where a class, function or method is defined |
 | `file_outline` | the symbols in a file, with line ranges, without reading the file |
 | `find_references` | callers, subclasses, and text mentions of a name |
-| `symbol_context`, `calls`, `called_by`, `call_tree`, `call_trace`, `impact`, `type_hierarchy`, `file_context`, `hotspots` | the symbol graph views, [see below](#graph-tools) |
+| `symbol_context`, `calls`, `called_by`, `call_tree`, `call_trace`, `impact`, `type_hierarchy`, `depends`, `file_context`, `hotspots` | the symbol graph views, [see below](#graph-tools) |
 | `read_code` | an exact line range from disk |
 | `data_for_code` | data: which data types / data files use this code type |
 | `code_for_data` | data: which code defines or implements the types this data file uses |
@@ -339,7 +339,7 @@ The page has a visible **❚❚ pause** button for when you need the card yourse
   Numbers that change are drawn, not printed; the console is the only place for raw text. The page is a working surface, not a monitor: tool calls and internals are not shown.
 - **Status at a glance.** The index ring shows how much is searchable by meaning, with a one-word state under it (ready, embedding, updating, stale, paused, …; hover for what to do) and a three-dot legend: full, semantic, text. Charts have light grid lines and axis ticks; click one to cycle its window (minutes → 6 h → 24 h). History is kept as a small per-minute CSV (`cache/db/history.csv`, 7 days), so charts survive restarts.
 - **Fits your screen.** Read-as, Files, the symbol explorer and the console resize by dragging their bottom edge (minimum enforced, double-click resets, sizes remembered). Each block and each hit rolls up from its ▼ triangle only; the rest of the heading is not a click target. Recent questions stay as chips under the ask bar, recent symbols under the Find box.
-- **Calls both ways.** The symbol explorer switches between **Callers** (who reaches this) and **Callees** (what this reaches), as lazily expanded trees with recursion marked. File outline and type tree are the other views. ◎ or a double-click re-roots on any node.
+- **Calls both ways.** The symbol explorer switches between **File outline** (default), **Callers** (who reaches this), **Callees** (what this reaches), as lazily expanded trees with recursion marked, and **Depends**: the dependency graph of a type (members, parameters, bases, creations) or of a file (includes / imports), both ways, as a thumbnail of the generated `depends` view (click: full graph in the Model explorer) or a folder-grouped outline; a cycle stops at ↺. Hovering a type in a diagram shows its inheritance. ◎ or a double-click re-roots on any node.
 - **Jump-to links everywhere:**
   - symbol names in hits open the symbol view;
   - `c123` refs in the links list open that hit;

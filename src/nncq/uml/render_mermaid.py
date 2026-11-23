@@ -33,6 +33,11 @@ _ALIAS = {"union": "struct", "record": "struct", "trait": "interface", "lifeline
           "usecase": "block"}
 
 
+EDGE_HUE = {"inherits": "interface", "realizes": "interface", "composes": "class", "aggregates": "struct",
+            "associates": "component", "depends": "package", "instantiates": "function", "var": "config",
+            "include": "module", "import": "module"}
+
+
 def kind_of(n: dict) -> str:
     """Palette key of a node: its type, abstract types as interfaces, configurations by release / debug."""
     t = _ALIAS.get(n.get("type") or "", n.get("type") or "class")
@@ -220,13 +225,19 @@ def _flow(model: dict) -> list[str]:
     for e in model.get("edges", []):
         a = nid(e.get("from_port") or e.get("from_frame") or e["from"])
         b = nid(e.get("to_port") or e.get("to_frame") or e["to"])
-        arrow = _ARROW.get(e["kind"], "-->")
+        arrow = "-.->" if e.get("cycle") else _ARROW.get(e["kind"], "-->")
         lab = " ".join(x for x in (e.get("label") or "", f"x{e['n']}" if e.get("n") and e["kind"] == "connects"
                                    else "") if x)
         if e["kind"] in ("inherits", "realizes", "instance_of", "contains", "flows-to", "uses", "depends-on") and \
                 e["kind"] not in lab:
             lab = (e["kind"] + " " + lab).strip()
         out.append(f'  {a} {arrow}|"{_q(lab)}"| {b}' if lab else f"  {a} {arrow} {b}")
+    if model.get("kind") == "depends":                        # edge colour = relation kind, same hues as the nodes
+        for i, e in enumerate(model.get("edges", [])):
+            f, s = PALETTE.get(EDGE_HUE.get(e["kind"], "block"), PALETTE["block"])
+            out.append(f"  linkStyle {i} stroke:{s},color:{s}" + (",stroke-dasharray:5 4" if e.get("cycle") else ""))
+        roots = [n for n in model["nodes"] if n.get("root")]
+        classes += [f"  class {nid(n['id'])} root" for n in roots]
     for i, x in enumerate(model.get("notes", [])):
         out.append(f'  note_{i}>"{_q(x["text"])}"]')
         if x.get("on"):
@@ -236,7 +247,8 @@ def _flow(model: dict) -> list[str]:
             "  classDef provided fill:#12351f,stroke:#4cc38a,color:#d7dae0",
             "  classDef required fill:#3a2d08,stroke:#e5a50a,color:#d7dae0",
             "  classDef bespoke stroke-dasharray:4 3",
-            "  classDef stale fill:#3a2d08,stroke:#e5a50a,stroke-width:2px,stroke-dasharray:6 3"]
+            "  classDef stale fill:#3a2d08,stroke:#e5a50a,stroke-width:2px,stroke-dasharray:6 3",
+            "  classDef root stroke-width:3px"]
     out += list(dict.fromkeys(classes))
     return out
 

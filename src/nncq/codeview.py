@@ -14,8 +14,11 @@ from __future__ import annotations
 
 import posixpath
 
+import json
+
 from nncq import graph
 from nncq.store import Store
+from nncq.uml.render_mermaid import PALETTE
 
 _LINK_KINDS = ("call", "include", "import", "inherits", "composes", "aggregates", "associates", "depends",
                "instantiates", "var")
@@ -86,6 +89,11 @@ def links(st: Store, path: str, start: int = 1, end: int = 1 << 30, cap: int = 2
         seen.add((line, name))
         out.append({"line": line, "col": col, "name": name, "kind": kind, **t})
     return {"path": path, "links": out}
+
+
+def codeview_js() -> str:
+    """The shared script with the diagram palette filled in (NC.pal: the same fills as Mermaid exports)."""
+    return CODEVIEW_JS.replace("__PALETTE__", json.dumps(PALETTE))
 
 
 CODEVIEW_JS = r"""
@@ -169,5 +177,5 @@ const NC=(()=>{const E=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'
    if(b.dataset.e==='save')return save();if(b.dataset.e==='cancel')return close();
    const j=await L('vcs',{path:o.path,op:b.dataset.v});st.innerHTML=j.error?`<span class="err">${E(j.error)}</span>`:'ok · '+vst(j.status||j);
    if(!j.error&&b.dataset.v==='revert'){const r=await L('read',{path:o.path});if(!r.error){ta.value=r.text;sha1=r.sha1;dirty=false;nums()}}})}
- return {hl,text,code,fill,numbered,langOf,editor,set api(f){api=f},set onPick(f){onPick=f}}})();
+ return {hl,text,code,fill,numbered,langOf,editor,pal:__PALETTE__,set api(f){api=f},set onPick(f){onPick=f}}})();
 """

@@ -15,6 +15,8 @@ Every generator returns (model, deps, scopes):
   package      folders at a depth and their #include / import dependencies
   deployment   artifacts (executables, libraries, scripts), link dependencies, build configurations
   sequence     from an entry function, calls in source order (bounded depth), lifelines = classes / modules
+  depends      dependency graph around a type (graph.type_deps) or a file (path=, graph.file_deps: include / import),
+               both directions, grouped by folder, cycles drawn as dashed back edges
 """
 from __future__ import annotations
 
@@ -31,7 +33,7 @@ from nncq.store import Store
 from nncq.uml.extract import multiplicity, type_names
 
 MODEL_VERSION = 1
-KINDS = ("class", "object", "component", "package", "deployment", "sequence")
+KINDS = ("class", "object", "component", "package", "deployment", "sequence", "depends")
 TYPE_KINDS = ("class", "struct", "record", "union", "interface", "trait", "enum")
 MEMBER_KINDS = ("field", "method", "function", "constant", "property", "variable")
 FUNCS = ("function", "method")
@@ -267,8 +269,10 @@ def class_view(st: Store, subject: str = "", under: str = "", depth: int = 1, me
                                    "('inherits','composes','aggregates','associates')", (t.qualname,)):
                 near.append(ctx.type_for(dst, t.path))
             if t.parent:                                  # a nested type: its enclosing type
-                near += [x for x in ctx.find(t.parent, kinds={"type"}) if x.kind in TYPE_KINDS
-                         and graph.norm(x.qualname) == graph.norm(t.parent)][:1]
+                fam = set(graph.lang_family(st, t.file_id))
+                near += [x for x in ctx.find(t.parent, kinds={"type"}) if x.kind in TYPE_KINDS      # same language:
+                         and graph.norm(x.qualname) == graph.norm(t.parent)                            # a C++ namespace
+                         and (not fam or fam & set(graph.lang_family(st, x.file_id)))][:1]              # is no Python class
             for (src,) in st.q("SELECT DISTINCT src FROM edges WHERE dst=? AND kind='inherits' LIMIT 12", (t.name,)):
                 near += [x for x in ctx.q("WHERE s.qualname=? AND s.kind IN (%s) LIMIT 1" % ",".join(
                     "?" * len(TYPE_KINDS)), (src, *TYPE_KINDS))]
@@ -826,8 +830,57 @@ def sequence_view(st: Store, subject: str, path: str = "", depth: int = 3, max_m
     return model, ctx.deps, ctx.scopes
 
 
+def depends_view(st: Store, subject: str = "", path: str = "", depth: int = 2, max_nodes: int = 15) -> tuple[dict, set, set]:
+    """subject = a type (or member: its owner type) -> its type dependencies; path = a file -> its include / import
+    dependencies. depth = hops each way, max_nodes = neighbours per node each way."""
+    ctx = Ctx(st)
+    path = path.replace("\\", "/").strip("/")
+    if subject:
+        g = graph.type_deps(st, subject, "both", max(1, min(depth, 3)), max_nodes)
+    elif path:
+        g = graph.file_deps(st, path, "both", max(1, min(depth, 3)), max_nodes)
+    else:
+        raise ValueError("depends needs subject (a type) or path (a file)")
+    if g.get("error") or not g.get("nodes"):
+        raise ValueError(g.get("error") or f"no dependencies for {subject or path!r}")
+    files = not subject
+    ids, nodes, groups = {}, [], defaultdict(list)
+    for n in g["nodes"]:
+        i = ids[n["id"]] = ctx.nid("d:" + n["id"], n["label"])
+        if files:
+            ref = ctx.loc(n["path"], 1)
+            ctx.deps.add((n["path"], "@file"))
+        else:
+            s = [x for x in ctx.q("WHERE s.qualname=? AND f.path=? LIMIT 1", (n["id"], n["path"]))]
+            ref = ctx.ref(s[0]) if s else ctx.loc(n["path"], n["line"])
+        typ = "module" if files else ("interface" if n["kind"] in ("interface", "trait") else n["kind"]
+                                       if n["kind"] in ("struct", "enum", "union", "record") else "class")
+        nodes.append({"id": i, "type": typ, "label": n["label"], "ref": ref,
+                      "stereotype": "" if files else n["kind"], **({"root": True} if n["id"] == g["root"] else {}),
+                      **({"note": "cycle"} if n.get("cycle") else {})})
+        folder = posixpath.dirname(n["path"] or "")
+        groups[folder].append(i)
+        ctx.scopes.add(folder + "/" if folder else "")
+    edges = []
+    for e in g["edges"]:
+        if e["from"] in ids and e["to"] in ids:
+            lab = e["kind"] + (f" x{e['n']}" if (e.get("n") or 1) > 1 else "") + (" ↺" if e.get("cycle") else "")
+            edges.append(_edge(ctx, ids[e["from"]], ids[e["to"]], e["kind"], lab, e.get("path") or "", e.get("line") or 0,
+                               **({"cycle": True} if e.get("cycle") else {})))
+    root = next(n for n in g["nodes"] if n["id"] == g["root"])
+    more = sum((g.get("more_out") or {}).values()) + sum((g.get("more_in") or {}).values())
+    notes = ([{"text": f"{g['cycles']} cycle(s): dashed edges"}] if g.get("cycles") else []) + \
+        ([{"text": f"+{more} more neighbours not shown (cap {max_nodes} per node)"}] if more else [])
+    model = {"version": MODEL_VERSION, "kind": "depends", "title": f"Depends ({'file' if files else 'type'}): {root['label']}",
+             "subject": g["root"], "layout": {"direction": "LR"}, "nodes": nodes, "edges": edges, "notes": notes,
+             "groups": [{"id": "g_" + slug(k or "root"), "label": k or "(root)", "nodes": v} for k, v in groups.items()],
+             "params": {"depth": depth, "mode": "include" if files else "type", "cycles": g.get("cycles", 0),
+                        **({"path": path} if files else {})}}
+    return model, ctx.deps, ctx.scopes
+
+
 GENERATORS = {"class": class_view, "object": object_view, "component": component_view, "package": package_view,
-              "deployment": deployment_view, "sequence": sequence_view}
+              "deployment": deployment_view, "sequence": sequence_view, "depends": depends_view}
 
 
 def generate(st: Store, kind: str, subject: str = "", **opts) -> tuple[dict, set, set]:
