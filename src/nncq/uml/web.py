@@ -529,7 +529,10 @@ $('#bmd').onclick=async()=>{if(!cur)return;const md=await text('markdown');ed=nu
 /* ---------- the shared code view (codeview.py): colouring, symbol links, editor ---------- */
 /*__CODEVIEW__*/
 NC.api=(u,b)=>api(u,{...b,repo});if(QS.get('debug')==='1'&&QS.get('vcs'))NC.vcs=QS.get('vcs');const hlc=NC.text,langOf=NC.langOf;
-NC.onPick=(l)=>{const p=l.sym?l.path:l.file;if(!p)return;source(p,l.sym?l.to_line:1);
+NC.onPick=(l)=>{const p=l.sym?l.path:l.file;if(!p)return;
+ /* a file link: open that file's default diagram (its file composition), as a click in the list would */
+ if(!l.sym){location.hash='#/uml/default?p='+encodeURIComponent(p)+(repo?'&repo='+encodeURIComponent(repo):'');return}
+ source(p,l.to_line);
  const x=l.sym&&synced()&&host();if(x&&x.modelPick)x.modelPick({h:location.hash,q:l.sym,path:l.path||''})};
 
 /* ---------- Preview .md: the export rendered the way a Markdown viewer would (headings, lists, links, mermaid) ---------- */

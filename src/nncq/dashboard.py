@@ -413,7 +413,7 @@ $('#s-search').addEventListener('keydown',e=>{if(e.altKey&&(e.key==='ArrowLeft'|
 /*__CODEVIEW__*/
 NC.api=async(u,b)=>{const r=await fetch(u,{method:'POST',headers:{...H,'Content-Type':'application/json'},body:JSON.stringify({...b,...(multi&&sel?{repo:sel}:{})})});return r.json()};
 if(QS.get('debug')==='1'&&QS.get('vcs'))NC.vcs=QS.get('vcs');      /* test hook: ?debug=1&vcs=p4 */
-NC.onPick=(l)=>{if(l.sym)openSym(l.sym,l.path||'');else if(l.file){target('sym');showFile(l.file,1)}};
+NC.onPick=(l)=>{if(l.sym)openSym(l.sym,l.path||'');else if(l.file){target('sym');openPath(l.file,1)}};
 const numbered=NC.numbered;
 
 /* ---------- search: ask -> how it was read + what came back, then files; a file opens in the right viewer ---------- */
@@ -617,11 +617,12 @@ function depsUi(){const s=DEPS.sum;if(!s)return;const t=$('#tree');
  t.insertAdjacentHTML('afterbegin',`<div class="dhead"><span class="seg"><a data-dv="thumb" class="${DEPS.view==='thumb'?'on':''}">graph</a><a data-dv="outline" class="${DEPS.view==='outline'?'on':''}">outline</a></span>
   <span class="dim" id="dsum">${s.a.mode==='type'?'type':'file'} · ${s.outs} out · ${s.ins} in${s.d.cycles?` · <span class="badge w">${s.d.cycles} cycle${s.d.cycles>1?'s':''} ↺</span>`:''}</span></div>`);
  if(DEPS.view==='thumb'){const u=t.querySelector('ul.tree');if(u)u.hidden=true;t.insertAdjacentHTML('beforeend','<div id="dthumb"></div>');depsThumb()}}
-async function buildTree(){nodes=[];selNode=null;if(!cur&&!(tmode==='depends'&&curFile)){drawTree();return}
+async function buildTree(){nodes=[];selNode=null;if(!cur&&!curFile){drawTree();return}
+ if(!cur&&(tmode==='callers'||tmode==='callees')){$('#tree').innerHTML=`<div class="empty dim">${tmode} needs a symbol: pick one in the outline</div>`;return}
  $('#tree').innerHTML='<div class="empty"><span class="spin"></span></div>';
  try{if(tmode==='callers'||tmode==='callees'){const r=mk({root:true,sym:cur.sym,path:cur.path,line:cur.line,dpath:cur.path,noroot:true,load:tmode==='callers'?loadCallers:loadCallees});
    r.label=`${short(cur.sym)} <span class="dim">${tmode==='callers'?'is called by':'calls'}</span>`;drawTree();await expand(r)}
-  else if(tmode==='outline'){(await outlineTree(cur.path)).forEach(r=>r.root=true);const hit=nodes.find(x=>x.sym===cur.sym);if(hit)selNode=hit.id;drawTree();
+  else if(tmode==='outline'){$('#s-symbols').classList.remove('idle');(await outlineTree(cur?cur.path:curFile)).forEach(r=>r.root=true);const hit=cur&&nodes.find(x=>x.sym===cur.sym);if(hit)selNode=hit.id;drawTree();
    const el=$('#tree .tn.cur');if(el)el.scrollIntoView({block:'nearest'})}
   else{DEPS.sum=null;$('#s-symbols').classList.remove('idle');(await depsTree()).forEach(r=>r.root=true);drawTree()}}
  catch(e){$('#tree').innerHTML=`<div class="empty err">${esc(e.message)}</div>`}}
@@ -635,7 +636,7 @@ $('#tree').addEventListener('click',async e=>{const dv=e.target.closest('[data-d
  if(nd.resolve&&!nd.path){try{const x=defsOf(await T('find_symbol',{name:nd.sym,kind:'type'}))[0];if(x){Object.assign(nd,{path:x.path,line:x.start,end:x.end,dpath:x.path});drawTree();show(x.path,x.start,x.end);selSync(nd)}}catch(err){}return}
  selSync(nd);
  if(nd.callPath&&tmode==='callees')show(nd.callPath,nd.callLine);else if(nd.path)show(nd.path,nd.line,nd.end);});
-$('#tree').addEventListener('dblclick',e=>{const row=e.target.closest('.tn');if(!row)return;const nd=nodes[+row.dataset.id];if(nd.file)return showFile(nd.path);if(nd.sym&&!nd.noroot)openSym(nd.sym,nd.dpath||nd.path)});
+$('#tree').addEventListener('dblclick',e=>{const row=e.target.closest('.tn');if(!row)return;const nd=nodes[+row.dataset.id];if(nd.file)return openPath(nd.path);if(nd.sym&&!nd.noroot)openSym(nd.sym,nd.dpath||nd.path)});
 async function show(path,line,end){setView('sym');closeEdit();$('#cpath').innerHTML=`<span class="mono">${esc(path)}</span><span>${line?':'+line:''}</span><span style="flex:1"></span><a class="ced" data-path="${esc(path)}" data-line="${line||1}" title="edit this file here (Ctrl+S saves, Esc cancels)">Edit</a>`;$('#sview').innerHTML='<span class="spin"></span>';
  try{const a=Math.max(1,(line||1)-15),b=end&&end-line<300?end+8:(line||1)+60;const d=await T('read_code',{path,start:a,end:b});const c=numbered(d.code);
   const box=$('#sview').parentElement,center=()=>{const mkr=$('#sview #mk');if(mkr)box.scrollTop=mkr.offsetTop-box.clientHeight/2};
@@ -709,7 +710,7 @@ function dhash(t){const p=new URLSearchParams();if(t&&t.s)p.set('s',t.s);if(t&&t
 function mnav(h,push){if(!frReady){frPend=h;return}const w=fr.contentWindow;if(w.location.hash===h)return;
  if(push)w.location.hash=h;else w.location.replace(w.location.pathname+w.location.search+h)}
 fr.addEventListener('load',()=>{frReady=true;syncUi();if(frPend){const h=frPend;frPend=null;mnav(h)}});
-function curTarget(){return view==='sym'&&cur?{s:cur.sym,p:cur.path}:view==='hits'&&ans&&ans.files&&fsel>=0?{p:ans.files[fsel].p}:null}
+function curTarget(){return view==='sym'&&cur?{s:cur.sym,p:cur.path}:view==='sym'&&curFile?{p:curFile}:view==='hits'&&ans&&ans.files&&fsel>=0?{p:ans.files[fsel].p}:null}
 function follow(t){lastT=t;noteSym(t);$('#mlink').href='views'+dhash(curTarget()||t);if(!syncOn||skipFollow||noFollow||restoringM)return;
  if(PS.c.model){missed=true;return}missed=false;mnav(dhash(t))}
 function catchUp(){if(missed&&lastT&&syncOn){missed=false;mnav(dhash(lastT))}}
@@ -727,9 +728,11 @@ function setSync(v){if(v===syncOn)return syncUi();syncOn=v;askUi();localStorage.
  else setHash({sync:'0'})}
 $('#csync').addEventListener('change',e=>setSync(e.target.checked));
 function mrestore(m){const h='#'+(m||'/uml/default');if(frReady){const w=fr.contentWindow;if(w.location.hash!==h)w.location.replace(w.location.pathname+w.location.search+h)}else frPend=h}
-function showFile(path,line){cur=null;curFile=path;nodes=[];drawTree();$('#s-symbols').classList.add('idle');$('#sq').value='';if(tmode==='depends')setTimeout(buildTree);
+function showFile(path,line){cur=null;curFile=path;nodes=[];drawTree();$('#s-symbols').classList.add('idle');$('#sq').value='';setTimeout(buildTree);
  $('#scard').innerHTML=`<div class="t">${esc(base(path))} <span class="kind k-file">file</span></div><div class="dim mono" style="font-size:11px">${esc(path)}</div>`;show(path,line||1);vtitle(path)}
 /* a code target for a Model explorer selection: {q, path, line} -> the symbol / file in the Symbol explorer, quietly */
+/* a file picked in this pane (include link, dependency row): selected like a Files row, so the Model explorer shows its file diagram */
+function openPath(path,line){target('sym');setHash({s:'',p:'',sf:path});showFile(path,line||1);follow({p:path})}
 function syncCode(t){if(t.q)return openSym(t.q,t.path||'',true,true);if(t.path){setHash({s:'',p:'',sf:t.path});showFile(t.path,t.line)}}
 window.nncqHost={syncOn:()=>syncOn,setSync,noteModel(s){LAST={src:'model',h:s.h,code:s.code||null}},openSym(q,p){target('sym');noFollow=true;Promise.resolve(openSym(q,p||'')).finally(()=>{noFollow=false})},
  collapse(p){setCol(p,true)},modelHash(h){setHash({m:h&&h!=='#'?h.replace(/^#/,''):''})},
