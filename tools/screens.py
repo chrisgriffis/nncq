@@ -306,6 +306,7 @@ def scene_editor(b: Browser, base: str):
 def scene_outline(b: Browser, base: str):
     """Symbol explorer: the card of a symbol and the outline of its file."""
     _sym(b, base, "orbitkit::telemetry::FramedDecoder", "outline")
+    b.js("document.querySelector('#tree').scrollTop=0", 0.4)
     b.shot("symbols-outline", union(b, "document.querySelector('#right .ph')", "document.querySelector('#tree')"))
 
 
