@@ -1,5 +1,10 @@
 # Design ideas (not implemented)
 
+Built since these notes started, so no longer listed here: codebase profiles (definition languages, data
+cross-reference rules, export / import), the UML / SysML model and the Model explorer, agent-authored views and
+compositions with provenance, staleness propagation, the `depends` graphs with cycle marking, constructor /
+instantiation facts and `virtual` / `override` flags in the parse, the three-pane dashboard with its code editor.
+
 ## Deep index for selected data files
 
 By default the data files matched by a profile's `[[xref]]` rules are not chunked or embedded. `datarefs.py` only
@@ -59,16 +64,24 @@ Rule: the indexing crawl records cheap per-file facts while it is already readin
 run on demand as SQLite queries. Only whole-program work that is too slow even on demand runs as a
 background job, and its results are stamped with the index generation they were computed from.
 
-Per-file facts to record during the crawl (one pass, free):
-- Constructor calls (`new X`, `X x(...)`, `X{...}`) as call edges to X. Without these, constructors look
-  like entry points and traces stop there.
-- Function references that are not calls (`&Foo::bar`, `bind(...)`, delegate/event `+=`, Lua callbacks)
+Per-file facts still to record during the crawl (one pass, free):
+- Constructor calls as *call* edges. The UML facts already record them as `instantiates` (`new X`,
+  `make_unique<X>`, locals); call traces and `called_by` do not follow those yet, so constructors still look like
+  entry points.
+- Function references that are not calls (`&Foo::bar`, `bind(...)`, delegate/event `+=`, script callbacks)
   as `ref` edges. These remove most false "uncalled" results and let traces pass through callbacks.
-- `virtual`/`override`/`final` flags on methods, so an override can be linked to its base method.
+- Override links: the `virtual` / `override` flags are recorded; linking an override to its base method (and a
+  sequence through an interface call to its implementations) is not.
 - Lambdas attributed to their enclosing function, not to the namespace / file level.
 
 Background-job candidates (each is O(whole graph) and only useful as a precomputed table):
 - Transitive caller count per function (blast-radius ranking for every symbol).
-- Strongly connected components (recursion and include cycles).
+- Strongly connected components over the whole repo (recursion and include cycles). `depends` marks cycles
+  only in the neighbourhood it walks.
 - Whole-repo entry points and dead-code list (needs the ref edges above to be trustworthy).
 - Centrality / "core API" ranking (PageRank-style over call + include edges).
+
+## Linux setup
+
+Nothing in the core is Windows-specific, but there is no `init.sh` equivalent of `init.ps1` yet, and idle
+detection on Linux (`xprintidle`) is untested.

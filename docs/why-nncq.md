@@ -20,10 +20,12 @@
 
 **nncq**
 - An index of the tree on disk, not of the solution: C++, C#, HLSL, Lua, Python, your own definition languages (declared in a codebase profile) and more, including the code that never makes it into a generated `.sln`.
-- A call and type graph built from tree-sitter, no build needed: callers, callees, call traces, blast radius, type hierarchy, includes.
+- A call and type graph built from tree-sitter, no build needed: callers, callees, call traces, blast radius, type hierarchy, type and include dependencies (with cycles).
+- A model of the code: UML / SysML diagrams generated from the same index (classes, objects, call sequences, components with their pins, packages, deployment with Debug / Release configurations, dependency graphs), plus diagrams and compositions an agent authors over MCP. A diagram whose code changed is flagged or regenerated, never silently out of date.
 - A code<->data cross-reference, when the codebase profile declares data rules: which data files use a type, and which code a given data file needs.
 - Search that returns whole functions and classes, ranked. Full mode adds embeddings and a reranker for questions that share no words with the code.
 - Answers sized for an agent: `ask` returns a short map of where the answer is (a few KB), and the agent opens only what it needs.
+- A dashboard for you, on the same index: ask, a Symbol explorer (outline, callers, callees, dependencies, code with clickable symbols) and a Model explorer, side by side and kept in sync.
 - Local only: one index per person, on their machine, matching their synced changelist. nncq adds no new place your code goes (no server, no cloud, no shared index).
 
 ---
@@ -36,6 +38,8 @@
 | Who calls `Foo::bar`, precisely? | Best: parser-aware references | Grep: every `bar`, unranked | Good: name-based, ranked by class, ambiguity flagged |
 | How does execution get from the main loop to X? | Manual, one level per click | Many greps and reads; often gives up | One `call_trace`: pseudo stacks with `file:line` |
 | What breaks if I change this signature? | Manual | Grep and guess | `impact`: callers grouped by folder |
+| What does this type depend on, and what depends on it? Any include cycles? | Manual, header by header | Reads headers one by one | `depends`: both directions, N hops, cycles marked |
+| Draw the classes around X, or the call sequence from Y | No | Writes Mermaid from whatever it read: plausible, unverified, stale tomorrow | `uml_view`: generated from the index, every element links back to code, flagged when its code changes |
 | "Where do we throttle streaming under memory pressure?" (no known names) | No help | Guesses words to grep | Full: semantic search + reranker. Lite: keywords, then re-ask using the code's vocabulary |
 | Which data files use this type? Which code does this data file need? | No | No (a grep over a large data tree takes tens of seconds per pass, unranked) | `data_for_code` / `code_for_data` in milliseconds |
 | Code outside the loaded solution (tools, shaders, scripts, custom DSLs, other configs) | Not indexed | Grep only | Indexed, graph included |
@@ -52,7 +56,7 @@ The deciding factor is context, not cleverness. An agent answers a research ques
 - **Copilot alone** on "how does the number of open connections affect request latency": grep for guessed words, get 300 hits, read 4-6 files (several thousand tokens each), and stop when the budget runs out. What it finds depends on which words it guessed.
 - **Copilot + nncq**: 3-4 narrow `ask`s (a few KB each), a `call_trace` and an `impact` on the best symbols, then `expand` on the 2-3 functions the answer rests on. For the same budget the agent has considered far more of the codebase, and every claim points to a `file:line`.
 
-The `nncq-user` skill (installed by `nncq agents`) tells the agent to work this way: break the question into several small asks, follow the best hits through the graph, verify, then write one digest. Copilot without it tends to do one search and start reading files.
+The `nncq-user` skill (installed by `nncq agents`, with `nncq-uml-modeler` for diagrams) tells the agent to work this way: break the question into several small asks, follow the best hits through the graph, verify, then write one digest. Copilot without it tends to do one search and start reading files.
 
 ---
 
@@ -60,7 +64,7 @@ The `nncq-user` skill (installed by `nncq agents`) tells the agent to work this 
 
 - **Links are by name, not resolved type.** A call to `update()` matches every `update`. nncq ranks the callers and says when a name is ambiguous, but VA is more precise for "exactly which overload".
 - **Static only.** Jobs, callbacks, virtual dispatch and script bindings break call traces. nncq reports where a trail goes cold instead of inventing the missing hop, but it cannot fill it.
-- **Read-only.** No refactoring or edits; that stays in VA and Copilot.
+- **Read-only for agents.** MCP never writes to the workspace. The dashboard has a small editor (save, plus the workspace's git or p4 actions) for quick fixes; refactoring stays in VA and Copilot.
 - **Lite has no semantic search.** Questions that share no words with the code are weaker. The graph tools, the cross-reference and `ask` / `expand` work the same.
 
 ---
@@ -68,7 +72,7 @@ The `nncq-user` skill (installed by `nncq agents`) tells the agent to work this 
 ## Recommended setup
 
 1. Keep Visual Assist for your own navigation and refactoring.
-2. Install nncq **lite** (`init.ps1 -Lite`): about 150 MB, no GPU, the index builds in minutes.
+2. Install nncq **lite** (`init.ps1 -Lite`): about 150 MB, no GPU, the index builds in minutes. To see what it does first, index the bundled demo (`nncq init --lite --yes --profile _demo`, see the README).
 3. `nncq agents --targets vs` (and `copilot`, `claude` if you use them): registers nncq in `%USERPROFILE%\.mcp.json` and installs the skill where the agent supports one. In Visual Studio, enable the nncq tools in the Copilot Chat tool picker (agent mode), and paste `nncq-user.skill.md` into your custom instructions.
 4. Ask research questions in plain words. Expect a mechanism plus `file:line` locations and a list of gaps, not a guess.
 5. Upgrade one machine to **full** (GPU) if questions with no shared words with the code keep coming back weak.
