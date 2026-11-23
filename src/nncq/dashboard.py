@@ -154,13 +154,16 @@ body.pf-on .unf{display:inline-block}body.pf-on #qpath{outline:2px solid var(--h
 .leg{display:flex;gap:12px;font-size:11px;color:var(--dim);flex-wrap:wrap}.leg b{color:var(--fg);font-weight:600}.leg i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:4px}
 .abar{display:grid;grid-template-columns:minmax(0,max-content) 1fr auto;gap:3px 8px;align-items:center;font-size:11px}
 .abar .an{cursor:pointer;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left}.abar .an:hover{color:var(--acc)}
-.abar .ab{height:7px;border-radius:4px;background:var(--acc);min-width:4px}
+.abar .ab{height:7px;min-width:4px;display:flex;gap:2px}.abar .ab i{flex:1;background:var(--acc);border-radius:2px}
 .lnk{font-size:11px;color:var(--dim);line-height:1.6}.lnk .r{color:var(--acc);cursor:pointer}.lnk .r:hover{text-decoration:underline}
 .files{max-height:46vh;overflow:auto;border-top:1px solid var(--line)}
 .frow{display:flex;gap:8px;align-items:center;padding:5px 12px;cursor:pointer;border-bottom:1px solid #1c2029;min-width:0;font-size:12px}
 .frow:hover{background:#1b1f29}.frow.on{background:#1d2a44}
 .frow .fn{font-weight:600;white-space:nowrap}.frow .fd{color:var(--dim);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;direction:rtl;text-align:left;min-width:60px;flex:1 1 0}
 .frow .fs{display:flex;gap:4px;flex:0 1 auto;min-width:0;overflow:hidden}.frow .fs span{font-size:11px;padding:0 6px;border-radius:8px;background:#232733;white-space:nowrap}
+.frow .sq{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 1 auto}
+#scard .fh{display:block;font-size:13px;font-weight:600;color:var(--acc);cursor:pointer;margin-bottom:4px;word-break:break-all}#scard .fh:hover{text-decoration:underline}#scard .fh .dim{font-weight:400}
+.cpd{position:fixed;z-index:50;font-size:11px;padding:1px 8px;border-radius:8px;background:#14301f;color:var(--ok);pointer-events:none}
 .rk{width:44px;height:5px;background:var(--t0);border-radius:3px;overflow:hidden;flex:none}.rk i{display:block;height:100%;background:var(--ok)}
 .hit{border-bottom:1px solid var(--line)}.tw:before{content:'';border-left:5px solid transparent;border-right:5px solid transparent;border-top:7px solid currentColor}.tw{color:#a9b0bc;font-size:0;flex:none;width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;border-radius:4px;cursor:pointer;transition:transform .15s;user-select:none;margin-left:-6px}.tw:hover{color:var(--fg);background:#1b1f29}.blk>summary>.tw{margin-right:-4px}
 .hit.cl .tw{transform:rotate(-90deg)}.hit.cl>.facts,.hit.cl>pre,.hit.cl>.more{display:none}.hit.cl>.hh{padding-bottom:8px}
@@ -442,7 +445,7 @@ function home(quiet){$('#q').value='';$('#qpath').value='';$('#qx').style.displa
 function setView(v){view=v;$('#right').classList.toggle('v-hits',v==='hits');setHash({v:v==='hits'?'':v});$('#mlink').href='views'+dhash(curTarget());$('#vhits').hidden=v!=='hits';$('#vsym').hidden=v!=='sym';
  document.querySelectorAll('#vtab a').forEach(a=>a.classList.toggle('on',a.dataset.v===v));
  vtitle(v==='hits'?(ans&&fsel>=0?ans.files[fsel].p:''):(cur?cur.path:''))}
-function vtitle(t){$('#vtitle').innerHTML=t?`<a data-file="${esc(t)}" title="open / view in folder / copy path">&lrm;${esc(t)}</a>`:''}
+function vtitle(t){$('#vtitle').innerHTML=t?`<a data-file="${esc(t)}" title="click: copy path · right-click: open / view in folder / copy">&lrm;${esc(t)}</a>`:''}
 /* the repo's VCS (profile [workspace] vcs, else detected; from /api/status): which VCS actions to offer */
 const repoVcs=()=>QS.get('debug')==='1'&&QS.get('vcs')||((last&&last.repos||[]).find(r=>r.name===sel)||(last&&last.repos||[])[0]||{}).vcs||'none';
 function fileMenu(path,x,y){let m=$('#pmenu');if(!m){m=document.createElement('div');m.id='pmenu';document.body.appendChild(m)}
@@ -458,9 +461,14 @@ function fileMenu(path,x,y){let m=$('#pmenu');if(!m){m=document.createElement('d
    if(vop){m.innerHTML='<div class="msg">'+esc(`${repoVcs()} ${vop}: ok`+((r.status||{}).state?' · '+r.status.state:''))+'</div>';return}}catch(err){m.innerHTML='<div class="msg">'+esc(String(err))+'</div>';return}
   m.style.display='none'}}
 document.addEventListener('click',e=>{const a=e.target.closest('#vtitle [data-file]');const m=$('#pmenu');
- if(a){e.preventDefault();e.stopPropagation();fileMenu(a.dataset.file,e.clientX,e.clientY);return}
+ if(a){e.preventDefault();e.stopPropagation();if(m)m.style.display='none';const p=a.dataset.file;
+  const legacy=()=>{const t=document.createElement('textarea');t.value=p;t.style.cssText='position:fixed;opacity:0';document.body.appendChild(t);t.select();const ok=document.execCommand('copy');t.remove();return ok?Promise.resolve():Promise.reject()};
+  (navigator.clipboard?navigator.clipboard.writeText(p).catch(legacy):legacy()).then(()=>{
+  document.querySelectorAll('.cpd').forEach(c=>c.remove());const c=document.createElement('span');c.className='cpd';c.textContent='copied!';c.style.left=e.clientX+'px';c.style.top=(e.clientY+14)+'px';document.body.appendChild(c);setTimeout(()=>c.remove(),1200)},()=>{});return}
  if(m&&!e.target.closest('#pmenu'))m.style.display='none'});
-$('#vtab').addEventListener('click',e=>{const a=e.target.closest('[data-v]');if(a)setView(a.dataset.v)});
+document.addEventListener('contextmenu',e=>{const a=e.target.closest('#vtitle [data-file]');if(!a)return;e.preventDefault();fileMenu(a.dataset.file,e.clientX,e.clientY)});
+$('#vtab').addEventListener('click',e=>{const a=e.target.closest('[data-v]');if(!a)return;
+ if(a.dataset.v==='sym'&&pendFile){const p=pendFile;setHash({s:'',p:'',sf:p});showFile(p);return}setView(a.dataset.v)});
 
 async function doSearch(){const q=$('#q').value.trim(),qp=$('#qpath').value.trim(),kk=$('#qk').value;if(!q)return home();
  const r=[q,...JSON.parse(localStorage.getItem('nncq.recent')||'[]').filter(x=>x!==q)].slice(0,12);localStorage.setItem('nncq.recent',JSON.stringify(r));
@@ -484,15 +492,20 @@ function drawAnswer(){const d=ans,ip=d.interpreted||{},pf=d.portfolio||{},hits=d
  const fb=`<div class="fb"><i style="width:${b/tot*100}%;background:${C1}"></i><i style="width:${mo/tot*100}%;background:${C2}"></i><i style="width:${ko/tot*100}%;background:${C3}"></i></div>
   <div class="leg"><span><i style="background:${C1}"></i>both <b>${b}</b></span><span><i style="background:${C2}"></i>meaning <b>${mo}</b></span><span><i style="background:${C3}"></i>keyword <b>${ko}</b></span></div>`;
  const areas=(pf.areas||[]).map(a=>/^(.+): (\d+) \((.*)\)$/.exec(a)).filter(Boolean),amx=Math.max(1,...areas.map(a=>+a[2]));
- const ab=areas.map(a=>`<span class="an" data-area="${esc(a[1])}" title="narrow to ${esc(a[1])}">&lrm;${esc(a[1])}</span><span class="ab" style="width:${+a[2]/amx*100}%"></span><span class="dim">${a[2]}</span>`).join('');
+ const ab=areas.map(a=>`<span class="an" data-area="${esc(a[1])}" title="narrow to ${esc(a[1])}">&lrm;${esc(a[1])}</span><span class="ab" style="width:${+a[2]/amx*100}%" title="${a[2]} of the shown hits">${'<i></i>'.repeat(Math.min(+a[2],60))}</span><span class="dim">${a[2]}</span>`).join('');
  const refs=s=>esc(s).replace(/\bc(\d+)\b/g,'<span class="r" data-ref="c$1">c$1</span>');
  const links=(d.links||[]).map(l=>`<div>${refs(l)}</div>`).join('');
  const led=[pf.keyword_led_to&&'keyword → '+esc(pf.keyword_led_to),pf.meaning_led_to&&'meaning → '+esc(pf.meaning_led_to)].filter(Boolean).join('<br>');
- const notes=[pf.strength,ip.meaning,d.note].filter(Boolean).map(esc).join('<br>');
+ const notes=[ip.caution&&'<b style="color:var(--warn)">'+esc(ip.caution)+'</b>',...[pf.strength,ip.meaning,d.note].filter(Boolean).map(esc)].filter(Boolean).join('<br>');
+ /* bar = relative strength vs the top hit (rel, from the raw channel scores); rank position only if rel is missing */
+ const barw=hs=>{const r=Math.max(...hs.map(h=>h.rel??-1)),best=Math.min(...hs.map(h=>h.rank));return r>=0?Math.max(4,r*100):Math.max(8,100-(best-1)*100/Math.max(1,hits.length))};
+ const why=hs=>hs.map(h=>'#'+h.rank+(h.rel!=null?' · '+Math.round(h.rel*100)+'% of top':'')+(h.why?' · '+h.why:'')+(hs.length>1?' · '+lastName(h.sym):'')).join('\n');
  const files=d.files.map((f,i)=>{const best=Math.min(...f.hs.map(h=>h.rank)),bn=base(f.p),dir=f.p.slice(0,Math.max(0,f.p.length-bn.length-1));
-  return `<div class="frow ${i===fsel?'on':''}" data-f="${i}"><span class="rk" title="best rank #${best}"><i style="width:${Math.max(8,100-(best-1)*100/Math.max(1,hits.length))}%"></i></span>
+  return `<div class="frow ${i===fsel?'on':''}" data-f="${i}"><span class="rk" title="${esc(why(f.hs))}"><i style="width:${barw(f.hs)}%"></i></span>
    <span class="fn">${esc(bn)}</span><span class="fs">${f.hs.map(h=>`<span title="${esc(h.sym)}">${esc(lastName(h.sym))}</span>`).join('')}</span>
    <span class="fd" title="${esc(f.p)}">&lrm;${esc(dir)}</span></div>`}).join('');
+ const syms=[];{const seen=new Set();[...hits].sort((x,y)=>x.rank-y.rank).forEach(h=>{if(!h.sym||/^\(/.test(h.sym)||seen.has(h.sym))return;seen.add(h.sym);syms.push(h)})}
+ d._syms=syms;
  $('#answer').innerHTML=`<details class="blk" open><summary><span class="tw" title="roll up / unroll">▾</span>${stw?`<span class="st ${stw}" title="${esc(pf.strength)}">${stw}</span>`:''}<span class="h">Read as</span>${terms}${ign}
    <button class="unf" title="clear the path filter (same as × in the filter field)">unfilter</button><span class="dim" style="margin-left:auto">${esc((pf.shown||'').replace(/ \(.*\)/,''))} · ${n(d.ms)} ms</span></summary>
   <div class="bb" data-rz="readas" data-rzmin="60">${voc?`<span class="lab">code says</span><div>${voc}</div>`:''}
@@ -503,15 +516,20 @@ function drawAnswer(){const d=ans,ip=d.interpreted||{},pf=d.portfolio||{},hits=d
    ${led?`<span class="lab">leads</span><div class="lnk">${led}</div>`:''}
    ${notes?`<span class="lab">notes</span><div class="lnk">${notes}</div>`:''}</div></details>
   <details class="blk" open><summary><span class="tw" title="roll up / unroll">▾</span><span class="h">Files</span><span class="dim">${d.files.length} files · ${hits.length} hits · pick one to open it on the right</span><button class="unf" title="clear the path filter (same as × in the filter field)">unfilter</button></summary>
-   <div class="files" data-rz="files" data-rzmin="80">${files||'<div class="empty">nothing found</div>'}</div></details>`}
+   <div class="files" data-rz="files" data-rzmin="80">${files||'<div class="empty">nothing found</div>'}</div></details>
+  ${syms.length?`<details class="blk" open><summary><span class="tw" title="roll up / unroll">▾</span><span class="h">Symbols</span><span class="dim">${syms.length} best matches · pick one to open it in the Symbol explorer</span></summary>
+   <div class="files" data-rz="syms" data-rzmin="60">${syms.map((h,i)=>{const bn=base(fullPath(h.at));
+    return `<div class="frow" data-hs="${i}" title="${esc(h.sym)} · ${esc(h.at)}"><span class="rk" title="${esc(why([h]))}"><i style="width:${barw([h])}%"></i></span>
+     <span class="fn sq">${esc(h.sym)}</span><span class="kind k-${esc(h.kind)}">${esc(h.kind)}</span><span class="fd">&lrm;${esc(bn)}</span></div>`}).join('')}</div></details>`:''}`}
 $('#answer').addEventListener('click',e=>{
  const v=e.target.closest('[data-ask]');if(v){$('#q').value=v.dataset.ask;doSearch();return}
  const a=e.target.closest('[data-area]');if(a){$('#qpath').value=a.dataset.area;doSearch();return}
  const r=e.target.closest('[data-ref]');if(r){const i=ans.files.findIndex(f=>f.hs.some(h=>h.ref===r.dataset.ref));if(i>=0){target('sym');openFile(i,r.dataset.ref)}return}
+ const hs=e.target.closest('[data-hs]');if(hs){const h=ans._syms[+hs.dataset.hs];document.querySelectorAll('#answer .frow').forEach(x=>x.classList.toggle('on',x===hs));target('sym');openSym(h.sym,fullPath(h.at));return}
  const f=e.target.closest('[data-f]');if(f){target('sym');openFile(+f.dataset.f)}});
 
 async function openFile(i,ref){const d=ans;fsel=i;setHash({f:i||''});document.querySelectorAll('#answer .frow').forEach(x=>x.classList.toggle('on',+x.dataset.f===i));
- const f=d.files[i];setView('hits');if(syncOn)$('#sq').value='';follow({p:f.p});
+ const f=d.files[i];pendFile=f.p;setView('hits');if(syncOn)$('#sq').value='';follow({p:f.p});
  $('#vhits').innerHTML=f.hs.map(h=>{const [a,b]=span(h.at);
   const facts=[['signature',h.sig&&`<span class="sig">${esc(h.sig)}</span>`],['doc',h.doc&&esc(h.doc)],['calls',h.calls&&esc(h.calls)],['callers',h.callers&&esc(h.callers)],
    ['bases',h.bases&&esc(h.bases)],['members',h.members&&esc(h.members)+(h.derived?` · ${h.derived} derived`:'')],['also at',h.also_at&&esc(h.also_at.join(', '))]].filter(x=>x[1]);
@@ -588,7 +606,7 @@ async function outlineTree(path){const d=await T('file_outline',{path});const ro
 const DEPS={view:localStorage.getItem('nncq.depview')||'thumb',sum:null,key:''};
 const EKIND={inherits:'interface',composes:'class',aggregates:'struct',associates:'component',depends:'package',instantiates:'function',var:'config',include:'module',import:'module'};
 const ekb=k=>{const c=NC.pal[EKIND[k]]||NC.pal.block;return `<span class="badge" style="background:${c[0]};color:${c[1]}">${esc(k)}</span>`};
-let curFile='';
+let curFile='',pendFile='';   /* a Files row picked in Active search: the Symbol tab opens on it */
 const depArgs=()=>cur?{name:cur.sym,mode:'type'}:{name:curFile,mode:'include'};
 function depRows(d,id,way){const by=new Map();for(const e of d.edges||[]){const o=way==='out'?(e.from===id&&e.to):(e.to===id&&e.from);if(!o)continue;if(!by.has(o))by.set(o,[]);by.get(o).push(e)}
  const folders=new Map();
@@ -642,6 +660,8 @@ $('#tree').addEventListener('click',async e=>{const dv=e.target.closest('[data-d
  const r=e.target.closest('[data-r]');if(r){const nd=nodes[+r.dataset.r];openSym(nd.sym,nd.dpath||nd.path);return}
  const t=e.target.closest('[data-t]');const row=e.target.closest('.tn');if(!row)return;const nd=nodes[+row.dataset.id];
  if(t&&!nd.leaf){expand(nd);return}
+ /* the outline is the file's own structure: a picked row becomes the target, so the card, tree and code agree */
+ if(tmode==='outline'&&nd.sym&&!nd.noroot&&(nd.dpath||nd.path)){if(!cur||cur.sym!==nd.sym)openSym(nd.sym,nd.dpath||nd.path);return}
  selNode=nd.id;drawTree();
  if(nd.resolve&&!nd.path){try{const x=defsOf(await T('find_symbol',{name:nd.sym,kind:'type'}))[0];if(x){Object.assign(nd,{path:x.path,line:x.start,end:x.end,dpath:x.path});drawTree();show(x.path,x.start,x.end);selSync(nd)}}catch(err){}return}
  selSync(nd);
@@ -665,10 +685,11 @@ function chips(list,label){if(!list||!list.length)return'';return `<div class="c
  if(typeof s==='object')return `<span class="chip" data-s="${esc(s.sym)}" data-p="${esc(s.path||'')}" title="${esc(s.sym)} · ${esc(s.path||'')}:${s.def_line||s.line||''}">${short(s.sym)}${s.times>1?` <span class="dim">×${s.times}</span>`:''}${s.test?' <span class="dim">test</span>':''}${s.by_name?' <i class="dim">by name</i>':''}</span>`;
  const m=reCaller.exec(s)||reCall.exec(s);
  const sym=m?(reCaller.test(s)?m[1]:((/^(\S+) /.exec(m[4]||'')||[])[1]||m[2])):s.split(' ')[0];return `<span class="chip" data-s="${esc(sym)}" title="${esc(s)}">${short(sym)}</span>`}).join('')}${list.length>12?`<span class="dim" style="font-size:11px">+${list.length-12}</span>`:''}</div>`}
-$('#scard').addEventListener('click',e=>{const c=e.target.closest('[data-s]');if(c)openSym(c.dataset.s,c.dataset.p||'')});
+$('#scard').addEventListener('click',e=>{const fp=e.target.closest('[data-fp]');if(fp){if(cur||curFile!==fp.dataset.fp)openPath(fp.dataset.fp);return}
+ const c=e.target.closest('[data-s]');if(c)openSym(c.dataset.s,c.dataset.p||'')});
 function findSym(q){q=(q||'').trim();if(q)openSym(q)}
 /* quiet: a selection synced from the Model explorer (no pane swap, no history entry of its own, no follow back) */
-async function openSym(name,path,again,quiet){if(!nav&&!quiet)target('sym');$('#sq').value=name;setHash({s:name,p:path||'',sf:''},!again&&!quiet);setView('sym');
+async function openSym(name,path,again,quiet){pendFile='';if(!nav&&!quiet)target('sym');$('#sq').value=name;setHash({s:name,p:path||'',sf:''},!again&&!quiet);setView('sym');
  $('#scard').innerHTML='<span class="spin"></span>';
  try{let d;try{d=await T('symbol_context',{name,path:path||''})}catch(e){d={error:e.message}}
   if(d.error||!d.defined_at){const f=await T('find_symbol',{name});const defs=defsOf(f).map(x=>[null,x.sym,x.kind,x.path,x.start]);
@@ -680,7 +701,7 @@ async function openSym(name,path,again,quiet){if(!nav&&!quiet)target('sym');$('#
   if(!nav&&!quiet)srecentAdd(cur.sym,p);else srecent();if(!quiet)follow({s:cur.sym,p});
   const facts=[d.call_sites_total&&`<span class="chip"><b>${esc(d.call_sites_total)}</b></span>`,d.mentioned_in_files!=null&&`<span class="chip">mentioned in <b>${n(d.mentioned_in_files)}</b> files</span>`,
    d.defined_at.length>1&&`<span class="chip">${d.defined_at.length} definitions</span>`].filter(Boolean).join('');
-  $('#scard').innerHTML=`<div class="t">${short(cur.sym)} <span class="kind k-${esc(d.kind||'')}">${esc(d.kind||'')}</span></div>
+  $('#scard').innerHTML=`<a class="fh mono" data-fp="${esc(p)}" title="open this file in the Symbol explorer">${esc(p)}<span class="dim">:${a}</span></a><div class="t">${short(cur.sym)} <span class="kind k-${esc(d.kind||'')}">${esc(d.kind||'')}</span></div>
    ${d.parent?`<div class="dim" style="font-size:11px">in <span class="chip" data-s="${esc(d.parent)}">${esc(d.parent)}</span></div>`:''}
    ${d.signature?`<div class="sig">${esc(d.signature)}</div>`:''}<div class="chips">${facts}</div>
    ${chips(d.bases,'bases')}${chips(d.derived,'derived')}${chips(d.callers_list||d.callers,'callers')}${chips(d.calls_list?d.calls_list.filter(c=>c.sym):(d.calls||[]).filter(s=>!/ambiguous|not in index/.test(s)),'calls')}`;
@@ -738,8 +759,8 @@ function setSync(v){if(v===syncOn)return syncUi();syncOn=v;askUi();localStorage.
  else setHash({sync:'0'})}
 $('#csync').addEventListener('change',e=>setSync(e.target.checked));
 function mrestore(m){const h='#'+(m||'/uml/default');if(frReady){const w=fr.contentWindow;if(w.location.hash!==h)w.location.replace(w.location.pathname+w.location.search+h)}else frPend=h}
-function showFile(path,line){cur=null;curFile=path;nodes=[];drawTree();$('#s-symbols').classList.add('idle');$('#sq').value='';setTimeout(buildTree);
- $('#scard').innerHTML=`<div class="t">${esc(base(path))} <span class="kind k-file">file</span></div><div class="dim mono" style="font-size:11px">${esc(path)}</div>`;show(path,line||1);vtitle(path)}
+function showFile(path,line){pendFile='';cur=null;curFile=path;nodes=[];drawTree();$('#s-symbols').classList.add('idle');$('#sq').value='';setTimeout(buildTree);
+ $('#scard').innerHTML=`<a class="fh mono" data-fp="${esc(path)}">${esc(path)}</a><div class="t">${esc(base(path))} <span class="kind k-file">file</span></div>`;show(path,line||1);vtitle(path)}
 /* a code target for a Model explorer selection: {q, path, line} -> the symbol / file in the Symbol explorer, quietly */
 /* a file picked in this pane (include link, dependency row): selected like a Files row, so the Model explorer shows its file diagram */
 function openPath(path,line){target('sym');setHash({s:'',p:'',sf:path});showFile(path,line||1);follow({p:path})}
