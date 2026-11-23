@@ -245,7 +245,7 @@ def _ensure_worker(r: repos.Repo) -> str:
         st.close()
     if not (p["cards_pending"] or p["full_pending"]):
         return "idle (all chunks embedded)"
-    proc = sysutil.spawn([sys.executable, "-m", "nncq", "work", "--repo", r.name, "--parent", str(os.getpid())],
+    proc = sysutil.spawn([sys.executable, "-m", "nncq", *config.home_args(), "work", "--repo", r.name, "--parent", str(os.getpid())],
                          config.LOG_DIR / f"worker-{r.name}.log", detach=False)
     _workers[r.name] = proc
     _log(f"[{r.name}] embedding worker started (pid {proc.pid})")
@@ -589,13 +589,16 @@ async def web_tool(name: str, args: dict) -> dict:
 _repo_cache: dict[str, tuple[float, dict]] = {}
 _LIVE_N = 600                                     # ~15 min of live samples at the page's poll rate
 _hist: dict[str, collections.deque] = {}          # rolling series for the dashboard charts: [(t, value), ...]
-# Charts survive restarts: samples are averaged per minute into a small CSV (t,key,value), reloaded at start.
-HIST_FILE = config.DATA_DIR / "history.csv"
 HIST_KEEP_S = 7 * 86400
 _hist_min: dict[str, list] = {}                   # key -> [minute, sum, count] being averaged
 _hist_long: dict[str, collections.deque] = {}     # key -> per-minute averages [(t, v)], up to HIST_KEEP_S
 _hist_lock = threading.Lock()
 _hist_loaded = False
+
+
+def _hist_file() -> Path:
+    """Charts survive restarts: samples are averaged per minute into a small CSV (t,key,value), reloaded at start."""
+    return config.DATA_DIR / "history.csv"
 
 
 def _long(key: str) -> collections.deque:
@@ -631,7 +634,7 @@ def _hist_load() -> None:
             return
         _hist_loaded = True
         try:
-            rows = HIST_FILE.read_text(encoding="utf-8").splitlines()
+            rows = _hist_file().read_text(encoding="utf-8").splitlines()
         except OSError:
             return
         cut, keep = time.time() - HIST_KEEP_S, []
@@ -650,9 +653,9 @@ def _hist_load() -> None:
                 if p[0] >= time.time() - 1800:
                     live.append(p)
         if len(keep) < len(rows):
-            tmp = HIST_FILE.with_suffix(".tmp")
+            tmp = _hist_file().with_suffix(".tmp")
             tmp.write_text("".join(x + "\n" for x in keep), encoding="utf-8", newline="\n")
-            os.replace(tmp, HIST_FILE)
+            os.replace(tmp, _hist_file())
 
 
 def _sample(key: str, t: float, v) -> None:
@@ -669,7 +672,7 @@ def _sample(key: str, t: float, v) -> None:
             avg = float(f"{m[1] / m[2]:.4g}")
             _long(key).append((m[0] * 60 + 30, avg))
             try:
-                with open(HIST_FILE, "a", encoding="utf-8", newline="\n") as f:
+                with open(_hist_file(), "a", encoding="utf-8", newline="\n") as f:
                     f.write(f"{m[0] * 60 + 30},{key},{avg:g}\n")
             except OSError:
                 pass

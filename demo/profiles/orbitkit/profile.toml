@@ -1,12 +1,12 @@
-# Shared sample profile for the bundled demo workspace (examples/orbitkit, a fictional ground-station toolkit).
-# Activate it with `nncq init --profile _demo` (copies it to profiles/orbitkit/, git-ignored like any profile),
-# then `nncq index --name orbitkit`. A relative root is relative to the nncq folder.
+# The bundled demo's profile (demo/orbitkit, a fictional ground-station toolkit). demo/ is an nncq home of its own:
+# `nncq --home demo ...` (or demo/demo.cmd) uses demo/profiles, demo/cache and demo/.env, never the main install's.
+# A relative root is relative to the home folder, so "orbitkit" is demo/orbitkit.
 
 name = "orbitkit"
 description = "orbitkit (demo): a fictional satellite ground-station toolkit, C++17 libraries + a Python tools package"
 
 [workspace]
-roots = ["examples/orbitkit"]
+roots = ["orbitkit"]
 markers = ["CMakeLists.txt", "CMakePresets.json"]
 git_remote = ""
 vcs = "git"

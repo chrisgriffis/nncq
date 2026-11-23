@@ -116,9 +116,6 @@ def profile_wizard(name: str, path: str, ask: bool, dirs: str | None = None) -> 
     A new profile gets the workspace part (roots, markers, git remote, dirs, ignores) filled in; DSLs, extra
     extensions and [[xref]] data rules are edited in profiles/<name>/profile.toml (the template documents them)."""
     from nncq import profiles, repos
-    if name and profiles.is_sample(name):
-        sample, name = name, profiles.activate(name).name
-        print(f"== profile '{name}' activated from the shared sample profiles/{sample}")
     p = profiles.get(name) if name else None
     root = Path(os.path.expandvars(path)).expanduser() if path else None
     if p is not None:

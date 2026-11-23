@@ -87,14 +87,14 @@ def detected() -> list[str]:
 def setup(target: str) -> list[str]:
     h, cmd = _home(), exe()
     if target == "copilot":
-        entry = {"type": "local", "command": cmd, "args": ["serve", "--stdio"], "tools": ["*"]}
+        entry = {"type": "local", "command": cmd, "args": [*config.home_args(), "serve", "--stdio"], "tools": ["*"]}
         return [_merge_json(h / ".copilot" / "mcp-config.json", "mcpServers", entry),
                 _skill(h / ".copilot" / "skills"), *_uml_skill(h / ".copilot" / "skills"),
                 "restart Copilot CLI or run /mcp"]
     if target == "claude":
         out = []
         claude = shutil.which("claude")
-        add = ["mcp", "add", "--scope", "user", "nncq", "--", cmd, "serve", "--stdio"]
+        add = ["mcp", "add", "--scope", "user", "nncq", "--", cmd, *config.home_args(), "serve", "--stdio"]
         if claude and os.environ.get("NNCQ_AGENT_HOME") is None:   # redirected home (tests): never call the real CLI
             got = subprocess.run([claude, "mcp", "get", "nncq"], capture_output=True, text=True)
             if got.returncode == 0:
@@ -107,7 +107,7 @@ def setup(target: str) -> list[str]:
             out.append("run: claude " + " ".join(add))
         return out + [_skill(h / ".claude" / "skills"), *_uml_skill(h / ".claude" / "skills")]
     if target == "vs":
-        entry = {"type": "stdio", "command": cmd, "args": ["serve", "--stdio"]}
+        entry = {"type": "stdio", "command": cmd, "args": [*config.home_args(), "serve", "--stdio"]}
         return [_merge_json(h / ".mcp.json", "servers", entry),
                 "skill: Visual Studio has no global skill folder; paste nncq-user.skill.md into your Copilot "
                 f"custom instructions, or attach it in chat ({SKILL_SRC})",

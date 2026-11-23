@@ -1,8 +1,8 @@
 """Reproducible README screenshots: drives headless Edge (or Chrome) over the DevTools protocol against a running
 nncq dashboard and writes cropped PNGs to docs/img/.
 
-    nncq init --profile _demo --lite --yes && nncq index --name orbitkit && nncq start
-    python tools/screens.py --url http://127.0.0.1:8765 [--only hero,ask] [--scale 1.5]
+    demo\demo.cmd --no-browser          (or demo/demo.sh: the bundled demo on port 8766)
+    python tools/screens.py --url http://127.0.0.1:8766 [--only hero,ask] [--scale 1.5]
 
 Each scene sets the page state (URL hash, clicks, typing), waits for it to render and captures an element or a
 clip. Pillow (optional) quantises the PNGs to keep them small. Stdlib only otherwise: the websocket client below
@@ -475,7 +475,7 @@ def warm_up(base: str, timeout: float = 60) -> None:
 def main() -> int:
     global OUT
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--url", default="http://127.0.0.1:8765")
+    ap.add_argument("--url", default="http://127.0.0.1:8766")
     ap.add_argument("--only", default="", help="comma-separated scene names (default: all)")
     ap.add_argument("--out", default=str(ROOT / "docs" / "img"))
     ap.add_argument("--browser", default="")

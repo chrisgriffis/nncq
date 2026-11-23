@@ -7,10 +7,11 @@ __pycache__/
 # per-codebase profiles are private (repo names, paths, custom parsers); only the template is shared
 profiles/*
 !profiles/_template/
-# the bundled demo's sample profile (examples/orbitkit), activated by `nncq init --profile _demo`
-!profiles/_demo/
+# exported profile archives (nncq profile export): the folder is kept, its contents are private
+!profiles/archive/
+profiles/archive/*
+!profiles/archive/.gitkeep
+# the bundled demo is a self-contained nncq home: its settings are tracked (no secrets in them)
+!demo/.env
 # in-repo git worktrees for parallel work
 .worktrees/
-# exported profile archives (nncq profile export): the folder is kept, its contents are private
-archive/*
-!archive/.gitkeep

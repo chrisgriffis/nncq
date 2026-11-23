@@ -1,9 +1,9 @@
 """Seed the bundled demo's model through the MCP server, the way an agent would: generate a set of diagrams and
 store one agent-authored composition and view (provenance: the MCP client name and the model id below), then
-write their ASCII / Markdown exports for the README.
+write their ASCII / Markdown exports (demo/docs holds the ones the README quotes).
 
-    nncq init --profile _demo --lite --yes && nncq index --name orbitkit && nncq start
-    python tools/demo_model.py --url http://127.0.0.1:8765/mcp [--out cache/demo-out]
+run.py calls this once per index, after the server is up. By hand, against a running demo server:
+    python demo/seed_model.py [--url http://127.0.0.1:8766/mcp] [--out demo/cache/seed-out]
 
 Re-running replaces the stored items (upsert by key / id). The script introduces itself as the MCP client
 "copilot-cli" (client info and User-Agent: stateless HTTP sessions record the latter) with the model id below, so the
@@ -19,7 +19,7 @@ from pathlib import Path
 from mcp import ClientSession, types
 from mcp.client.streamable_http import streamablehttp_client
 
-ROOT = Path(__file__).resolve().parents[1]
+HERE = Path(__file__).resolve().parent          # demo/
 CLIENT = types.Implementation(name="copilot-cli", version="demo")
 MODEL = "claude-opus-5.5"
 
@@ -140,7 +140,7 @@ async def main(url: str, out: Path) -> int:
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--url", default="http://127.0.0.1:8765/mcp")
-    ap.add_argument("--out", default=str(ROOT / "cache" / "demo-out"))
+    ap.add_argument("--url", default="http://127.0.0.1:8766/mcp")
+    ap.add_argument("--out", default=str(HERE / "cache" / "seed-out"))
     a = ap.parse_args()
     raise SystemExit(asyncio.run(main(a.url, Path(a.out))))
