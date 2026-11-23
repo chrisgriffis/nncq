@@ -5,10 +5,14 @@ MCP process keeps a bare listening socket on NNCQ_PORT and starts this web app o
 """
 from __future__ import annotations
 
+import json
+
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse
 from starlette.routing import Route
+
+from nncq import config
 
 
 def routes(snapshot, control, tool=None) -> list[Route]:
@@ -16,7 +20,12 @@ def routes(snapshot, control, tool=None) -> list[Route]:
     tool(name, args) -> awaitable dict for POST /api/tool/<name> (the search and symbol pages)."""
     async def page(request: Request):
         from nncq.codeview import codeview_js
-        return HTMLResponse(HTML.replace("/*__CODEVIEW__*/", codeview_js()))
+        html = HTML.replace("/*__CODEVIEW__*/", codeview_js())
+        start = config.settings().start
+        if start.startswith("#"):       # NNCQ_START: the view a bare URL opens on (the hosted demo)
+            js = f"<script>if(!location.hash)history.replaceState(null,'',location.pathname+location.search+{json.dumps(start)})</script>"
+            html = html.replace("<style>", js + "<style>", 1)
+        return HTMLResponse(html)
 
     async def status(request: Request):
         import anyio
@@ -220,6 +229,7 @@ ul.tree{list-style:none;margin:0;padding-left:16px}ul.tree.root{padding-left:0}
 @keyframes sp{to{transform:rotate(360deg)}}
 .cpath{padding:6px 12px;font-size:11px;color:var(--dim);border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:center}.cpath .ced{color:var(--acc);cursor:pointer}.cpath .ced:hover{text-decoration:underline}
 #sedit .nce{background:var(--panel2)}.pb[hidden]{display:none!important}.cpath:empty{display:none}
+.pub .pause,.pub .ced{display:none}
 </style></head><body>
 <div id="banner"></div>
 <div id="page">
@@ -363,7 +373,7 @@ function render(d){last=d;const rs=d.repos||[];multi=rs.length>1;if(!rs.some(r=>
  patch($('#console'),(d.events||[]).slice().reverse().map(e=>`<div><span class="dim">${new Date(e[0]*1e3).toLocaleTimeString()}</span> ${esc(e[1])}</div>`).join('')||'<div class="dim">quiet</div>')}
 $('#status').addEventListener('click',e=>{const c=e.target.closest('[data-repo]');if(c&&multi){sel=c.dataset.repo;localStorage.setItem('nncq.repo',sel);if(last)render(last)}});
 async function poll(){clearTimeout(timer);try{const r=await fetch('api/status',{headers:H,cache:'no-store'});if(!r.ok)throw new Error(r.status);
-  render(await r.json());fails=0;$('#banner').style.display='none'}
+  const d=await r.json();document.documentElement.classList.toggle('pub',!!d.public);render(d);fails=0;$('#banner').style.display='none'}
  catch(e){fails++;document.querySelectorAll('.cdot').forEach(x=>x.classList.add('off'));$('#banner').style.display='block';
   $('#banner').textContent='nncq is not answering. It runs inside its MCP client (e.g. Copilot) and exits with it; this page reconnects when it is back.'}
  const busy=last&&(last.repos||[]).some(r=>(r.job&&r.job.state==='running')||(r.embedding&&r.embedding.alive));
@@ -436,9 +446,9 @@ function vtitle(t){$('#vtitle').innerHTML=t?`<a data-file="${esc(t)}" title="ope
 /* the repo's VCS (profile [workspace] vcs, else detected; from /api/status): which VCS actions to offer */
 const repoVcs=()=>QS.get('debug')==='1'&&QS.get('vcs')||((last&&last.repos||[]).find(r=>r.name===sel)||(last&&last.repos||[])[0]||{}).vcs||'none';
 function fileMenu(path,x,y){let m=$('#pmenu');if(!m){m=document.createElement('div');m.id='pmenu';document.body.appendChild(m)}
- const vk=repoVcs();
- m.innerHTML='<a data-op="open">Open in editor</a><a data-op="reveal">View in folder</a><a data-op="copy">Copy path</a>'
-  +(vk==='git'?'<a data-op="vcs:stage">git stage</a>':vk==='p4'?'<a data-op="vcs:edit">p4 edit (check out)</a>':'');
+ const vk=repoVcs(),pub=!!(last&&last.public);
+ m.innerHTML=(pub?'':'<a data-op="open">Open in editor</a><a data-op="reveal">View in folder</a>')+'<a data-op="copy">Copy path</a>'
+  +(pub?'':vk==='git'?'<a data-op="vcs:stage">git stage</a>':vk==='p4'?'<a data-op="vcs:edit">p4 edit (check out)</a>':'');
  m.style.display='block';m.style.left=Math.min(x,innerWidth-180)+'px';m.style.top=(y+6)+'px';
  m.onclick=async e=>{const op=(e.target.closest('[data-op]')||{}).dataset?.op;if(!op)return;e.stopPropagation();
   if(op==='copy'){navigator.clipboard.writeText(path);m.style.display='none';return}

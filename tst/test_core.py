@@ -397,3 +397,14 @@ def test_results_citing_files_changed_on_disk_are_flagged(repo):
         assert div[1]["state"] == "missing on disk"
     finally:
         st.close()
+
+
+def test_public_mode_is_read_only(monkeypatch):
+    import asyncio
+    from nncq import server
+    monkeypatch.setenv("NNCQ_PUBLIC", "1")
+    mcp = server.build()
+    names = {t.name for t in asyncio.run(mcp.list_tools())}
+    assert names and "ask" in names and "uml_view" in names and not names & server.PUBLIC_DROP
+    assert asyncio.run(server.web_tool("uml_build", {}))["error"].startswith("not available")
+    assert server.control("pause")["error"] and not server.worker.paused()

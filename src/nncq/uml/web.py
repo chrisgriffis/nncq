@@ -265,6 +265,7 @@ pre .k,.mdv .k{color:#c792ea}pre .s,.mdv .s{color:#c3e88d}pre .c,.mdv .c{color:#
 @media (max-width:1100px){main{grid-template-columns:minmax(170px,24%) minmax(0,1fr) minmax(220px,30%)}}
 @media (max-width:760px){main{grid-template-columns:minmax(150px,30%) minmax(0,1fr);grid-template-rows:minmax(0,1fr) minmax(120px,36%)}
  main>.col:last-child{grid-column:1/-1;border-left:0;border-top:1px solid var(--line)}}
+.pub #bbuild,.pub #bdel,.pub #bvs,.pub [data-edit]{display:none}
 </style></head><body>
 <div id="notice"></div><div id="htip"></div>
 <header><b><span class="noemb">nncq · model explorer</span><span class="emb">Model explorer</span></b><span class="navb"><a id="nback" title="back (Alt+←)">‹</a><a id="nfwd" title="forward (Alt+→)">›</a></span><a href="./" class="dim noemb">← dashboard</a>
@@ -311,6 +312,7 @@ if(MERMAID){const s=document.createElement('script');s.src='vendor/mermaid.min.j
 
 /* ---------- repos, model state, list ---------- */
 async function init(){try{const r=await fetch('api/status',{headers:H});const d=await r.json();const rs=(d.repos||[]).map(x=>x.name);
+  document.documentElement.classList.toggle('pub',!!d.public);
   repo=localStorage.getItem('nncq.repo')||rs[0]||'';if(!rs.includes(repo))repo=rs[0]||'';
   $('#repo').innerHTML=rs.map(n=>`<option ${n===repo?'selected':''}>${esc(n)}</option>`).join('');
   const st=((d.repos||[]).find(x=>x.name===repo)||{}).status||{};const u=st.uml||{};

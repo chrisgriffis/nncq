@@ -1,0 +1,11 @@
+.git
+.venv
+.worktrees
+.env
+cache
+profiles
+demo/cache
+**/__pycache__
+docs
+tools
+tst

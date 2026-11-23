@@ -2,7 +2,7 @@
 
     demo\\demo.cmd            Windows: double-click (first run sets up ..\\.venv)
     demo/demo.sh             Linux / macOS
-    python demo/run.py [--fresh] [--no-seed] [--no-browser]
+    python demo/run.py [--fresh] [--no-seed] [--no-browser] [--prepare]
 
 Before indexing it runs the asset step of `nncq init` (tree-sitter parsers, the pinned sha256-verified Mermaid build
 for the dashboard's diagrams), which only touches the network when they are missing.
@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import signal
 import subprocess
 import sys
@@ -50,6 +51,7 @@ def main() -> int:
     ap.add_argument("--fresh", action="store_true", help="re-parse everything and seed the model again")
     ap.add_argument("--no-seed", action="store_true", help="skip the generated diagrams / agent-made items")
     ap.add_argument("--no-browser", action="store_true", help="don't open the dashboard")
+    ap.add_argument("--prepare", action="store_true", help="index and seed, then stop (container image build)")
     a = ap.parse_args()
 
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))      # killed: still stop the server (finally below)
@@ -70,6 +72,7 @@ def main() -> int:
     if subprocess.call(nncq("index", "--name", REPO, "--no-embed", *(["--fresh"] if a.fresh else []))):
         return 1
 
+    os.environ.setdefault("NNCQ_START", START)     # a bare URL opens the tour too (the hosted demo)
     print(f"== starting the demo server on {url}  (Ctrl+C stops it)")
     srv = subprocess.Popen(nncq("serve"))
     try:
@@ -92,6 +95,8 @@ def main() -> int:
             if asyncio.run(seed_model.main(url + "mcp", config.CACHE / "seed-out")) == 0:
                 marker.write_text(time.strftime("%Y-%m-%d %H:%M:%S"), encoding="utf-8")
 
+        if a.prepare:
+            return 0
         print(f"== demo ready: {url}{START}")
         if not a.no_browser:
             webbrowser.open(url + START)
