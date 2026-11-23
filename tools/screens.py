@@ -265,6 +265,8 @@ def scene_hero(b: Browser, base: str):
     b.resize(1920, 1080, 1)
     dash(b, base, f"#q={q(QUESTION)}&s={q('orbitkit::telemetry::FramedDecoder::decode')}",
          {"w": {"dash": 33, "sym": 31, "model": 36}}, wait=f"{FRAME}.querySelector('#out svg')", settle=3)
+    b.until("document.querySelector('#scard .t') && /decode/.test(document.querySelector('#scard .t').textContent) "
+            "&& !/pick one/.test(document.querySelector('#scard').textContent)", 15)
     b.js("const d=document.querySelector('#dashb');d.scrollTop=document.querySelector('#s-search').offsetTop-d.offsetTop-6", 0.6)
     b.shot("hero")
 
@@ -421,11 +423,53 @@ def scene_status(b: Browser, base: str):
     b.shot("status", union(b, "document.querySelector('#status')", pad=4))
 
 
+def scene_sync(b: Browser, base: str):
+    """Sync views, animated: each symbol picked in the Symbol explorer brings its default diagram to the Model
+    explorer (function -> sequence, type -> class view). Needs Pillow (GIF)."""
+    from PIL import Image
+    b.resize(1440, 760, 1)
+    steps = [f"#s={q('orbitkit::sched::Scheduler::tick')}", f"#s={q('orbitkit::telemetry::Pipeline')}",
+             f"#s={q('orbitkit::telemetry::FramedDecoder')}", f"#s={q('orbitkit::core::Crc::check')}"]
+    dash(b, base, steps[0], {"w": {"dash": 30, "sym": 40, "model": 60}, "c": {"dash": True}},
+         wait=f"{FRAME}.querySelector('#out svg')", settle=2)
+    frames = []
+    for i, h in enumerate(steps):
+        if i:
+            title = b.js(f"{FRAME}.querySelector('#vt').textContent")
+            b.js(f"location.hash={json.dumps(h)}", 0.5)
+            b.until(f"{FRAME}.querySelector('#vt').textContent!=={json.dumps(title)} && {FRAME}.querySelector('#out svg')", 15)
+            time.sleep(1.8)
+        frames.append(Image.open(io.BytesIO(base64.b64decode(
+            b.call("Page.captureScreenshot", format="png")["data"]))).convert("RGB"))
+    pal = frames[0].quantize(colors=128, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE)
+    out = [f.quantize(palette=pal, dither=Image.Dither.NONE) for f in frames]
+    path = OUT / "sync.gif"
+    out[0].save(path, save_all=True, append_images=out[1:], duration=2200, loop=0, optimize=True)
+    print(f"   {path.name}  {path.stat().st_size // 1024} KB")
+
+
 SCENES = {"hero": scene_hero, "ask": scene_ask, "code": scene_code, "editor": scene_editor, "outline": scene_outline,
           "callers": scene_callers, "depends": scene_depends, "class": scene_class, "hierarchy": scene_hierarchy, "sequence": scene_sequence,
           "component": scene_component, "deployment": scene_deployment, "filecomp": scene_filecomp,
           "dependsgraph": scene_dependsgraph, "agent": scene_agent, "minimap": scene_minimap,
-          "preview": scene_preview, "status": scene_status}
+          "preview": scene_preview, "status": scene_status, "sync": scene_sync}
+
+
+def warm_up(base: str, timeout: float = 60) -> None:
+    """Wait until the server has finished its start-up catch-up, so the first scene does not race it."""
+    end = time.time() + timeout
+    while time.time() < end:
+        try:
+            st = json.load(urllib.request.urlopen(base + "/api/status", timeout=10))
+            jobs = [r.get("job") or {} for r in st.get("repos", [])]
+            if st.get("repos") and all(j.get("state") != "running" for j in jobs):
+                req = urllib.request.Request(base + "/api/tool/symbol_context", data=b'{"name": "main"}',
+                                             headers={"Content-Type": "application/json"})
+                urllib.request.urlopen(req, timeout=30).read()
+                return
+        except OSError:
+            pass
+        time.sleep(1)
 
 
 def main() -> int:
@@ -443,6 +487,7 @@ def main() -> int:
     if not exe:
         raise SystemExit("no Edge / Chrome found: pass --browser")
     names = [n for n in a.only.split(",") if n] or list(SCENES)
+    warm_up(a.url.rstrip("/"))
     b = Browser(exe, a.port, ROOT / "cache" / "tmp" / "screens-browser", 1600, 1000, 1)
     try:
         for n in names:

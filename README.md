@@ -237,6 +237,9 @@ One page, three panes: the **dashboard** (index status, the Ask box, answers, co
 - **Sync views** (on by default): a symbol or file picked anywhere shows its default diagram in the Model explorer, an element picked in a diagram reveals its code in the Symbol explorer, and Back / Forward restore both together. Off, each explorer keeps its own history.
 - The URL holds the state (`#q=…&s=…&m=…`), so a link reopens the same view; results are cached in the page, so going back is instant.
 
+<a href="docs/img/sync.gif"><img src="docs/img/sync.gif" alt="Sync views: picking Scheduler::tick, Pipeline, FramedDecoder and Crc::check in the Symbol explorer brings up a sequence, a class view, a class view and a sequence in the Model explorer" width="100%"></a>
+<sub><b>Sync views</b> (dashboard pane collapsed): each symbol picked in the Symbol explorer brings its default diagram to the Model explorer: a function its sequence, a type its class view with the picked element's details.</sub>
+
 <table>
 <tr><td width="50%"><a href="docs/img/status.png"><img src="docs/img/status.png" alt="Index status card in lite mode"></a><br><sub><b>Status.</b> The ring shows how much is searchable by meaning (lite mode: text only, by design), the bars the three index tiers, the chart the embedding rate; GPU and model state underneath.</sub></td>
 <td width="50%"><a href="docs/img/ask.png"><img src="docs/img/ask.png" alt="An answer with a path filter: Read as roll-up and Files list, outlined"></a><br><sub><b>Ask, with a path filter.</b> How the question was read (stems, share of code, ignored words, the code's own vocabulary, which channel found what, areas, links between hits), then the files. Panels the filter affects get a white outline and an <i>unfilter</i> button.</sub></td></tr>
@@ -573,7 +576,7 @@ The README visuals are reproducible from the demo, against a running server:
 
 ```powershell
 .venv\Scripts\python tools\demo_model.py --url http://127.0.0.1:8765/mcp   # diagrams + agent-made items, exports in cache\demo-out
-.venv\Scripts\python tools\screens.py --url http://127.0.0.1:8765          # headless Edge / Chrome over DevTools -> docs\img\*.png
+.venv\Scripts\python tools\screens.py --url http://127.0.0.1:8765          # headless Edge / Chrome over DevTools -> docs\img\*.png, sync.gif
 .venv\Scripts\python tools\banner.py                                       # docs\img\banner.svg from docs\img\hero.png
 ```
 
