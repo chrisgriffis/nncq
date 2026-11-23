@@ -219,6 +219,7 @@ def dash(b: Browser, base: str, hash_: str = "", panes: dict | None = None, wait
     b.goto(base + "/", 0.5)
     b.js("localStorage.clear();sessionStorage.clear();" + (
         f"localStorage.setItem('nncq.panes',{json.dumps(json.dumps(panes))});" if panes else ""))
+    b.goto("about:blank", 0.2)
     b.goto(base + "/" + hash_, settle)
     if wait:
         b.until(wait, 20)
