@@ -42,7 +42,7 @@ int main(int argc, char** argv)
         cfg.radio = "loopback";
         cfg.replayFile = replay;
     }
-    app::Station station(cfg);
+    app::Station station{cfg};
     if (!station.prepare(tle)) {
         core::logWarn("groundd", "no satellites in " + tle);
         return 1;
