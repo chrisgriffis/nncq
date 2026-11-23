@@ -324,9 +324,9 @@ def scene_depends(b: Browser, base: str):
     time.sleep(1)
     b.shot("symbols-depends", union(b, "document.querySelector('#sform')", "document.querySelector('#tree')"))
     b.js("document.querySelector('#tree a[data-dv=outline]').click()", 1.5)
-    for _ in range(3):
-        b.js("""(()=>{const c=[...document.querySelectorAll('#tree .tn')].filter(x=>/Scheduler/.test(x.textContent)&&
-             x.querySelector('.car')&&x.querySelector('.car').textContent==='\u25b8');if(c.length)c[0].querySelector('.car').click()})()""", 1.2)
+    b.js("""(()=>{const c=[...document.querySelectorAll('#tree .tn')].find(x=>{const n=x.querySelector('.nm');
+         return n&&n.textContent.trim()==='sched::Scheduler'});if(c)c.querySelector('.car').click()})()""", 1.5)
+    b.js("const t=document.querySelector('#tree');t.style.maxHeight='none';t.style.height='auto'", 0.5)
     b.shot("symbols-depends-outline", union(b, "document.querySelector('#sform')", "document.querySelector('#tree')"))
 
 

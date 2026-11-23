@@ -10,9 +10,10 @@ from nncq.uml import catalog, model, protocol
 READ_TOOLS = {"uml_protocol", "uml_find", "uml_view", "uml_views"}
 WEB_TOOLS = READ_TOOLS | {"uml_build", "uml_delete"}
 
-INSTRUCTIONS = """UML: uml_view(kind=class|object|component|package|deployment|sequence, subject) draws a diagram
-from the index (ascii for chat, markdown for files); uml_views lists stored diagrams (also by symbol); compose your
-own diagrams and compositions with uml_upsert (schema + rules: uml_protocol); uml_find gives element ids."""
+INSTRUCTIONS = """UML: uml_view(kind=class|object|component|package|deployment|sequence|depends, subject) draws a
+diagram from the index (no kind: the default one for a subject / path; ascii for plain views in chat, markdown
+otherwise); uml_views lists stored diagrams (also by symbol); compose your own diagrams and compositions with
+uml_upsert(model=<your model id>) (schema + rules: uml_protocol); uml_find gives element ids."""
 
 
 def _ready(st) -> dict | None:
