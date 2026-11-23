@@ -154,7 +154,7 @@ body.pf-on .unf{display:inline-block}body.pf-on #qpath{outline:2px solid var(--h
 .leg{display:flex;gap:12px;font-size:11px;color:var(--dim);flex-wrap:wrap}.leg b{color:var(--fg);font-weight:600}.leg i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:4px}
 .abar{display:grid;grid-template-columns:minmax(0,max-content) 1fr auto;gap:3px 8px;align-items:center;font-size:11px}
 .abar .an{cursor:pointer;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left}.abar .an:hover{color:var(--acc)}
-.abar .ab{height:7px;border-radius:4px;background:var(--acc);min-width:4px}
+.abar .ab{height:7px;min-width:4px;display:flex;gap:2px}.abar .ab i{flex:1;background:var(--acc);border-radius:2px}
 .lnk{font-size:11px;color:var(--dim);line-height:1.6}.lnk .r{color:var(--acc);cursor:pointer}.lnk .r:hover{text-decoration:underline}
 .files{max-height:46vh;overflow:auto;border-top:1px solid var(--line)}
 .frow{display:flex;gap:8px;align-items:center;padding:5px 12px;cursor:pointer;border-bottom:1px solid #1c2029;min-width:0;font-size:12px}
@@ -492,13 +492,16 @@ function drawAnswer(){const d=ans,ip=d.interpreted||{},pf=d.portfolio||{},hits=d
  const fb=`<div class="fb"><i style="width:${b/tot*100}%;background:${C1}"></i><i style="width:${mo/tot*100}%;background:${C2}"></i><i style="width:${ko/tot*100}%;background:${C3}"></i></div>
   <div class="leg"><span><i style="background:${C1}"></i>both <b>${b}</b></span><span><i style="background:${C2}"></i>meaning <b>${mo}</b></span><span><i style="background:${C3}"></i>keyword <b>${ko}</b></span></div>`;
  const areas=(pf.areas||[]).map(a=>/^(.+): (\d+) \((.*)\)$/.exec(a)).filter(Boolean),amx=Math.max(1,...areas.map(a=>+a[2]));
- const ab=areas.map(a=>`<span class="an" data-area="${esc(a[1])}" title="narrow to ${esc(a[1])}">&lrm;${esc(a[1])}</span><span class="ab" style="width:${+a[2]/amx*100}%"></span><span class="dim">${a[2]}</span>`).join('');
+ const ab=areas.map(a=>`<span class="an" data-area="${esc(a[1])}" title="narrow to ${esc(a[1])}">&lrm;${esc(a[1])}</span><span class="ab" style="width:${+a[2]/amx*100}%" title="${a[2]} of the shown hits">${'<i></i>'.repeat(Math.min(+a[2],60))}</span><span class="dim">${a[2]}</span>`).join('');
  const refs=s=>esc(s).replace(/\bc(\d+)\b/g,'<span class="r" data-ref="c$1">c$1</span>');
  const links=(d.links||[]).map(l=>`<div>${refs(l)}</div>`).join('');
  const led=[pf.keyword_led_to&&'keyword → '+esc(pf.keyword_led_to),pf.meaning_led_to&&'meaning → '+esc(pf.meaning_led_to)].filter(Boolean).join('<br>');
- const notes=[pf.strength,ip.meaning,d.note].filter(Boolean).map(esc).join('<br>');
+ const notes=[ip.caution&&'<b style="color:var(--warn)">'+esc(ip.caution)+'</b>',...[pf.strength,ip.meaning,d.note].filter(Boolean).map(esc)].filter(Boolean).join('<br>');
+ /* bar = relative strength vs the top hit (rel, from the raw channel scores); rank position only if rel is missing */
+ const barw=hs=>{const r=Math.max(...hs.map(h=>h.rel??-1)),best=Math.min(...hs.map(h=>h.rank));return r>=0?Math.max(4,r*100):Math.max(8,100-(best-1)*100/Math.max(1,hits.length))};
+ const why=hs=>hs.map(h=>'#'+h.rank+(h.rel!=null?' · '+Math.round(h.rel*100)+'% of top':'')+(h.why?' · '+h.why:'')+(hs.length>1?' · '+lastName(h.sym):'')).join('\n');
  const files=d.files.map((f,i)=>{const best=Math.min(...f.hs.map(h=>h.rank)),bn=base(f.p),dir=f.p.slice(0,Math.max(0,f.p.length-bn.length-1));
-  return `<div class="frow ${i===fsel?'on':''}" data-f="${i}"><span class="rk" title="best rank #${best}"><i style="width:${Math.max(8,100-(best-1)*100/Math.max(1,hits.length))}%"></i></span>
+  return `<div class="frow ${i===fsel?'on':''}" data-f="${i}"><span class="rk" title="${esc(why(f.hs))}"><i style="width:${barw(f.hs)}%"></i></span>
    <span class="fn">${esc(bn)}</span><span class="fs">${f.hs.map(h=>`<span title="${esc(h.sym)}">${esc(lastName(h.sym))}</span>`).join('')}</span>
    <span class="fd" title="${esc(f.p)}">&lrm;${esc(dir)}</span></div>`}).join('');
  const syms=[];{const seen=new Set();[...hits].sort((x,y)=>x.rank-y.rank).forEach(h=>{if(!h.sym||/^\(/.test(h.sym)||seen.has(h.sym))return;seen.add(h.sym);syms.push(h)})}
@@ -516,7 +519,7 @@ function drawAnswer(){const d=ans,ip=d.interpreted||{},pf=d.portfolio||{},hits=d
    <div class="files" data-rz="files" data-rzmin="80">${files||'<div class="empty">nothing found</div>'}</div></details>
   ${syms.length?`<details class="blk" open><summary><span class="tw" title="roll up / unroll">▾</span><span class="h">Symbols</span><span class="dim">${syms.length} best matches · pick one to open it in the Symbol explorer</span></summary>
    <div class="files" data-rz="syms" data-rzmin="60">${syms.map((h,i)=>{const bn=base(fullPath(h.at));
-    return `<div class="frow" data-hs="${i}" title="${esc(h.sym)} · ${esc(h.at)}"><span class="rk" title="rank #${h.rank}"><i style="width:${Math.max(8,100-(h.rank-1)*100/Math.max(1,hits.length))}%"></i></span>
+    return `<div class="frow" data-hs="${i}" title="${esc(h.sym)} · ${esc(h.at)}"><span class="rk" title="${esc(why([h]))}"><i style="width:${barw([h])}%"></i></span>
      <span class="fn sq">${esc(h.sym)}</span><span class="kind k-${esc(h.kind)}">${esc(h.kind)}</span><span class="fd">&lrm;${esc(bn)}</span></div>`}).join('')}</div></details>`:''}`}
 $('#answer').addEventListener('click',e=>{
  const v=e.target.closest('[data-ask]');if(v){$('#q').value=v.dataset.ask;doSearch();return}

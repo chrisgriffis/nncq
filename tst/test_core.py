@@ -252,6 +252,13 @@ def test_lite_profile_never_touches_models_and_reports_no_degradation(repo, monk
     assert "torch" not in sys.modules and "transformers" not in sys.modules
 
 
+def test_hit_relevance_comes_from_raw_scores_not_rank():
+    from nncq.ask import _relevance
+    shown = [{"cid": i, "score": 0.0} for i in (1, 2, 3)]
+    _relevance(shown, {1: -8.0, 2: -8.0, 3: -2.0}, {}, False)      # BM25: lower is better
+    assert [it["rel"] for it in shown] == [1.0, 1.0, 0.25]       # ties stay ties, a weak hit stays weak
+
+
 def test_agents_setup_merges_configs_and_installs_skill(tmp_path, monkeypatch):
     import json
     from nncq import agents

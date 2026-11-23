@@ -16,6 +16,7 @@ Refs are chunk ids ("c123"): short and stateless, valid until that file is re-in
 """
 from __future__ import annotations
 
+import math
 import re
 import threading
 import time
@@ -265,6 +266,28 @@ def _led_to(store: Store, lst: list, n: int = 100) -> str:
     return ", ".join(f"{a} {c * 100 // tot}%" for a, c in areas.most_common(3))
 
 
+def _relevance(shown: list[dict], lex_s: dict, den_s: dict, reranked: bool) -> None:
+    """it['rel']: 0..1 relative to the top hit, from the channels' raw scores (the fused score is rank-based, so it
+    says nothing about how close two hits are): reranker logit, else BM25 (lower is better) and vector similarity."""
+    if reranked:
+        raw = {id(it): 1 / (1 + math.exp(-it["score"])) for it in shown}
+    else:
+        best_l = min((lex_s[it["cid"]] for it in shown if it["cid"] in lex_s), default=0.0)
+        best_d = max((den_s[it["cid"]] for it in shown if it["cid"] in den_s), default=0.0)
+        chans = [ch for ch, on in (("l", best_l < 0), ("d", best_d > 0)) if on]
+        raw = {}
+        for it in shown:
+            v = 0.0
+            if "l" in chans and it["cid"] in lex_s:
+                v += lex_s[it["cid"]] / best_l
+            if "d" in chans and it["cid"] in den_s:
+                v += den_s[it["cid"]] / best_d
+            raw[id(it)] = v / max(1, len(chans))
+    top = max(raw.values(), default=0.0)
+    for it in shown:
+        it["rel"] = round(raw[id(it)] / top, 2) if top > 0 else None
+
+
 def ask(store: Store, root: Path, question: str, k: int = 8, path: str = "", lang: str = "",
         vec_cover: float | None = None) -> dict:
     t0 = time.time()
@@ -275,6 +298,7 @@ def ask(store: Store, root: Path, question: str, k: int = 8, path: str = "", lan
         return {"question": question, "hits": [], "note": "no matches", "interpreted": {"terms": [t["word"] for t in terms]}}
     lex_r = {cid: i + 1 for i, (cid, _) in enumerate(c["lex"])}
     den_r = {cid: i + 1 for i, (cid, _) in enumerate(c["dense"])}
+    lex_s, den_s = dict(c["lex"]), dict(c["dense"])
     scores = c["scores"]
 
     items, by_key, by_text = [], {}, {}
@@ -292,6 +316,7 @@ def ask(store: Store, root: Path, question: str, k: int = 8, path: str = "", lan
         by_key[key] = by_text[h] = it
         items.append(it)
     shown = items[:k]
+    _relevance(shown, lex_s, den_s, c.get("reranked", False))
 
     files: dict[str, list[str]] = {}
     low_hay = {id(it): (it["text"] + " " + it["path"] + " " + it["sym"]).lower() for it in shown}
@@ -311,6 +336,7 @@ def ask(store: Store, root: Path, question: str, k: int = 8, path: str = "", lan
     if vec_cover is None:
         vec_cover = min(1.0, search.vectors(store).n / ndocs)
     tinfo = []
+    caution = []
     for t in terms:
         s = t["word"]
         if t["prefix"]:
@@ -320,8 +346,14 @@ def ask(store: Store, root: Path, question: str, k: int = 8, path: str = "", lan
         if have_vocab:
             df = _df(store, t["prefix"], True) if t["prefix"] else _df(store, t["exact"])
             s += f" · {'~' if t['prefix'] else ''}{_pct(df / ndocs)} of chunks" if df else " · not in the code vocabulary"
+            if df / ndocs > 0.1:
+                caution.append(f"'{t['word']}' is in {_pct(df / ndocs)} of chunks: too common to rank on; "
+                               f"add a more specific word or a path filter")
         s += f" · in {sum(t['word'] in it['matched'] for it in shown)}/{len(shown)} hits"
         tinfo.append(s)
+    rels = [it["rel"] for it in shown if it.get("rel") is not None]
+    if len(rels) >= 3 and min(rels) >= 0.8:
+        caution.append("the hits score within 20% of each other: their order is close to arbitrary")
     qwords = {n for t in terms for n in _needles(t)}
     vc = Counter()
     for it in items[:20]:
@@ -347,6 +379,8 @@ def ask(store: Store, root: Path, question: str, k: int = 8, path: str = "", lan
         interp["meaning"] = "not used: " + "; ".join(c["notes"] or ["no vectors"])
     if vocab:
         interp["code_vocabulary"] = ", ".join(vocab)
+    if caution:
+        interp["caution"] = "; ".join(caution)
 
     # ---- portfolio
     areas: dict[str, list[dict]] = {}
@@ -417,6 +451,8 @@ def ask(store: Store, root: Path, question: str, k: int = 8, path: str = "", lan
         h = {"ref": f"c{it['cid']}", "rank": rank,
              "sym": it["sym"] if it["kind"] not in FILE_LEVEL else f"(file level of {Path(it['path']).name})",
              "kind": it["kind"], "at": f"{area} / {rel}:{it['a']}-{it['b']}"}
+        if it.get("rel") is not None:
+            h["rel"] = it["rel"]
         ext = _extent(store, it["fid"], it["sym"], it["a"], it["b"]) if it["kind"] not in FILE_LEVEL else None
         if ext and ext[0] and ext[0] != it["sym"]:
             h["sig"] = re.sub(r"\s+", " ", ext[0])[:180]
