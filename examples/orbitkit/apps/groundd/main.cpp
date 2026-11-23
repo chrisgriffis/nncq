@@ -47,5 +47,5 @@ int main(int argc, char** argv)
         core::logWarn("groundd", "no satellites in " + tle);
         return 1;
     }
-    return station.run(ticks);
+    return station.serve(ticks);
 }

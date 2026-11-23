@@ -78,7 +78,7 @@ bool Station::prepare(const std::string& tleFile)
     return !satellites_.empty();
 }
 
-int Station::run(int maxTicks)
+int Station::serve(int maxTicks)
 {
     running_ = true;
     for (int tick = 0; running_ && (maxTicks == 0 || tick < maxTicks); ++tick) {

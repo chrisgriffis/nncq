@@ -2,7 +2,7 @@
 
 ## One tick
 
-`groundd` ticks once per second. `Station::run` calls `Scheduler::tick`, which
+`groundd` ticks once per second. `Station::serve` calls `Scheduler::tick`, which
 
 1. picks the pass to work (`pickNext`: highest priority, then highest elevation),
 2. asks the `Tracker` to point the `Antenna` at the satellite's current look angle,

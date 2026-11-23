@@ -22,5 +22,5 @@ text_langs = ["markdown", "cmake"]
 [mcp]
 notes = """orbitkit: libs/core (clock, CRC, frames), libs/link (radios, antenna), libs/telemetry (decoders, sinks,
 Pipeline), libs/sched (ephemeris, passes, Tracker, Scheduler), apps/groundd (Station, main), python/orbitkit_tools
-(offline twins of the decoders, pass planner, reports). One tick: main -> Station::run -> Scheduler::tick ->
+(offline twins of the decoders, pass planner, reports). One tick: main -> Station::serve -> Scheduler::tick ->
 Pipeline::run -> IDecoder::decode -> Crc::check."""

@@ -32,7 +32,7 @@ public:
     /// Loads the satellites' TLEs and plans the passes of the next day.
     bool prepare(const std::string& tleFile);
     /// Ticks the scheduler once per second until stop() or maxTicks (0 = forever). Returns an exit code.
-    int run(int maxTicks);
+    int serve(int maxTicks);
     void stop() { running_ = false; }
 
     static StationConfig loadConfig(const std::string& path);
