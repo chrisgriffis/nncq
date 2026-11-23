@@ -25,11 +25,11 @@ Authoritative schema, element-id scheme, rules, examples: call `uml_protocol`. T
 ## Author
 `uml_upsert(spec, model=<your model id>)`: pass your model id (provenance: MCP client + model, shown on the item). Same `key` (view) / `id` (composition) = replace.
 ```json
-{"id":"device-access","name":"Device access","members":[
-  {"id":"lib","ref":"comp:DeviceLib"},{"id":"api","ref":"sym:ns::DeviceApi"},
-  {"id":"seq","ref":"view:connect-flow"},
-  {"id":"hw","bespoke":{"type":"block","label":"Hardware"}}],
- "connectors":[{"from":"lib","to":"hw","kind":"flows-to","label":"usb"}],
+{"id":"ground-segment","name":"Ground segment","members":[
+  {"id":"lib","ref":"comp:orbit_telemetry"},{"id":"api","ref":"sym:telemetry::Pipeline"},
+  {"id":"seq","ref":"view:downlink-flow"},
+  {"id":"sat","bespoke":{"type":"block","label":"Satellite"}}],
+ "connectors":[{"from":"sat","to":"lib","kind":"flows-to","label":"UHF downlink"}],
  "groups":[{"id":"core","label":"Core","members":["lib","api"]}]}
 ```
 Composition `groups` draw sub-frames (optional `parent` = enclosing group id).
