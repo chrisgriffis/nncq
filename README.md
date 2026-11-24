@@ -588,6 +588,7 @@ The README visuals are reproducible from the demo, against a running server (`de
 .venv\Scripts\python demo\seed_model.py                                    # diagrams + agent-made items, exports in demo\cache\seed-out
 .venv\Scripts\python tools\screens.py --url http://127.0.0.1:8766          # headless Edge / Chrome over DevTools -> docs\img\*.png, sync.gif
 .venv\Scripts\python tools\banner.py                                       # docs\img\banner.svg from docs\img\hero.png
+.venv\Scripts\python tools\readme_pdf.py                                   # README.pdf: rendered, images and Mermaid drawn, page numbers
 ```
 
 `screens.py` needs only the standard library (Pillow, when installed, shrinks the PNGs; `banner.py` needs it). Headless browsers do not paint native tooltips, so `screens.py` draws the code view's and the badge's tooltip text itself.
