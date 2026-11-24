@@ -5,7 +5,7 @@ Otherwise it adds `index_state`: a short list of what is degraded, where (folder
 still works, plus `affects_these_results` when returned paths fall in a degraded area.
 
 States (cheap to compute, cached for a few seconds):
-  sync running      a delta (p4 sync, file changes, catch-up) is being applied: results there may mix revisions
+  sync running      a delta (a pull or sync, file changes, catch-up) is being applied: results there may mix revisions
   sync interrupted  the process applying it died: those files stay stale until the next update / server start
   not embedded      chunks with no vector yet: found by keyword and graph, not by meaning
   card-only         chunks with a summary vector but not a full one: semantic ranking is coarser there

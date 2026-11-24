@@ -105,9 +105,9 @@ def test_cpp_members_visibility_relations_and_stereotypes():
 
 
 def test_qualified_call_receiver_is_the_whole_qualifier():
-    src = "namespace app { void tick() { core::Crc::check(); ::log(); } }\n"
-    r = chunker.process("tick.cpp", src.encode(), "cpp", uml=True)
-    roles = {e.dst: e.role for e in r.edges if e.kind == "call" and e.src == "app::tick"}
+    src = "namespace app { void verify() { core::Crc::check(); ::log(); } }\n"
+    r = chunker.process("verify.cpp", src.encode(), "cpp", uml=True)
+    roles = {e.dst: e.role for e in r.edges if e.kind == "call" and e.src == "app::verify"}
     assert roles["check"] == "core::Crc::"
 
 
@@ -361,8 +361,8 @@ def test_agent_views_compositions_list_and_markdown(repo):
         assert out["unverified_edges"] == ["c -calls-> d"]
         comp = {"id": "access", "name": "Access", "members": [
             {"id": "lib", "ref": "comp:DevLib"}, {"id": "view", "ref": "view:devflow"},
-            {"id": "farm", "bespoke": {"type": "block", "label": "Farm"}}],
-            "connectors": [{"from": "lib", "to": "farm", "kind": "flows-to"}]}
+            {"id": "gw", "bespoke": {"type": "block", "label": "Gateway"}}],
+            "connectors": [{"from": "lib", "to": "gw", "kind": "flows-to"}]}
         assert catalog.upsert(st, comp)["result"] == "created"
         outer = {"id": "outer", "name": "Outer", "members": [{"id": "a", "ref": "composition:access"}]}
         assert catalog.upsert(st, outer)["result"] == "created"
@@ -371,7 +371,7 @@ def test_agent_views_compositions_list_and_markdown(repo):
         assert catalog.upsert(st, {"kind": "class", "title": "x", "nodes": [{"id": "1bad"}]})["errors"]
         assert "error" in catalog.get(st, "composition:outer", "ascii")
         mm = catalog.get(st, "composition:outer", "mermaid")["mermaid"]
-        assert mm.count('subgraph n_a__frame_access["«composition» Access"]') == 1 and "n_a__farm" in mm
+        assert mm.count('subgraph n_a__frame_access["«composition» Access"]') == 1 and "n_a__gw" in mm
         md = catalog.get(st, "devflow", "markdown")["markdown"]
         assert md.startswith("<!-- nncq uml export: generator=") and "view=devflow" in md
         assert "```mermaid\nclassDiagram" in md and 'click n_d href "http://' in md

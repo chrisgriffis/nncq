@@ -71,7 +71,7 @@ def split_ident(word: str) -> list[str]:
 
 
 def fts_body(text: str) -> str:
-    """Code + sub-tokens of compound identifiers, so 'spawn' finds SpawnEntityData and spawn_entity."""
+    """Code + sub-tokens of compound identifiers, so 'retry' finds RetryPolicyConfig and retry_count."""
     extra = {p for w in set(_IDENT.findall(text)) for p in split_ident(w)}
     return text + ("\n" + " ".join(sorted(extra)) if extra else "")
 
@@ -184,7 +184,7 @@ class Store:
                          e.col if e.col >= 0 else None) for e in r.edges))
 
     def touch_file(self, path: str, size: int, mtime_ns: int) -> None:
-        """Content unchanged (same sha1) but stat changed, e.g. p4 sync of an identical revision."""
+        """Content unchanged (same sha1) but stat changed, e.g. a checkout or sync that rewrote identical content."""
         self.db.execute("UPDATE files SET size=?, mtime_ns=? WHERE path=?", (size, mtime_ns, path))
 
     def delete_file(self, path: str) -> None:

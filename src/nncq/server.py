@@ -1,7 +1,7 @@
 """MCP server: search, graph, data and index tools over stdio (an agent launches it) or streamable HTTP.
 
 Lifecycle: the process that holds NNCQ_PORT "owns" the workspace indexes and runs, per registered repo:
-  - a start-up catch-up delta (picks up p4 syncs made while nothing was running)
+  - a start-up catch-up delta (picks up pulls / syncs made while nothing was running)
   - a file watcher (debounced path deltas) when NNCQ_WATCH is on
   - a supervisor that starts the GPU embedding worker when chunks lack vectors (not while paused)
   - the status dashboard on http://127.0.0.1:NNCQ_PORT/
@@ -375,7 +375,7 @@ def build(stdio: bool = False) -> FastMCP:
     @mcp.tool()
     async def grep_code(pattern: str, glob: str = "", fixed: bool = False, ignore_case: bool = False,
                         max_results: int = 100, repo: str = "") -> dict:
-        """Exact text / regex search with ripgrep over the repo (honours .p4ignore). glob: e.g. '*.cpp,*.h'."""
+        """Exact text / regex search with ripgrep over the repo (honours .gitignore / .p4ignore). glob: e.g. '*.cpp,*.h'."""
         return await _run(lambda: search.grep_code(_repo(repo), pattern, glob, fixed, ignore_case, max_results))
 
     @mcp.tool()
@@ -522,7 +522,7 @@ def build(stdio: bool = False) -> FastMCP:
     @mcp.tool()
     async def update_index(repo: str = "", mode: str = "delta") -> dict:
         """Bring the index up to date or control embedding. Returns immediately; poll index_status.
-        mode: delta (re-index files changed on disk, e.g. after a p4 sync) | embed (start the GPU worker now) |
+        mode: delta (re-index files changed on disk, e.g. after a pull or sync) | embed (start the GPU worker now) |
         pause (stop embedding, free VRAM) | resume. Never writes to the workspace."""
         def f():
             r = _repo(repo)

@@ -3,7 +3,7 @@ instantiate which types, and which data files reference which.
 
 A rule = a glob for the data files + a regex whose (?P<type>...) group names a type a file instantiates and/or
 one whose (?P<ref>...) group names another data file it references (path or key, without extension).
-No chunks, no vectors: one ripgrep pass per rule (hundreds of thousands of files in a minute or so), then deltas.
+No chunks, no vectors: one ripgrep pass per rule for the first build, then deltas.
 Answers: what data uses this code (type) / what code does this data file use / who references this file /
 most referenced files. Static (what the files say), name-based.
 """
@@ -208,7 +208,7 @@ def update(store: Store, root: Path, rules: list[Xref], extra_ignore: str = "", 
 
 
 def _refresh_dirty(store: Store, w: _Writer) -> None:
-    """Recompute stats only for the types, assets and files a delta touched."""
+    """Recompute stats only for the types, reference keys and files a delta touched."""
     db = store.db
     if w.dirty_types:
         ids = list(w.dirty_types)
@@ -249,7 +249,7 @@ def _refresh_stats(store: Store) -> None:
     db.executemany("UPDATE data_assets SET inbound=? WHERE id=?",
                    ((n, a) for a, n in db.execute("SELECT asset_id, COUNT(*) FROM data_refs GROUP BY asset_id").fetchall()))
     db.execute("DELETE FROM data_assets WHERE inbound=0")
-    # file inbound = inbound of the asset key(s) the file path ends with (content layers: same key, several files)
+    # file inbound = inbound of the reference key(s) the file path ends with (one key can match several files)
     files = sorted(db.execute("SELECT rkey, id FROM data_files").fetchall())
     keys = [f[0] for f in files]
     inbound: dict[int, int] = collections.Counter()
@@ -267,7 +267,7 @@ def _refresh_stats(store: Store) -> None:
 # ------------------------------------------------------------------ lookups
 
 def resolve(store: Store, q: str, limit: int = 20) -> list[tuple[int, str, int]]:
-    """Asset path / name / reference key -> [(file_id, path, inbound)]: suffix match, then substring."""
+    """Data file path / name / reference key -> [(file_id, path, inbound)]: suffix match, then substring."""
     q = q.strip().replace("\\", "/").strip("/")
     rk = rkey(q)
     rows = store.q("SELECT id, path, inbound FROM data_files WHERE rkey=? OR (rkey>=? AND rkey<?) "
