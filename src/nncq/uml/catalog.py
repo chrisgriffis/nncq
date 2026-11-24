@@ -109,7 +109,7 @@ def _diff(old: dict, new: dict) -> dict:
     return {k: v for k, v in out.items() if v}
 
 
-GEN_VERSION = 6             # bump when generators change their output: stored auto views of older ones regenerate
+GEN_VERSION = 7             # bump when generators change their output: stored auto views of older ones regenerate
 
 
 def auto(st: Store, kind: str, subject: str = "", **opts) -> dict:
@@ -583,3 +583,54 @@ def find(st: Store, name: str, limit: int = 20) -> dict:
     out += [{"id": f"pkg:{d}", "kind": "folder"} for d in dirs if name.lower() in d.rsplit("/", 1)[-1].lower()][:10]
     return {"name": name, "elements": out,
             "note": "ports: port:<component>/<file> (provided) | port:<component>/needs <component> (required)"}
+
+
+def browse(st: Store, path: str = "", limit: int = 500) -> dict:
+    """One level of the model as a tree (the Model explorer's Browse list): the sub-folders of a folder that hold
+    code (single-child chains merged: src/app), its code files with the types each declares and, at the root, the
+    components by kind. Only AST-language files count: data and docs have no UML."""
+    p = path.replace("\\", "/").strip("/")
+    pre = p + "/" if p else ""
+    rows = st.q("SELECT id, path, lang FROM files WHERE path >= ? AND path < ?", (pre, pre[:-1] + "0")) if pre \
+        else st.q("SELECT id, path, lang FROM files")
+    ast = {}
+    sub: dict[str, list[str]] = defaultdict(list)        # child folder -> code paths below it, relative to it
+    files = []
+    for fid, fp, lang in rows:
+        if lang not in ast:
+            ast[lang] = bool(lang) and langs.is_ast_lang(lang)
+        if not ast[lang]:
+            continue
+        rel = fp[len(pre):]
+        if "/" in rel:
+            head, rest = rel.split("/", 1)
+            sub[head].append(rest)
+        else:
+            files.append((fid, fp))
+    folders = []
+    for name, rels in sub.items():
+        while all("/" in r for r in rels) and len({r.split("/", 1)[0] for r in rels}) == 1:
+            name += "/" + rels[0].split("/", 1)[0]
+            rels = [r.split("/", 1)[1] for r in rels]
+        folders.append({"name": name, "path": pre + name, "files": len(rels)})
+    folders.sort(key=lambda x: x["name"].lower())
+    files.sort(key=lambda x: x[1].lower())
+    shown = files[:limit]
+    types: dict[int, list] = defaultdict(list)
+    for i in range(0, len(shown), 500):
+        ids = [f for f, _ in shown[i:i + 500]]
+        for fid, n, q, k, line in st.q(
+                f"SELECT file_id, name, qualname, kind, start_line FROM symbols WHERE file_id IN "
+                f"({','.join('?' * len(ids))}) AND kind IN ({','.join('?' * len(V.TYPE_KINDS))}) "
+                "ORDER BY start_line", (*ids, *V.TYPE_KINDS)):
+            types[fid].append({"name": n, "q": q, "kind": k, "line": line})
+    out = {"path": p, "folders": folders,
+           "files": [{"path": fp, "name": fp.rsplit("/", 1)[-1], "types": types.get(fid, [])} for fid, fp in shown],
+           **({"more_files": len(files) - limit} if len(files) > limit else {})}
+    if not p:
+        comps: dict[str, list] = defaultdict(list)
+        for n, k, d, c in st.q("SELECT c.name, c.kind, c.dir, COUNT(cf.file_id) FROM components c "
+                               "LEFT JOIN comp_files cf ON cf.comp_id = c.id GROUP BY c.id ORDER BY c.kind, c.name"):
+            comps[k or "component"].append({"name": n, "dir": d or "", "files": c})
+        out["components"] = dict(comps)
+    return out

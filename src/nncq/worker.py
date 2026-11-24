@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import time
 
 import numpy as np
@@ -177,12 +178,20 @@ def run(repo: Repo, once: bool = False, max_batches: int = 0, log=print, parent:
             v = emb.encode_documents([fmt(p, k or "", sym or "", txt or "") for _, p, k, sym, txt in rows])
             v16 = v.astype(np.float16)
             wrote = 0
-            with store.tx() as db:
-                for (cid, *_), vec in zip(rows, v16):
-                    if db.execute("UPDATE chunks SET tier=? WHERE id=? AND tier<?", (tier, cid, tier)).rowcount:
-                        db.execute("INSERT OR REPLACE INTO vecs(chunk_id, tier, v) VALUES(?,?,?)",
-                                   (cid, tier, vec.tobytes()))
-                        wrote += 1
+            try:
+                with store.tx() as db:
+                    for (cid, *_), vec in zip(rows, v16):
+                        if db.execute("UPDATE chunks SET tier=? WHERE id=? AND tier<?", (tier, cid, tier)).rowcount:
+                            db.execute("INSERT OR REPLACE INTO vecs(chunk_id, tier, v) VALUES(?,?,?)",
+                                       (cid, tier, vec.tobytes()))
+                            wrote += 1
+            except sqlite3.OperationalError as e:
+                if "locked" not in str(e) and "busy" not in str(e):
+                    raise
+                save(state="waiting: the parser holds the index write lock")      # long data/UML passes
+                log(f"index busy ({e}): retrying")
+                time.sleep(5)
+                continue
             batches += 1
             n_rate += len(rows)
             el = time.time() - t_rate

@@ -1,7 +1,7 @@
 """Reproducible README screenshots: drives headless Edge (or Chrome) over the DevTools protocol against a running
 nncq dashboard and writes cropped PNGs to docs/img/.
 
-    demo\demo.cmd --no-browser          (or demo/demo.sh: the bundled demo on port 8766)
+    demo\\demo.cmd --no-browser          (or demo/demo.sh: the bundled demo on port 8766)
     python tools/screens.py --url http://127.0.0.1:8766 [--only hero,ask] [--scale 1.5]
 
 Each scene sets the page state (URL hash, clicks, typing), waits for it to render and captures an element or a

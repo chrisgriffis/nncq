@@ -932,6 +932,8 @@ def _serve_stdio(mcp: FastMCP) -> None:
     os.dup2(logf.fileno(), 1)
     sys.stdout = logf
     _log(f"--- nncq stdio MCP server, pid {os.getpid()}")
+    from nncq import models
+    _log(f"ML stack loaded in {models.preload():.1f}s")       # before any other thread exists: see models.preload
     threading.Thread(target=_claim_loop, daemon=True, name="claim").start()
 
     async def main():
@@ -962,6 +964,8 @@ def serve(stdio: bool = False) -> None:
         raise SystemExit(f"port {s.port} is in use ({_owner_desc()}). Stop that first, or set NNCQ_PORT.")
     host = "127.0.0.1" if s.host in ("0.0.0.0", "::") else s.host
     _info["mcp_url"] = f"http://{host}:{s.port}/mcp"
+    from nncq import models
+    models.preload()                # before any other thread exists: see models.preload
     _become_owner(None)
     from nncq import dashboard
     from nncq.uml import web as uml_web

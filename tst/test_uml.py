@@ -246,6 +246,71 @@ def test_file_scoped_and_default_views(repo):
         st.close()
 
 
+def test_component_overview_hides_scripts_beyond_the_cap(repo, monkeypatch):
+    st = _st(repo)
+    try:
+        with st.tx() as db:
+            for i in range(3):
+                db.execute("INSERT INTO components(name, kind, dir, source, line, info) VALUES(?,?,?,?,?,?)",
+                           (f"t{i}.py", "script", "py", f"py/t{i}.py", 0, "{}"))
+        monkeypatch.setattr(views, "MAX_OVERVIEW_SCRIPTS", 2)
+        m, _, _ = views.component_view(st)
+        assert "t0.py" not in {x["label"] for x in m["nodes"]} and "DevLib" in {x["label"] for x in m["nodes"]}
+        assert m["notes"][0]["text"].startswith("3 scripts not shown")
+        assert "t0.py" in {x["label"] for x in views.component_view(st, subject="t0.py")[0]["nodes"]}
+    finally:
+        st.close()
+
+
+def test_browse_tree_merges_single_folder_chains_and_lists_types_and_components(repo):
+    st = _st(repo)
+    try:
+        root = catalog.browse(st)
+        assert [f["name"] for f in root["folders"]] == ["lib", "py/svc"] and root["files"] == []
+        assert {c["name"] for c in root["components"]["library"]} == {"DevLib"}
+        inc = catalog.browse(st, "lib/include")
+        assert [t["name"] for t in {f["name"]: f for f in inc["files"]}["Device.hpp"]["types"]] == ["IDevice", "Device"]
+        assert "components" not in inc
+    finally:
+        st.close()
+
+
+def test_generation_queue_newest_first_cancel_and_stop_interrupts(repo, monkeypatch):
+    import threading
+    import time
+    from nncq import repos
+    from nncq.uml import genq
+    monkeypatch.setattr(repos, "get", lambda name: repo)
+    started, real = threading.Event(), catalog.default_view
+
+    def slow(st, subject="", path="", fmt="json"):
+        if subject == "slow":
+            started.set()       # a long query, cut short by stop (sqlite interrupt)
+            st.q("WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x < 200000000) "
+                 "SELECT COUNT(*) FROM c")
+        return real(st, subject, path, fmt)
+    monkeypatch.setattr(catalog, "default_view", slow)
+    genq.control("eject")
+    try:
+        a = genq.add("t", subject="slow")
+        assert started.wait(30)
+        b, c = genq.add("t", path="lib/src/Device.cpp"), genq.add("t", path="py/svc")
+        assert [x["id"] for x in genq.state()["queued"]] == [c["id"], b["id"]]
+        genq.control("cancel", b["id"])
+        t = time.time()
+        genq.control("stop")
+        while genq.state()["running"] and time.time() - t < 10:
+            time.sleep(0.02)
+        s = genq.state()
+        assert s["done"][str(a["id"])]["state"] == s["done"][str(b["id"])]["state"] == "cancelled"
+        assert s["paused"] and [x["id"] for x in s["queued"]] == [c["id"]] and time.time() - t < 5
+        genq.control("play")
+        out = genq.add("t", path="py/svc", wait=30)
+        assert out["id"] == c["id"] and out["state"] == "done" and out["key"]
+    finally:
+        genq.control("eject")
+
+
 def test_type_hierarchy_has_structured_derived_list(repo):
     from nncq import graph
     st = _st(repo)
