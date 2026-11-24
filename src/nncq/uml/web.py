@@ -48,7 +48,9 @@ def routes(tool) -> list[Route]:
 
     async def page(request: Request):
         from nncq.codeview import codeview_js
-        return HTMLResponse(PAGE.replace("__MERMAID__", "1" if vendor.path() else "0").replace("/*__CODEVIEW__*/", codeview_js()))
+        from nncq.dashboard import NO_STORE
+        return HTMLResponse(PAGE.replace("__MERMAID__", "1" if vendor.path() else "0").replace("/*__CODEVIEW__*/", codeview_js()),
+                            headers=NO_STORE)
 
     async def code_links(request: Request):
         """POST /api/code/links {repo, path, start, end}: symbol links for those lines (codeview.links)."""
@@ -96,8 +98,50 @@ def routes(tool) -> list[Route]:
     async def build(request: Request):
         return JSONResponse(await tool("uml_build", {"repo": request.query_params.get("repo", "")}))
 
+    async def browse(request: Request):
+        """POST /api/uml/browse {repo, path}: one level of the model tree (catalog.browse) for the All list."""
+        import anyio
+        try:
+            a = await request.json()
+        except ValueError:
+            a = {}
+
+        def run():
+            from nncq.store import Store
+            from nncq.uml import catalog
+            st = Store(_repo(a.get("repo", "")).db, cache_mb=16)
+            try:
+                return catalog.browse(st, str(a.get("path", "")))
+            finally:
+                st.close()
+        try:
+            return JSONResponse(await anyio.to_thread.run_sync(run))
+        except (KeyError, ValueError, OSError) as e:
+            return JSONResponse({"error": f"{type(e).__name__}: {e}"})
+
+    async def queue(request: Request):
+        """POST /api/uml/queue {op: add | state | play | pause | stop | eject | cancel, ...}: the generation queue
+        (genq.py). Public mode: add and state only (the queue is shared by every visitor)."""
+        import anyio
+        from nncq.uml import genq
+        try:
+            a = await request.json()
+        except ValueError:
+            a = {}
+        op = a.get("op", "state")
+        if op == "add":
+            return JSONResponse(await anyio.to_thread.run_sync(lambda: genq.add(
+                str(a.get("repo", "")), str(a.get("kind", "")), str(a.get("subject", "")), str(a.get("path", "")),
+                wait=min(float(a.get("wait") or 0), 5.0))))
+        if op == "state":
+            return JSONResponse(genq.state())
+        if config.settings().public:
+            return JSONResponse({"error": "read-only public demo"}, status_code=403)
+        return JSONResponse(genq.control(op, int(a.get("id") or 0)))
+
     return [Route("/views", page), Route("/vendor/mermaid.min.js", mermaid_js),
-            Route("/api/code/links", code_links, methods=["POST"]),
+            Route("/api/code/links", code_links, methods=["POST"]), Route("/api/uml/browse", browse, methods=["POST"]),
+            Route("/api/uml/queue", queue, methods=["POST"]),
             Route("/api/uml/local/{op}", local, methods=["POST"]), Route("/api/uml/build", build, methods=["POST"])]
 
 
@@ -251,6 +295,17 @@ body.embed header{padding:6px 10px;gap:8px}body.embed header b{font-size:13px}
 .cx{position:absolute;right:6px;top:50%;transform:translateY(-50%);color:var(--dim);cursor:pointer;font-size:16px;line-height:1;display:none;padding:0 4px;user-select:none}.cx:hover{color:var(--fg)}
 #htip{position:fixed;z-index:60;display:none;background:#151821;border:1px solid var(--line);border-radius:7px;padding:7px 10px;font-size:11px;line-height:1.5;max-width:270px;box-shadow:0 6px 20px #0008;pointer-events:none}#htip div{margin-top:3px}
 .hint{margin-top:8px;font-size:11px;color:var(--dim)}.hint .mono{font-size:11px;color:#9fb3cc}
+.lmode{display:flex;gap:2px;background:var(--panel2);border-radius:7px;padding:2px;width:max-content;font-size:12px;color:var(--dim)}.lmode a{padding:1px 10px;border-radius:5px;cursor:pointer;color:var(--dim)}.lmode a:hover{color:var(--fg)}.lmode a.on{background:#1d2a44;color:var(--fg)}
+.lrow{display:flex;flex-wrap:wrap;gap:6px;align-items:center}.lrow>.cw,.lrow>input{flex:1 1 100%}
+.tf{display:flex;flex-wrap:wrap;gap:4px;flex:1 1 100%}.tf[hidden]{display:none}.tfc{display:inline-flex;align-items:center;gap:5px;cursor:pointer}.tfc a{opacity:.6}.tfc:hover a{opacity:1}
+#list .b[data-tf]{cursor:pointer}#list .b[data-tf]:hover{filter:brightness(1.35)}
+.gq{margin-top:8px;font-size:11px}.gqh{display:flex;align-items:center;gap:6px;min-width:0}.gqh .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dim)}.gqh .cv{cursor:pointer;color:var(--dim);width:10px}
+.gqb{display:flex;flex:none}.gqb a{padding:0 3px;color:var(--dim);cursor:pointer}.gqb a:hover{color:var(--fg)}.gqb a.on{color:var(--acc)}
+.gql{display:flex;flex-direction:column;gap:4px;margin-top:6px}.gqi{display:flex;align-items:center;gap:6px;padding:2px 2px 2px 9px;border-radius:10px;background:#1a1e28;min-width:0}
+.gqi .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.gqi .n{color:var(--dim);flex:none}.gqi .x{color:var(--dim);cursor:pointer;padding:0 6px;flex:none}.gqi .x:hover{color:var(--bad)}.gqi.run .t{color:var(--acc)}.gqm{color:var(--dim);cursor:pointer;padding-left:9px}.gqm:hover{color:var(--fg)}
+html.pub .gqb,html.pub .gqi .x{display:none}
+.cpd{position:fixed;z-index:50;font-size:11px;padding:1px 8px;border-radius:8px;background:#14301f;color:var(--ok);pointer-events:none}
+.tr .vi{padding-left:calc(8px + var(--d,0) * 14px)}.tr .cv{width:12px;flex:none;color:var(--dim);text-align:center}.tr .cv:hover{color:var(--fg)}.tr .n{color:var(--dim);font-size:11px;flex:none}
 #mmbox{position:relative;height:170px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;overflow:hidden;cursor:grab}
 #mmbox svg{position:absolute;left:0;top:0;pointer-events:none;max-width:none}#mmv{position:absolute;border:1.5px solid var(--acc);background:#5aa9ff1f;border-radius:2px;pointer-events:none}
 .mdv{flex:1;overflow:auto;margin:8px;padding:6px 18px;background:var(--bg);border:1px solid var(--line);border-radius:6px;font-size:14px;line-height:1.55}
@@ -277,8 +332,11 @@ pre .k,.mdv .k{color:#c792ea}pre .s,.mdv .s{color:#c3e88d}pre .c,.mdv .c{color:#
  <div class="col">
   <div class="sec"><h4>Overview <span id="mmz" class="dim" style="text-transform:none;letter-spacing:0"></span></h4>
    <div id="mmbox" title="the open diagram, scaled: click or drag to pan"><div class="dim" style="padding:8px;font-size:11px">no diagram</div></div>
-   <div class="hint">Custom views: ask your agent (MCP <span class="mono">uml_protocol</span> / <span class="mono">uml_upsert</span>)</div></div>
-  <div class="sec" style="display:flex;gap:6px"><input id="filter" placeholder="filter" style="flex:1"><select id="gb"><option value="kind">by kind</option><option value="group">by group</option><option value="origin">by origin</option></select></div>
+   <div class="gq" id="gq"><div class="gqh"><a class="cv" id="gqr" title="show / hide the queue">▸</a><span id="gqs"></span><span class="t" id="gqt">no diagrams generating</span>
+    <span class="gqb"><a data-q="play" title="play: run the queue">▶</a><a data-q="pause" title="pause: let the running diagram finish, start no more">⏸</a><a data-q="stop" title="stop: interrupt the running diagram and pause">⏹</a><a data-q="eject" title="eject: stop and clear the queue">⏏</a></span></div>
+    <div class="gql" id="gql" hidden></div></div></div>
+  <div class="sec lrow"><div class="lmode" id="lmode" title="All: the whole model as a tree (components, folders, files, types); switching to it turns Sync views off.&#10;Filtered: stored diagrams (generated before, or made by an agent via MCP uml_upsert), narrowed by the filter."><a data-m="all">All</a><a data-m="filtered">Filtered</a></div><span class="sp" style="flex:1"></span><select id="gb"><option value="kind">by kind</option><option value="group">by group</option><option value="origin">by origin</option></select>
+   <input id="filter" placeholder="filter"><div class="tf" id="tf" hidden></div></div>
   <div class="scroll" id="list"><div class="dim" style="padding:12px">loading…</div></div>
  </div>
  <div class="col" style="min-width:0">
@@ -304,7 +362,7 @@ async function api(path,body){const r=await fetch(path,{method:'POST',headers:{.
 async function T(name,args){const j=await api('api/tool/'+name,{...args,...(repo?{repo}:{})});if(j&&j.error)throw new Error(j.error+(j.fix?' — '+j.fix:''));return j}
 const L=(op,a)=>api('api/uml/local/'+op,{...a,repo});
 function notice(t){const n=$('#notice');n.textContent=t;n.style.display='block';setTimeout(()=>document.addEventListener('click',()=>n.style.display='none',{once:true,capture:true}),50)}
-const MCFG={startOnLoad:false,theme:'dark',securityLevel:'strict',maxTextSize:500000,flowchart:{htmlLabels:true},
+const MCFG={startOnLoad:false,theme:'dark',securityLevel:'strict',maxTextSize:500000,maxEdges:5000,flowchart:{htmlLabels:true},
  themeVariables:{darkMode:true,background:'#0b0d11',primaryColor:'#1b2a44',primaryTextColor:'#d7dae0',primaryBorderColor:'#5aa9ff',lineColor:'#8b95a7',
   secondaryColor:'#14301f',tertiaryColor:'#151821',clusterBkg:'#ffffff07',clusterBorder:'#3d4658',fontFamily:'Segoe UI, system-ui, sans-serif',fontSize:'13px',
   noteBkgColor:'#2b2a14',noteTextColor:'#e8e2b0',actorBkg:'#14301f',actorBorder:'#4cc38a',signalColor:'#8b95a7',signalTextColor:'#d7dae0'}};
@@ -327,11 +385,19 @@ $('#bbuild').onclick=async()=>{const b=$('#bbuild');b.disabled=true;b.innerHTML=
  try{const j=await api('api/uml/build?repo='+encodeURIComponent(repo));$('#mstate').textContent=j.error||('refresh: '+(j.reason||j.state||'started'));if(j.error)return done()}catch(e){return done()}
  const t0=Date.now();const tick=async()=>{try{const d=await (await fetch('api/status',{headers:H,cache:'no-store'})).json();const r=(d.repos||[]).find(x=>x.name===repo)||{};
    if(r.job&&r.job.state==='running'&&Date.now()-t0<6e5)return setTimeout(tick,2000)}catch(e){}done()};setTimeout(tick,1500)};
-async function list(){let d;try{d=await T('uml_views',{group_by:$('#gb').value})}catch(e){$('#list').innerHTML=`<div class="err" style="padding:10px">${esc(e.message)}</div>`;return}
+async function list(){if(LM==='all')return brRoot();
+ let d;try{d=await T('uml_views',{group_by:$('#gb').value})}catch(e){$('#list').innerHTML=`<div class="err" style="padding:10px">${esc(e.message)}</div>`;return}
  const f=$('#filter').value.toLowerCase();let h='';
- for(const [g,vs] of Object.entries(d.groups||{})){const xs=vs.filter(v=>!f||(v.title+v.key).toLowerCase().includes(f));if(!xs.length)continue;
-  h+=`<div class="grp">${esc(g)} · ${xs.length}</div>`+xs.map(v=>`<div class="vi ${cur&&cur.key===v.key?'on':''}" data-k="${esc(v.key)}" title="${esc(v.key)}">${kindBadge(v)}${originBadge(v)}<span class="t">${esc(v.title)}</span>${v.stale?`<span class="b w" title="${esc(typeof v.stale==='string'?v.stale:'stale: see Report')}">stale</span>`:''}</div>`).join('')}
- $('#list').innerHTML=h||'<div class="dim" style="padding:12px">No stored diagrams yet: pick a symbol or file (its default diagram is made on demand), or let an agent compose one (uml_upsert).</div>'}
+ for(const [g,vs] of Object.entries(d.groups||{})){const xs=vs.filter(v=>(!f||(v.title+v.key).toLowerCase().includes(f))&&tfOk(v));if(!xs.length)continue;
+  h+=`<div class="grp">${esc(g)} · ${xs.length}</div>`+xs.map(v=>`<div class="vi ${cur&&cur.key===v.key?'on':''}" data-k="${esc(v.key)}" title="${esc(v.key)}">${kindBadge(v)}${originBadge(v)}<span class="t">${esc(v.title)}</span>${v.stale?`<span class="b w" data-tf="stale:stale" title="${esc(typeof v.stale==='string'?v.stale:'stale: see Report')}">stale</span>`:''}</div>`).join('')}
+ $('#list').innerHTML=h||(f||TF.length?'<div class="dim" style="padding:12px">Nothing matches the filter.</div>':'<div class="dim" style="padding:12px">No stored diagrams yet: pick a symbol or file (its default diagram is made on demand), or let an agent compose one (uml_upsert).</div>')}
+/* tag filters: click a badge in the list to add it as a chip; × removes. AND across kind/origin/stale, OR within one */
+let TF=[];try{TF=JSON.parse(localStorage.getItem('nncq.tf')||'[]')}catch(e){}
+const tagv=(v,f)=>f==='kind'?(isFile(v)?'file':v.kind):f==='origin'?v.origin:(v.stale?'stale':'');
+function tfOk(v){const by={};TF.forEach(t=>(by[t.f]=by[t.f]||[]).push(t.v));return Object.entries(by).every(([f,vs])=>vs.includes(tagv(v,f)))}
+function tfShow(){localStorage.setItem('nncq.tf',JSON.stringify(TF));$('#tf').hidden=!TF.length||LM==='all';
+ $('#tf').innerHTML=TF.map((t,i)=>`<span class="b ${esc(t.c)} tfc" data-tfx="${i}" title="remove this filter">${esc(t.l)}<a>×</a></span>`).join('')}
+$('#tf').onclick=e=>{const c=e.target.closest('[data-tfx]');if(c){TF.splice(+c.dataset.tfx,1);tfShow();list()}};
 /* every filter / search input: an inline × while it has text; click or Esc clears, re-applies, refocuses */
 const CLR=[];
 function clearable(inp,apply){const w=document.createElement('span');w.className='cw';inp.replaceWith(w);w.appendChild(inp);
@@ -342,12 +408,58 @@ function clearable(inp,apply){const w=document.createElement('span');w.className
 setInterval(()=>CLR.forEach(f=>f()),400);            /* values set by code (history, links) */
 clearable($('#filter'),list);
 $('#filter').oninput=list;$('#gb').onchange=list;
-$('#list').onclick=e=>{const v=e.target.closest('[data-k]');if(v)go(v.dataset.k)};
+$('#list').onclick=e=>{const b=e.target.closest('#list .b[data-tf]');if(b){const [f,v]=b.dataset.tf.split(/:(.*)/);
+  if(!TF.some(t=>t.f===f&&t.v===v))TF.push({f,v,c:[...b.classList].filter(x=>x!=='b').join(' '),l:b.textContent});tfShow();return list()}
+ const tg=e.target.closest('[data-tg]');if(tg)return brToggle(tg.closest('.tn'));
+ const h=e.target.closest('[data-h]');if(h){document.querySelectorAll('#list .vi.on').forEach(x=>x.classList.remove('on'));h.closest('.vi').classList.add('on');
+  const t=h.closest('.tn');if(t.dataset.path!=null&&t.querySelector(':scope>.kids').hidden)brToggle(t);return navTo(h.dataset.h)}
+ const v=e.target.closest('[data-k]');if(v)go(v.dataset.k)};
+
+/* ---------- All: the whole model as a lazily expanding tree (POST api/uml/browse, one folder level at a time) ---------- */
+let LM=localStorage.getItem('nncq.lmode')==='all'?'all':'filtered';const BR={repo:null};
+const enc=encodeURIComponent,dh=q=>'#/uml/default?'+q;
+function cpd(e,t){document.querySelectorAll('.cpd').forEach(c=>c.remove());const c=document.createElement('span');c.className='cpd';c.textContent=t;
+ const r=e&&e.clientX!=null?{x:e.clientX,y:e.clientY}:{x:20,y:20};c.style.left=r.x+'px';c.style.top=(r.y+14)+'px';document.body.appendChild(c);setTimeout(()=>c.remove(),1400)}
+function setMode(m,ev,quiet){LM=m;localStorage.setItem('nncq.lmode',m);document.querySelectorAll('#lmode a').forEach(a=>a.classList.toggle('on',a.dataset.m===m));
+ $('#gb').style.display=m==='all'?'none':'';tfShow();$('#filter').placeholder=m==='all'?'filter the open part of the tree':'filter';
+ if(m==='all'&&ev&&synced()){const x=host();x.setSync(false);$('#csync').checked=false;navUi();cpd(ev,'sync views off')}
+ if(!quiet)list()}
+$('#lmode').onclick=e=>{const a=e.target.closest('[data-m]');if(a&&a.dataset.m!==LM)setMode(a.dataset.m,e)};
+setMode(LM,null,true);
+const tn=(d,cv,label,h,extra,kids,path)=>`<div class="tn"${path!=null?` data-path="${esc(path)}"`:''}><div class="vi" style="--d:${d}"><a class="cv"${cv?' data-tg':''}>${cv?'▸':''}</a>${label.startsWith('<')?label:`<span class="t"${h?` data-h="${esc(h)}"`:' data-tg'} title="${esc(label)}">${esc(label)}</span>`}${extra||''}</div>${kids!=null?`<div class="kids" hidden>${kids}</div>`:''}</div>`;
+function brRows(j,d){let h='';
+ for(const f of j.folders)h+=tn(d,1,f.name,dh('p='+enc(f.path)),`<span class="n" title="code files">${f.files}</span>`,'',f.path);
+ for(const f of j.files){const ty=f.types||[];
+  h+=tn(d,ty.length,f.name,dh('p='+enc(f.path)),ty.length?`<span class="n" title="types">${ty.length}</span>`:'',
+   ty.length?ty.map(t=>tn(d+1,0,`<span class="b">${esc(t.kind)}</span><span class="t" data-h="${esc(dh('s='+enc(t.q)+'&p='+enc(f.path)))}" title="${esc(t.q)}">${esc(t.name)}</span>`)).join(''):null)}
+ if(j.more_files)h+=`<div class="vi dim" style="--d:${d}">… ${j.more_files} more files: open the folder's diagram</div>`;
+ return h}
+async function brGet(path){const j=await api('api/uml/browse',{repo,path});if(j.error)throw new Error(j.error);return j}
+async function brRoot(){if(BR.repo===repo&&$('#list .tr'))return brFilter();BR.repo=repo;$('#list').innerHTML='<div class="dim" style="padding:12px"><span class="spin"></span> loading the model…</div>';
+ let j;try{j=await brGet('')}catch(e){BR.repo=null;$('#list').innerHTML=`<div class="err" style="padding:10px">${esc(e.message)}</div>`;return}
+ const cs=Object.entries(j.components||{}),nc=cs.reduce((a,[,v])=>a+v.length,0);
+ let h=tn(0,0,'Workspace overview',dh(''));
+ if(nc)h+=`<div class="grp">components · ${nc}</div>`+cs.map(([k,v])=>tn(0,1,k,'',`<span class="n">${v.length}</span>`,
+   v.map(c=>tn(1,0,c.name,dh('k=component&s='+enc(c.name)),`<span class="n" title="${esc(c.dir)}">${c.files||''}</span>`)).join(''))).join('');
+ h+=`<div class="grp">folders</div>`+(brRows(j,0)||'<div class="dim" style="padding:8px 12px">no code files indexed</div>');
+ $('#list').innerHTML=`<div class="tr">${h}</div>`;brFilter()}
+async function brToggle(t){if(!t)return;const k=t.querySelector(':scope>.kids'),cv=t.querySelector(':scope>.vi .cv');if(!k)return;
+ if(k.hidden&&t.dataset.path!=null&&!t.dataset.loaded){t.dataset.loaded='1';k.hidden=false;cv.textContent='▾';k.innerHTML='<div class="dim" style="padding:3px 24px"><span class="spin"></span></div>';
+  const d=+getComputedStyle(t.querySelector(':scope>.vi')).getPropertyValue('--d')+1;
+  try{k.innerHTML=brRows(await brGet(t.dataset.path),d)||`<div class="dim vi" style="--d:${d}">empty</div>`}catch(e){delete t.dataset.loaded;k.innerHTML=`<div class="err" style="padding:3px 24px">${esc(e.message)}</div>`}
+  return brFilter()}
+ k.hidden=!k.hidden;cv.textContent=k.hidden?'▸':'▾'}
+/* the filter narrows what is loaded; a folder or group whose children match opens */
+function brFilter(){const f=$('#filter').value.toLowerCase();
+ const walk=t=>{const k=t.querySelector(':scope>.kids');let any=false;if(k)for(const c of k.children)if(c.classList.contains('tn'))any=walk(c)||any;
+  const m=!f||(t.querySelector(':scope>.vi .t')||{}).textContent.toLowerCase().includes(f);t.hidden=!(m||any);
+  if(k&&f&&any){k.hidden=false;const cv=t.querySelector(':scope>.vi .cv');if(cv)cv.textContent='▾'}return m||any};
+ document.querySelectorAll('#list .tr>.tn').forEach(walk)}
 
 /* ---------- open / draw ---------- */
 const isFile=v=>String(v.key||'').startsWith('composition:file:');
-const originBadge=v=>v.origin==='auto'?'<span class="b o-auto" title="generated from the index, on demand; regenerated when its sources change">auto</span>':`<span class="b o-${esc(v.origin)}" title="${esc(v.provenance?v.provenance.tag+'\n'+v.provenance.detail:'made via MCP')}">${v.origin==='agent'?'mcp-agent':esc(v.origin)}</span>`;
-const kindBadge=v=>isFile(v)?'<span class="b k-file" title="file composition (generated on demand)">file</span>':`<span class="b k-${esc(v.kind)}">${esc(v.kind)}</span>`;
+const originBadge=v=>v.origin==='auto'?'<span class="b o-auto" data-tf="origin:auto" title="generated from the index, on demand; regenerated when its sources change">auto</span>':`<span class="b o-${esc(v.origin)}" data-tf="origin:${esc(v.origin)}" title="${esc(v.provenance?v.provenance.tag+'\n'+v.provenance.detail:'made via MCP')}">${v.origin==='agent'?'mcp-agent':esc(v.origin)}</span>`;
+const kindBadge=v=>isFile(v)?'<span class="b k-file" data-tf="kind:file" title="file composition (generated on demand)">file</span>':`<span class="b k-${esc(v.kind)}" data-tf="kind:${esc(v.kind)}">${esc(v.kind)}</span>`;
 /* embedded: navigation goes through the dashboard's single history (it replaces this frame's hash); a navigation
    made here also selects the matching code in the Symbol explorer (syncNext) */
 let syncNext=false;
@@ -567,17 +679,46 @@ $('#bvs').onclick=async()=>{if(!cur)return;const j=await L('export_md',{key:cur.
    #/uml/default?s=<symbol>&p=<file or folder> (or none: the workspace overview): the best diagram for that target */
 let seq=0;
 function useRepo(r){if(r&&r!==repo&&[...$('#repo').options].some(o=>o.value===r)){repo=r;$('#repo').value=r}}
-async function dflt(s,p){const my=++seq;$('#out').innerHTML='<div class="dim" style="padding:20px"><span class="spin"></span> generating…</div>';
+async function dflt(s,p,k){const my=++seq;$('#out').innerHTML='<div class="dim" style="padding:20px"><span class="spin"></span> generating…</div>';
  $('#vt').textContent=s||p||'Workspace';$('#vb').innerHTML='';
- try{const d=await T('uml_view',{kind:'default',subject:s||'',path:p||'',format:'json'});if(my!==seq)return;show(d);
+ try{const d=await gen({kind:k||'',subject:s||'',path:p||''},my);if(!d||my!==seq)return;show(d);
   const sn=s&&String(s).split(/::|\./).pop();
   /* exact node, then exact member (a constructor shares its class's name), then by last name */
   const q2=String(s||'').replace(/\./g,'::'),eq=q=>!!q&&(q===s||String(q).replace(/\./g,'::')===q2),last=q=>!!q&&String(q).split(/::|\./).pop()===sn;
   const memOf=f=>{for(const x of d.model.nodes){const y=(x.members||[]).find(y=>f((y.ref||{}).q));if(y)return [x,y]}return null};
   const n=s&&d.model.nodes.find(x=>eq((x.ref||{}).q)),mm=s&&!n&&memOf(eq),n2=s&&!n&&!mm&&d.model.nodes.find(x=>x.type!=='module'&&last((x.ref||{}).q)),mm2=s&&!n&&!mm&&!n2&&memOf(last);
   if(n||n2)pick((n||n2).id);else if(mm||mm2){const [x,y]=mm||mm2;pickMember(x.id,y.id)}else $('#side').innerHTML=`<div class="dim" style="padding:14px">Default diagram for ${esc(s||p||'the workspace')} (${esc(d.kind)}). Click a node for details.</div>`;
-  if(!document.querySelector(`#list .vi[data-k="${CSS.escape(d.key)}"]`))list()}
+  if(LM!=='all'&&!document.querySelector(`#list .vi[data-k="${CSS.escape(d.key)}"]`))list()}
  catch(e){if(my===seq){cur=null;$('#vt').textContent='No diagram';$('#out').innerHTML=`<div class="err" style="padding:20px">${esc(e.message)}</div>`}}}
+/* ---------- the generation queue (genq.py): every generated diagram goes through it, one at a time, newest first.
+   Rolled: what is generating + play / pause / stop / eject. Unrolled: the line items (top 5, … for all), × cancels one */
+const GQ={s:null,open:localStorage.getItem('nncq.gq')==='1',all:false,waits:new Map(),timer:0};
+async function gq(op,extra){const j=await api('api/uml/queue',{op,...(extra||{})});if(j&&!j.error)gqShow(j);else if(j&&j.error)notice(j.error);return j}
+async function gen(args,my){let it=await api('api/uml/queue',{op:'add',repo,...args,wait:1.5});if(it.error)throw new Error(it.error);
+ while(it.state==='queued'||it.state==='running'){if(my!==seq)return null;
+  const ahead=it.state==='queued'&&GQ.s?GQ.s.queued.findIndex(x=>x.id===it.id):-1;
+  $('#out').innerHTML=`<div class="dim" style="padding:20px"><span class="spin"></span> ${it.state==='running'?'generating':'queued'}: ${esc(it.label)}${it.secs?` · ${it.secs}s`:''}${ahead>0?` · ${ahead} ahead`:''}${GQ.s&&GQ.s.paused?' · queue paused (▶ to run)':''}</div>`;
+  it=await new Promise(res=>{GQ.waits.set(it.id,res);gqPoll()})}
+ if(it.state==='cancelled')throw new Error('cancelled: '+it.label);if(it.state==='error')throw new Error(it.error||'failed');
+ return T('uml_view',{key:it.key,format:'json'})}
+async function gqPoll(){clearTimeout(GQ.timer);let s;try{s=await (await fetch('api/uml/queue',{method:'POST',headers:{...H,'Content-Type':'application/json'},body:'{"op":"state"}',cache:'no-store'})).json()}catch(e){}
+ if(s&&!s.error)gqShow(s);const busy=s&&(s.running||s.queued.length);GQ.timer=setTimeout(gqPoll,busy||GQ.waits.size?700:5000)}
+function gqShow(s){GQ.s=s;
+ for(const [id,res] of [...GQ.waits]){const it=s.running&&s.running.id===id?s.running:s.queued.find(x=>x.id===id)||s.done[id];if(it){GQ.waits.delete(id);res(it)}else{GQ.waits.delete(id);res({id,state:'cancelled',label:'diagram'})}}
+ const r=s.running,n=s.queued.length;
+ $('#gqs').innerHTML=r?'<span class="spin"></span>':'';
+ $('#gqt').textContent=r?`${r.label} · ${r.secs||0}s${n?` · +${n} queued`:''}`:n?`${s.paused?'paused':'starting'} · ${n} queued`:s.paused?'paused · nothing queued':'no diagrams generating';
+ $('#gqt').title=r?'generating: '+r.label:'';
+ document.querySelectorAll('#gq [data-q]').forEach(a=>a.classList.toggle('on',a.dataset.q===(s.paused?'pause':'play')));
+ $('#gqr').textContent=GQ.open?'▾':'▸';$('#gql').hidden=!GQ.open;if(!GQ.open)return;
+ const items=[...(r?[{...r,run:1}]:[]),...s.queued],show=GQ.all?items:items.slice(0,5);
+ $('#gql').innerHTML=(show.map(x=>`<div class="gqi${x.run?' run':''}" title="${esc(x.repo?x.repo+': ':'')}${esc(x.label)}">${x.run?'<span class="spin"></span>':''}<span class="t">${esc(x.label)}</span>${x.run?`<span class="n">${x.secs||0}s</span>`:''}<a class="x" data-x="${x.id}" title="${x.run?'stop generating this one':'remove from the queue'}">×</a></div>`).join('')
+  +(items.length>5?`<a class="gqm" data-more>${GQ.all?'show fewer':`… ${items.length-5} more`}</a>`:''))||'<div class="dim" style="padding-left:9px">queue empty</div>'}
+$('#gq').onclick=e=>{const q=e.target.closest('[data-q]'),x=e.target.closest('[data-x]');
+ if(q)return gq(q.dataset.q);if(x)return gq('cancel',{id:+x.dataset.x});
+ if(e.target.closest('[data-more]')){GQ.all=!GQ.all;return GQ.s&&gqShow(GQ.s)}
+ if(e.target.closest('#gqr,#gqt')){GQ.open=!GQ.open;localStorage.setItem('nncq.gq',GQ.open?'1':'0');if(GQ.s)gqShow(GQ.s)}};
+gqPoll();
 /* ‹ › : this explorer's own history of diagrams / selections (with Sync views on: the dashboard's single history) */
 const NAVH={list:[],i:-1,jump:null};
 function navTrack(){const h=location.hash||'#';if(NAVH.jump!=null&&NAVH.list[NAVH.jump]===h){NAVH.i=NAVH.jump;NAVH.jump=null}
@@ -590,7 +731,7 @@ navUi();$('#nback').onclick=()=>navStep(-1);$('#nfwd').onclick=()=>navStep(1);
 document.addEventListener('keydown',e=>{if(e.altKey&&(e.key==='ArrowLeft'||e.key==='ArrowRight')&&!/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)){e.preventDefault();navStep(e.key==='ArrowLeft'?-1:1)}});
 async function route(){const h=host();if(h&&h.modelHash)h.modelHash(location.hash);navTrack();
  const dm=/^#\/uml\/default\/?(?:\?(.*))?$/.exec(location.hash);
- if(!location.hash||location.hash==='#'||dm){const p=new URLSearchParams(dm&&dm[1]||'');useRepo(p.get('repo'));return dflt(p.get('s')||p.get('c')||'',p.get('p')||'')}
+ if(!location.hash||location.hash==='#'||dm){const p=new URLSearchParams(dm&&dm[1]||'');useRepo(p.get('repo'));return dflt(p.get('s')||p.get('c')||'',p.get('p')||'',p.get('k')||'')}
  const m=/^#\/uml\/([^/]+)\/([^?]*)(?:\?(.*))?$/.exec(location.hash);if(!m)return;
  const p=new URLSearchParams(m[3]||''),el=decodeURIComponent(m[2]);seq++;
  useRepo(p.get('repo'));

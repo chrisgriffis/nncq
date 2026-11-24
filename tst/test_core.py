@@ -372,6 +372,35 @@ def test_profile_export_import_round_trip(prof):
     assert "name = 'acme2'" in (dst / "profile.toml").read_text(encoding="utf-8")
 
 
+def _answers(monkeypatch, *xs):
+    it = iter(xs)
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(it))
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True, raising=False)
+
+
+def test_init_new_profile_takes_a_pasted_quoted_path_and_asks_for_its_name(prof, tmp_path, monkeypatch):
+    from nncq import init, profiles
+    _answers(monkeypatch, str(tmp_path / "nope"), f'  "{prof}"  ', "acme", "bad name!", "ws1", "Acme game", "", "", "")
+    r = init.profile_wizard("", "", ask=True)
+    p = profiles.get("ws1")
+    assert r.name == "ws1" and p.root == prof.resolve() and p.description == "Acme game"
+
+
+def test_init_imports_an_exported_profile_and_asks_where_its_workspace_is(prof, tmp_path, monkeypatch):
+    import shutil
+    import types
+    from nncq import init, profiles
+    src = config.PROFILES_DIR / "acme" / "profile.toml"
+    src.write_text(src.read_text(encoding="utf-8").replace(prof.as_posix(), "Z:/elsewhere/acme"), encoding="utf-8")
+    f = profiles.export("acme")
+    shutil.rmtree(src.parent)
+    _answers(monkeypatch, f'"{f}"', str(tmp_path), str(prof))      # import; wrong folder (no marker); right one
+    a = types.SimpleNamespace(yes=False, profile="", name="", workspace="", dirs=None)
+    r = init._workspace(a)
+    assert r.name == "acme" and r.root == prof.resolve()
+    assert profiles.get("acme").roots[0] == str(prof.resolve()).replace("\\", "/")
+
+
 def test_demo_is_a_self_contained_home(tmp_path, monkeypatch):
     from nncq import profiles, repos
     monkeypatch.delenv("NNCQ_WORKSPACE_ORBITKIT", raising=False)

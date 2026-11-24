@@ -96,13 +96,13 @@ nncq's code knows no particular codebase. Everything specific to one lives in a 
 
 ```powershell
 nncq profile list                       # profiles, and the workspace each found on this machine
-nncq profile new myapp C:\src\myapp     # wizard (nncq init runs it too: pick or create a profile)
+nncq profile new myapp C:\src\myapp     # wizard (nncq init runs it too: pick, import or create a profile)
 nncq profile show myapp
 nncq profile export myapp               # one compressed profiles\archive\myapp-<time>.nncqprofile
 nncq profile import profiles\archive\myapp-<time>.nncqprofile [--as name] [--force]
 ```
 
-`profiles/archive/` is tracked but its contents are git-ignored: export there, copy the file to another machine, import, and the profile finds its workspace again through its linking rules. An LLM agent running `nncq init`, or asked to write a profile from the template, can fill in the DSL and xref rules from a plain description of the codebase.
+`profiles/archive/` is tracked but its contents are git-ignored: export there, copy the file to another machine, import, and the profile finds its workspace again through its linking rules. `nncq init` offers the exported files in `profiles/archive/` (or any `.nncqprofile` path) for import; when an imported profile does not find its workspace on this machine, init asks for the path and remembers it in the profile. Paths can be pasted with quotes (Explorer's "Copy as path"). An LLM agent running `nncq init`, or asked to write a profile from the template, can fill in the DSL and xref rules from a plain description of the codebase.
 
 ### Agent setup: `nncq agents`
 
@@ -273,6 +273,9 @@ Two roll-ups per answer: how the question was read plus the portfolio, then the 
 ### Model explorer
 
 A grouped list of stored diagrams with colour-coded kind and origin badges (`auto`, `mcp-agent`, `user`), an overview minimap, pan / zoom (wheel at the cursor, drag, fit, 100%, keys `+ - 0 1`), Mermaid rendering in a palette by element kind, and a side panel for the picked element: location, relations, members, callers / callees, source, and buttons to reveal, open or edit the file.
+
+- **All / Filtered**: *Filtered* is that list of stored diagrams (generated before, or made by an agent), narrowed by the filter. Click any kind, origin (`auto` / `mcp-agent`) or `stale` tag in the list to add it as a removable chip under the filter; chips of the same type widen the match, different types narrow it. *All* browses the whole model as a tree: components by kind, then folders, code files and the types each declares, loaded one folder at a time; a click opens that element's default diagram. Switching to All turns Sync views off.
+- **Generation queue** (under the minimap): diagrams are generated one at a time, newest request first, since a large one can take a minute while the embedder is busy. Rolled up it shows the one being generated with ▶ play, ⏸ pause (let it finish, start no more), ⏹ stop (cut it short, pause) and ⏏ eject (stop and clear); unrolled it lists the queue (top 5, … for the rest), each with × to cancel it. Agents' `uml_view` calls do not wait in it.
 
 <a href="docs/img/model-class.png"><img src="docs/img/model-class.png" alt="Class view of Pipeline with members, composition, aggregation, association, nested Stats, and the picked node's details" width="100%"></a>
 <sub><b>Class view</b> of <code>Pipeline</code>: members with visibility, <i>composes</i> <code>IDecoder</code> (<code>unique_ptr</code>), <i>aggregates</i> <code>ISink</code> (<code>vector&lt;shared_ptr&gt;</code>, *), <i>associates</i> <code>IRadio</code> and <code>Clock</code> (references), the nested <code>Stats</code>; on the right, the picked node's element, relations and member chips.</sub>
@@ -471,7 +474,7 @@ Parsing runs at about 500 files/s per CPU core. **The trade-off is honest:** lin
 - **FTS:** identifiers are also indexed as sub-words, so `crc` matches `crcFailures_` and `Crc::check`. The symbol column is weighted above the body.
 - **Search:** BM25 top 100 and dense top 100 merged by reciprocal-rank fusion; the top 40 go through the cross-encoder. Without vectors it falls back to lexical search and says so.
 - **Data files** (`datarefs.py`, from a profile's `[[xref]]` rules) are not chunked or embedded: one ripgrep pass per rule records the instance types per file and the file→file references; code↔data joins go through type names.
-- **UML** (`uml/`): `extract.py` (facts during the parse), `buildinfo.py` (CMake, presets, Python packaging, without running anything), `model.py` (components, file dependencies), `views.py` (generators), `catalog.py` (stored views, compositions, staleness, provenance, exports), `render_mermaid.py` / `render_ascii.py`, `web.py` (the Model explorer).
+- **UML** (`uml/`): `extract.py` (facts during the parse), `buildinfo.py` (CMake, presets, Python packaging, without running anything), `model.py` (components, file dependencies), `views.py` (generators), `catalog.py` (stored views, compositions, staleness, provenance, exports), `render_mermaid.py` / `render_ascii.py`, `web.py` (the Model explorer), `genq.py` (its diagram generation queue).
 - **Storage layout:**
   ```
   init.ps1, pyproject.toml   repo root (launch + packaging only)
