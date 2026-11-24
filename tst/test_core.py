@@ -234,7 +234,7 @@ def test_env_inline_comments(tmp_path):
 def test_lite_profile_never_touches_models_and_reports_no_degradation(repo, monkeypatch):
     import sys
     from nncq import ask as asker, search
-    monkeypatch.setenv("NNCQ_PROFILE", "lite")
+    monkeypatch.setenv("NNCQ_MODE", "lite")
     monkeypatch.setenv("NNCQ_EMBED_TIER", "2")           # ignored under lite
     s = config.settings()
     assert s.lite and s.embed_tier == 0 and not s.rerank
