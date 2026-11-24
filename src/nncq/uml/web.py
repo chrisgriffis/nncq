@@ -297,6 +297,8 @@ body.embed header{padding:6px 10px;gap:8px}body.embed header b{font-size:13px}
 .hint{margin-top:8px;font-size:11px;color:var(--dim)}.hint .mono{font-size:11px;color:#9fb3cc}
 .lmode{display:flex;gap:2px;background:var(--panel2);border-radius:7px;padding:2px;width:max-content;font-size:12px;color:var(--dim)}.lmode a{padding:1px 10px;border-radius:5px;cursor:pointer;color:var(--dim)}.lmode a:hover{color:var(--fg)}.lmode a.on{background:#1d2a44;color:var(--fg)}
 .lrow{display:flex;flex-wrap:wrap;gap:6px;align-items:center}.lrow>.cw,.lrow>input{flex:1 1 100%}
+.tf{display:flex;flex-wrap:wrap;gap:4px;flex:1 1 100%}.tf[hidden]{display:none}.tfc{display:inline-flex;align-items:center;gap:5px;cursor:pointer}.tfc a{opacity:.6}.tfc:hover a{opacity:1}
+#list .b[data-tf]{cursor:pointer}#list .b[data-tf]:hover{filter:brightness(1.35)}
 .gq{margin-top:8px;font-size:11px}.gqh{display:flex;align-items:center;gap:6px;min-width:0}.gqh .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dim)}.gqh .cv{cursor:pointer;color:var(--dim);width:10px}
 .gqb{display:flex;flex:none}.gqb a{padding:0 3px;color:var(--dim);cursor:pointer}.gqb a:hover{color:var(--fg)}.gqb a.on{color:var(--acc)}
 .gql{display:flex;flex-direction:column;gap:4px;margin-top:6px}.gqi{display:flex;align-items:center;gap:6px;padding:2px 2px 2px 9px;border-radius:10px;background:#1a1e28;min-width:0}
@@ -334,7 +336,7 @@ pre .k,.mdv .k{color:#c792ea}pre .s,.mdv .s{color:#c3e88d}pre .c,.mdv .c{color:#
     <span class="gqb"><a data-q="play" title="play: run the queue">▶</a><a data-q="pause" title="pause: let the running diagram finish, start no more">⏸</a><a data-q="stop" title="stop: interrupt the running diagram and pause">⏹</a><a data-q="eject" title="eject: stop and clear the queue">⏏</a></span></div>
     <div class="gql" id="gql" hidden></div></div></div>
   <div class="sec lrow"><div class="lmode" id="lmode" title="All: the whole model as a tree (components, folders, files, types); switching to it turns Sync views off.&#10;Filtered: stored diagrams (generated before, or made by an agent via MCP uml_upsert), narrowed by the filter."><a data-m="all">All</a><a data-m="filtered">Filtered</a></div><span class="sp" style="flex:1"></span><select id="gb"><option value="kind">by kind</option><option value="group">by group</option><option value="origin">by origin</option></select>
-   <input id="filter" placeholder="filter"></div>
+   <input id="filter" placeholder="filter"><div class="tf" id="tf" hidden></div></div>
   <div class="scroll" id="list"><div class="dim" style="padding:12px">loading…</div></div>
  </div>
  <div class="col" style="min-width:0">
@@ -386,9 +388,16 @@ $('#bbuild').onclick=async()=>{const b=$('#bbuild');b.disabled=true;b.innerHTML=
 async function list(){if(LM==='all')return brRoot();
  let d;try{d=await T('uml_views',{group_by:$('#gb').value})}catch(e){$('#list').innerHTML=`<div class="err" style="padding:10px">${esc(e.message)}</div>`;return}
  const f=$('#filter').value.toLowerCase();let h='';
- for(const [g,vs] of Object.entries(d.groups||{})){const xs=vs.filter(v=>!f||(v.title+v.key).toLowerCase().includes(f));if(!xs.length)continue;
-  h+=`<div class="grp">${esc(g)} · ${xs.length}</div>`+xs.map(v=>`<div class="vi ${cur&&cur.key===v.key?'on':''}" data-k="${esc(v.key)}" title="${esc(v.key)}">${kindBadge(v)}${originBadge(v)}<span class="t">${esc(v.title)}</span>${v.stale?`<span class="b w" title="${esc(typeof v.stale==='string'?v.stale:'stale: see Report')}">stale</span>`:''}</div>`).join('')}
- $('#list').innerHTML=h||'<div class="dim" style="padding:12px">No stored diagrams yet: pick a symbol or file (its default diagram is made on demand), or let an agent compose one (uml_upsert).</div>'}
+ for(const [g,vs] of Object.entries(d.groups||{})){const xs=vs.filter(v=>(!f||(v.title+v.key).toLowerCase().includes(f))&&tfOk(v));if(!xs.length)continue;
+  h+=`<div class="grp">${esc(g)} · ${xs.length}</div>`+xs.map(v=>`<div class="vi ${cur&&cur.key===v.key?'on':''}" data-k="${esc(v.key)}" title="${esc(v.key)}">${kindBadge(v)}${originBadge(v)}<span class="t">${esc(v.title)}</span>${v.stale?`<span class="b w" data-tf="stale:stale" title="${esc(typeof v.stale==='string'?v.stale:'stale: see Report')}">stale</span>`:''}</div>`).join('')}
+ $('#list').innerHTML=h||(f||TF.length?'<div class="dim" style="padding:12px">Nothing matches the filter.</div>':'<div class="dim" style="padding:12px">No stored diagrams yet: pick a symbol or file (its default diagram is made on demand), or let an agent compose one (uml_upsert).</div>')}
+/* tag filters: click a badge in the list to add it as a chip; × removes. AND across kind/origin/stale, OR within one */
+let TF=[];try{TF=JSON.parse(localStorage.getItem('nncq.tf')||'[]')}catch(e){}
+const tagv=(v,f)=>f==='kind'?(isFile(v)?'file':v.kind):f==='origin'?v.origin:(v.stale?'stale':'');
+function tfOk(v){const by={};TF.forEach(t=>(by[t.f]=by[t.f]||[]).push(t.v));return Object.entries(by).every(([f,vs])=>vs.includes(tagv(v,f)))}
+function tfShow(){localStorage.setItem('nncq.tf',JSON.stringify(TF));$('#tf').hidden=!TF.length||LM==='all';
+ $('#tf').innerHTML=TF.map((t,i)=>`<span class="b ${esc(t.c)} tfc" data-tfx="${i}" title="remove this filter">${esc(t.l)}<a>×</a></span>`).join('')}
+$('#tf').onclick=e=>{const c=e.target.closest('[data-tfx]');if(c){TF.splice(+c.dataset.tfx,1);tfShow();list()}};
 /* every filter / search input: an inline × while it has text; click or Esc clears, re-applies, refocuses */
 const CLR=[];
 function clearable(inp,apply){const w=document.createElement('span');w.className='cw';inp.replaceWith(w);w.appendChild(inp);
@@ -399,7 +408,9 @@ function clearable(inp,apply){const w=document.createElement('span');w.className
 setInterval(()=>CLR.forEach(f=>f()),400);            /* values set by code (history, links) */
 clearable($('#filter'),list);
 $('#filter').oninput=list;$('#gb').onchange=list;
-$('#list').onclick=e=>{const tg=e.target.closest('[data-tg]');if(tg)return brToggle(tg.closest('.tn'));
+$('#list').onclick=e=>{const b=e.target.closest('#list .b[data-tf]');if(b){const [f,v]=b.dataset.tf.split(/:(.*)/);
+  if(!TF.some(t=>t.f===f&&t.v===v))TF.push({f,v,c:[...b.classList].filter(x=>x!=='b').join(' '),l:b.textContent});tfShow();return list()}
+ const tg=e.target.closest('[data-tg]');if(tg)return brToggle(tg.closest('.tn'));
  const h=e.target.closest('[data-h]');if(h){document.querySelectorAll('#list .vi.on').forEach(x=>x.classList.remove('on'));h.closest('.vi').classList.add('on');
   const t=h.closest('.tn');if(t.dataset.path!=null&&t.querySelector(':scope>.kids').hidden)brToggle(t);return navTo(h.dataset.h)}
  const v=e.target.closest('[data-k]');if(v)go(v.dataset.k)};
@@ -410,7 +421,7 @@ const enc=encodeURIComponent,dh=q=>'#/uml/default?'+q;
 function cpd(e,t){document.querySelectorAll('.cpd').forEach(c=>c.remove());const c=document.createElement('span');c.className='cpd';c.textContent=t;
  const r=e&&e.clientX!=null?{x:e.clientX,y:e.clientY}:{x:20,y:20};c.style.left=r.x+'px';c.style.top=(r.y+14)+'px';document.body.appendChild(c);setTimeout(()=>c.remove(),1400)}
 function setMode(m,ev,quiet){LM=m;localStorage.setItem('nncq.lmode',m);document.querySelectorAll('#lmode a').forEach(a=>a.classList.toggle('on',a.dataset.m===m));
- $('#gb').style.display=m==='all'?'none':'';$('#filter').placeholder=m==='all'?'filter the open part of the tree':'filter';
+ $('#gb').style.display=m==='all'?'none':'';tfShow();$('#filter').placeholder=m==='all'?'filter the open part of the tree':'filter';
  if(m==='all'&&ev&&synced()){const x=host();x.setSync(false);$('#csync').checked=false;navUi();cpd(ev,'sync views off')}
  if(!quiet)list()}
 $('#lmode').onclick=e=>{const a=e.target.closest('[data-m]');if(a&&a.dataset.m!==LM)setMode(a.dataset.m,e)};
@@ -447,8 +458,8 @@ function brFilter(){const f=$('#filter').value.toLowerCase();
 
 /* ---------- open / draw ---------- */
 const isFile=v=>String(v.key||'').startsWith('composition:file:');
-const originBadge=v=>v.origin==='auto'?'<span class="b o-auto" title="generated from the index, on demand; regenerated when its sources change">auto</span>':`<span class="b o-${esc(v.origin)}" title="${esc(v.provenance?v.provenance.tag+'\n'+v.provenance.detail:'made via MCP')}">${v.origin==='agent'?'mcp-agent':esc(v.origin)}</span>`;
-const kindBadge=v=>isFile(v)?'<span class="b k-file" title="file composition (generated on demand)">file</span>':`<span class="b k-${esc(v.kind)}">${esc(v.kind)}</span>`;
+const originBadge=v=>v.origin==='auto'?'<span class="b o-auto" data-tf="origin:auto" title="generated from the index, on demand; regenerated when its sources change">auto</span>':`<span class="b o-${esc(v.origin)}" data-tf="origin:${esc(v.origin)}" title="${esc(v.provenance?v.provenance.tag+'\n'+v.provenance.detail:'made via MCP')}">${v.origin==='agent'?'mcp-agent':esc(v.origin)}</span>`;
+const kindBadge=v=>isFile(v)?'<span class="b k-file" data-tf="kind:file" title="file composition (generated on demand)">file</span>':`<span class="b k-${esc(v.kind)}" data-tf="kind:${esc(v.kind)}">${esc(v.kind)}</span>`;
 /* embedded: navigation goes through the dashboard's single history (it replaces this frame's hash); a navigation
    made here also selects the matching code in the Symbol explorer (syncNext) */
 let syncNext=false;
