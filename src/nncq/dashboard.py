@@ -82,6 +82,12 @@ svg{display:block}
 .cw{position:relative;display:flex;flex:1;min-width:0}.cw>input{flex:1;min-width:0;padding-right:26px!important}
 .cx{position:absolute;right:6px;top:50%;transform:translateY(-50%);color:var(--dim);cursor:pointer;font-size:16px;line-height:1;display:none;padding:0 4px;user-select:none}.cx:hover{color:var(--fg)}
 .pt{font-size:12px;font-weight:600;white-space:nowrap}
+.gh{display:inline-flex;color:var(--dim)}.gh:hover{color:var(--fg)}
+.hq{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;border:1px solid var(--dim);color:var(--dim);font-size:10px;font-weight:700;cursor:pointer;user-select:none}.hq:hover{color:var(--fg);border-color:var(--fg)}
+.hov{position:fixed;inset:0;z-index:1000;background:rgba(4,6,9,.72);display:flex;align-items:center;justify-content:center}.hov[hidden]{display:none}
+.hbox{background:var(--panel);border:1px solid var(--line);border-radius:10px;width:min(780px,calc(100% - 40px));max-height:calc(100% - 60px);overflow:auto;padding:16px 22px 18px;font-size:13px;line-height:1.55;box-shadow:0 14px 44px #000b}
+.hbox h2{font-size:16px;margin:0 0 4px}.hbox h3{font-size:13px;margin:14px 0 2px;color:var(--acc)}.hbox ul{margin:2px 0;padding-left:18px}.hbox p{margin:4px 0}.hbox .dim{color:var(--dim)}
+.hbox kbd{font-family:Consolas,monospace;font-size:11px;padding:0 5px;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;background:var(--panel2)}
 :root{--hc:#ffffff;--hcfg:#000000}
 .unf{display:none;font-size:11px;line-height:16px;padding:0 8px;border-radius:9px;background:var(--hc);color:var(--hcfg);border:0;font-weight:600;cursor:pointer;flex:none}.unf:hover{opacity:.85}
 body.pf-on .unf{display:inline-block}body.pf-on #qpath{outline:2px solid var(--hc);outline-offset:-2px}body.pf-on .pf-aff{outline:2px solid var(--hc);outline-offset:-2px}
@@ -239,7 +245,7 @@ ul.tree{list-style:none;margin:0;padding-left:16px}ul.tree.root{padding-left:0}
 <div id="banner"></div>
 <div id="page">
  <section class="xp" id="left" data-pane="dash">
- <div class="xh"><b class="pt">Dashboard</b><span class="sp"></span><button class="xc" data-col="dash" title="collapse the dashboard (its strip expands it again)">–</button></div>
+ <div class="xh"><b class="pt">Dashboard</b><a class="gh" href="https://github.com/chrisgriffis/nncq" target="_blank" rel="noopener" title="nncq on GitHub"><svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg></a><a class="hq" id="hbtn" title="help (?)">?</a><span class="sp"></span><button class="xc" data-col="dash" title="collapse the dashboard (its strip expands it again)">–</button></div>
  <div id="dashb">
  <div id="status"><div class="card empty"><span class="spin"></span></div></div>
 
@@ -274,6 +280,26 @@ ul.tree{list-style:none;margin:0;padding-left:16px}ul.tree.root{padding-left:0}
 
  <section class="xp" id="mpane" data-pane="model"><iframe id="mframe" title="Model explorer"></iframe><div class="strip" title="expand the Model explorer">Model explorer</div></section>
 </div>
+<div class="hov" id="help" hidden><div class="hbox" role="dialog" aria-modal="true" aria-label="nncq help">
+ <h2>nncq dashboard</h2><p class="dim">A local code index for your agents, and three panes to look through it yourself. Click outside this box or press <kbd>Esc</kbd> to close.</p>
+ <h3>Dashboard (left)</h3><ul>
+  <li><b>Status</b>: each indexed codebase, its tier (keyword → card vectors → full vectors), background jobs and the GPU worker.</li>
+  <li><b>Ask</b>: a question in plain words (how / where / why…) or an identifier. Hits are ranked by keyword and meaning together; the path filter and hit count narrow them. <kbd>‹</kbd> <kbd>›</kbd> step through earlier asks.</li>
+  <li><b>Console</b>: what the server and its jobs are doing.</li></ul>
+ <h3>Symbol explorer (middle)</h3><ul>
+  <li><b>Active search</b>: the files behind the current ask; pick one to read it.</li>
+  <li><b>Symbol</b>: find a name or <code>ns::Class::method</code>, then switch between File outline, Callers, Callees and Depends.</li></ul>
+ <h3>Model explorer (right)</h3><ul>
+  <li>UML / SysML diagrams built from the index: class, sequence, component, package, deployment, depends.</li>
+  <li><b>Filtered</b> lists stored diagrams; click a kind or origin tag to filter by it. <b>All</b> browses the whole model as a tree.</li>
+  <li>The queue under the minimap shows diagrams being generated: play, pause, stop, eject, or × one.</li></ul>
+ <h3>Sync views</h3><p>On: picking a symbol or file shows its diagram, picking a diagram shows its code, and Back / Forward move both panes together. Off: each explorer navigates on its own.</p>
+ <h3>Keys</h3><ul>
+  <li><kbd>/</kbd> focus Ask · <kbd>?</kbd> this help · <kbd>Esc</kbd> clear a field or close this</li>
+  <li><kbd>Alt</kbd>+<kbd>←</kbd> / <kbd>→</kbd> back / forward (in Ask: previous / next ask)</li>
+  <li>Drag the bars between panes to resize, double-click to reset; <kbd>–</kbd> collapses a pane to a strip.</li></ul>
+ <p style="margin-top:14px"><a href="https://github.com/chrisgriffis/nncq#readme" target="_blank" rel="noopener" style="color:var(--acc)">Full README on GitHub</a></p>
+</div></div>
 
 <script>
 const QS=new URLSearchParams(location.search);
@@ -807,6 +833,13 @@ document.addEventListener('click',e=>{const b=e.target.closest('.unf');if(!b)ret
 /* ---------- start ---------- */
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll()});
 document.addEventListener('keydown',e=>{if(e.key==='/'&&!/INPUT|SELECT/.test(document.activeElement.tagName)){e.preventDefault();setCol('dash',false);$('#q').focus()}});
+/* help: a blocking overlay; a click anywhere outside the box, or Esc, closes it */
+const help=v=>{$('#help').hidden=!v};
+$('#hbtn').onclick=()=>help(true);
+$('#help').addEventListener('click',e=>{if(!e.target.closest('.hbox'))help(false)});
+document.addEventListener('keydown',e=>{const open=!$('#help').hidden;
+ if(open&&e.key==='Escape'){e.preventDefault();e.stopPropagation();help(false)}
+ else if(!open&&e.key==='?'&&!/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)){e.preventDefault();help(true)}},true);
 document.addEventListener('click',e=>{const s=e.target.closest('summary');if(s&&!e.target.closest('.tw'))e.preventDefault()},true);new MutationObserver(()=>rzApply($('#answer'))).observe($('#answer'),{childList:true});rzApply();segs();recent();srecent();layout();syncUi();localStorage.removeItem('nncq.mpin');   /* the old pin is gone */
 {const h0=new URLSearchParams(location.hash.slice(1)),m0=(h0.get('m')||'').replace(/^#/,''),s0=h0.get('s')||'';
  const nt=(performance.getEntriesByType('navigation')[0]||{}).type;
